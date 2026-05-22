@@ -27,7 +27,17 @@ export function renderInputBox(
     e.preventDefault();
     const text = ta.value;
     if (!text) return;
-    send({ kind: "keys", literal: text + "\r" });
+    // Send the text literally, then trigger Enter as a real key event rather
+    // than appending a raw \r byte. tmux send-keys -l "...\r" injects 0x0D
+    // as a literal character; in cooked-mode shells the tty driver maps it
+    // to NL and submits the line, but in raw-mode TUIs (claude-code, vim,
+    // less, Ink-based CLIs) ICRNL is off and the app reads 0x0D directly —
+    // most don't treat it as "submit", they just move the cursor home. That
+    // produced the "text appears, Enter doesn't fire" symptom. Going
+    // through tmux's Enter keyword lets tmux emit the byte sequence the
+    // pane's current application mode expects.
+    send({ kind: "keys", literal: text });
+    send({ kind: "key", name: "Enter" });
     ta.value = "";
   });
 
