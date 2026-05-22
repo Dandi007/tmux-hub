@@ -34,4 +34,46 @@ describe("runQuickLaunch", () => {
     expect(onError.mock.calls[0]?.[0]).toBe("not-configured");
     expect(onError.mock.calls[0]?.[1]).toContain("kb-cc");
   });
+
+  test("500 → onError('runtime', body text)", async () => {
+    const fetcher = mock(async (_input: string, _init?: RequestInit) => new Response("internal boom", { status: 500 }));
+    const onStarted = mock((_name: string) => {});
+    const onError = mock((_kind: "not-configured" | "runtime", _message: string) => {});
+
+    await runQuickLaunch({ fetcher, cwd: "~", onStarted, onError });
+
+    expect(onStarted).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0]?.[0]).toBe("runtime");
+    expect(onError.mock.calls[0]?.[1]).toBe("internal boom");
+  });
+
+  test("network error (fetcher throws) → onError('runtime', message)", async () => {
+    const fetcher = mock(async (_input: string, _init?: RequestInit) => { throw new Error("network down"); });
+    const onStarted = mock((_name: string) => {});
+    const onError = mock((_kind: "not-configured" | "runtime", _message: string) => {});
+
+    await runQuickLaunch({ fetcher, cwd: "~", onStarted, onError });
+
+    expect(onStarted).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0]?.[0]).toBe("runtime");
+    expect(onError.mock.calls[0]?.[1]).toBe("network down");
+  });
+
+  test("200 with malformed body → onError('runtime', 'malformed response')", async () => {
+    const fetcher = mock(async (_input: string, _init?: RequestInit) => new Response("<not-json>", {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    const onStarted = mock((_name: string) => {});
+    const onError = mock((_kind: "not-configured" | "runtime", _message: string) => {});
+
+    await runQuickLaunch({ fetcher, cwd: "~", onStarted, onError });
+
+    expect(onStarted).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0]?.[0]).toBe("runtime");
+    expect(onError.mock.calls[0]?.[1]).toBe("malformed response");
+  });
 });
