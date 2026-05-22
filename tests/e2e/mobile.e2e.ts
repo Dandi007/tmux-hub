@@ -59,4 +59,36 @@ test.describe("mobile view", () => {
 
     ctx.tmuxE2E(["kill-session", "-t", name]);
   });
+
+  test("quick-launch button starts a kb-cc session and switches to it", async ({ page, ctx }) => {
+    await page.goto("/");
+    await bindSecret(page);
+    await page.reload();
+
+    // Wait for the quick-launch button to become enabled (mount-time GET /templates
+    // resolves with kb-cc present in deploy/templates.yaml.example).
+    const btn = page.locator(".mobile-toolbar__quick-launch");
+    await expect(btn).toBeVisible({ timeout: 10_000 });
+    await expect(btn).toBeEnabled({ timeout: 10_000 });
+
+    await btn.click();
+
+    // Server-side: a new tmux session whose name starts with "kb-cc-" must appear
+    // in the isolated e2e tmux server.
+    let names: string[] = [];
+    for (let i = 0; i < 30; i++) {
+      names = ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n").filter(Boolean);
+      if (names.some((n) => n.startsWith("kb-cc-"))) break;
+      await page.waitForTimeout(200);
+    }
+    const newName = names.find((n) => n.startsWith("kb-cc-"));
+    expect(newName, `expected a kb-cc-* session in ${JSON.stringify(names)}`).toBeTruthy();
+
+    // Front-end: select should auto-switch to the new session option.
+    await expect(page.locator(`.mobile-shell__session-select option[value="${newName!}"]`))
+      .toHaveCount(1, { timeout: 10_000 });
+    await expect(page.locator(".mobile-shell__session-select")).toHaveValue(newName!, { timeout: 10_000 });
+
+    ctx.tmuxE2E(["kill-session", "-t", newName!]);
+  });
 });
