@@ -18,7 +18,7 @@ export type AttachOptions = {
   rows?: number;
 };
 
-const BUILD_MARKER = "cursor-inactive-none-v5";
+const BUILD_MARKER = "predict-altbuffer-gate-v6";
 
 export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandle> {
   console.log(`[tmux-hub] ${BUILD_MARKER} attaching to ${opts.sessionName}`);
@@ -126,8 +126,16 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   };
 
   const predictLocalEcho = (data: string): void => {
-    // Only predict single printable ASCII chars. CJK / control / multi-byte / paste
-    // chunks fall through to "wait for server" — no prediction queue entry.
+    // Skip prediction in alternate screen buffer. Full-screen TUIs (claude code,
+    // vim, less, fzf) all switch to alt buffer via CSI ?1049h and render with
+    // partial repaints; our predict-write moves xterm's internal cursor without
+    // the app's knowledge, so when the app later draws its own cursor glyph
+    // (e.g. ✏️ in claude code) at the model position, the old glyph at the
+    // predicted position is left behind as residue (the 'white block').
+    // Predictions only help shell-prompt typing where the shell echoes each
+    // char back; full-screen apps don't echo so prediction has no benefit
+    // and active downsides.
+    if (term.buffer.active.type === "alternate") return;
     if (data.length !== 1) return;
     const byte = data.charCodeAt(0);
     if (!isPrintable(byte)) return;
