@@ -47,7 +47,9 @@ describe("output-broadcaster (S1b)", () => {
     expect(text1).toContain("tick");
     expect(existsSync(b.logPath)).toBe(true);
 
-    await b.stop();
+    // Default stop() now KEEPS the log so history persists across attaches.
+    // Pass { deleteLog: true } to verify the cleanup path explicitly.
+    await b.stop({ deleteLog: true });
     expect(existsSync(b.logPath)).toBe(false);
   }, 8000);
 
@@ -72,8 +74,8 @@ describe("output-broadcaster (S1b)", () => {
   test("stop is idempotent and cleans up", async () => {
     const b = new SessionBroadcaster(S, tmuxTest);
     await b.start();
-    await b.stop();
-    await b.stop(); // should not throw
+    await b.stop({ deleteLog: true });
+    await b.stop({ deleteLog: true }); // should not throw
     expect(b.subscriberCount()).toBe(0);
     expect(existsSync(b.logPath)).toBe(false);
   }, 5000);

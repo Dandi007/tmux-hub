@@ -39,7 +39,9 @@ export class SessionBroadcaster {
     this.ring = new RingBuffer(RING_BUFFER_BYTES);
     mkdirSync(LOG_DIR, { recursive: true });
     const safe = session.replace(/[^a-zA-Z0-9_-]/g, "_");
-    this.logPath = resolve(LOG_DIR, `${safe}-${Date.now()}.log`);
+    // Stable per-session log file. Persists across attaches and hub restarts
+    // so that history captured while no client is connected is preserved.
+    this.logPath = resolve(LOG_DIR, `${safe}.log`);
   }
 
   async start(): Promise<void> {
@@ -75,6 +77,48 @@ export class SessionBroadcaster {
     return () => { this.subscribers.delete(send); };
   }
 
+  // Replay buffered history (tail of log file up to REPLAY_CAP bytes) then
+  // attach for live updates. Bytes that arrive during the replay read are
+  // buffered into a tap and flushed AFTER the history so that the subscriber
+  // sees a strict 0->now byte order. Subscriber is then attached for live.
+  attachWithReplay(send: Subscriber): () => void {
+    if (this.fd === null) {
+      // Broadcaster hasn't started — fall back to plain attach.
+      this.subscribers.add(send);
+      return () => { this.subscribers.delete(send); };
+    }
+    const REPLAY_CAP = 5 * 1024 * 1024;     // 5 MB tail
+    const pending: Uint8Array[] = [];
+    const tap = (chunk: Uint8Array): void => { pending.push(chunk); };
+    this.subscribers.add(tap);
+
+    const enc = new TextEncoder();
+    try {
+      const upTo = this.offset;
+      const start = Math.max(0, upTo - REPLAY_CAP);
+      const len = upTo - start;
+      // RIS reset clears the terminal state. If we sliced mid-sequence at
+      // `start`, xterm may briefly mis-render the first cells; acceptable
+      // trade-off vs unbounded replay.
+      send(enc.encode("\x1bc"));
+      if (len > 0) {
+        const buf = new Uint8Array(len);
+        readSync(this.fd, buf, 0, len, start);
+        send(buf);
+      }
+    } catch (e) {
+      for (const l of this.eventListeners) l({ kind: "error", message: `replay: ${String(e)}` });
+    } finally {
+      this.subscribers.delete(tap);
+    }
+    // Flush any live bytes that landed during replay, in order.
+    for (const chunk of pending) {
+      try { send(chunk); } catch { /* swallow per-subscriber */ }
+    }
+    this.subscribers.add(send);
+    return () => { this.subscribers.delete(send); };
+  }
+
   onEvent(fn: EventListener): () => void {
     this.eventListeners.add(fn);
     return () => { this.eventListeners.delete(fn); };
@@ -84,13 +128,18 @@ export class SessionBroadcaster {
 
   bytesBroadcast(): number { return this.ring.bytesWritten(); }
 
-  async stop(): Promise<void> {
+  async stop(opts: { deleteLog?: boolean } = {}): Promise<void> {
     if (this.stopped) return;
     this.stopped = true;
     if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
     if (this.fd !== null) { try { closeSync(this.fd); } catch { /* ignore */ } this.fd = null; }
     await this.run(["pipe-pane", "-o", "-t", `${this.session}:0.0`]).catch(() => undefined);
-    try { if (existsSync(this.logPath)) unlinkSync(this.logPath); } catch { /* ignore */ }
+    // Default: KEEP the log file so history persists across hub restarts.
+    // Only delete when the underlying tmux session is gone (caller passes
+    // deleteLog: true from the session_removed handler).
+    if (opts.deleteLog) {
+      try { if (existsSync(this.logPath)) unlinkSync(this.logPath); } catch { /* ignore */ }
+    }
     for (const l of this.eventListeners) l({ kind: "stopped" });
     this.subscribers.clear();
     this.eventListeners.clear();
@@ -146,11 +195,11 @@ export class BroadcasterRegistry {
 
   has(session: string): boolean { return this.map.has(session); }
 
-  async stop(session: string): Promise<void> {
+  async stop(session: string, opts: { deleteLog?: boolean } = {}): Promise<void> {
     const b = this.map.get(session);
     if (!b) return;
     this.map.delete(session);
-    await b.stop();
+    await b.stop(opts);
   }
 
   async stopAll(): Promise<void> {

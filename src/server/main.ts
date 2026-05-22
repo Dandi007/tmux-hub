@@ -25,10 +25,26 @@ const input = new InputRouter();
 
 registry.subscribe(async (event) => {
   sse.emit(event);
-  if (event.event === "session_removed") {
-    await broadcasters.stop(event.payload.name);
+  if (event.event === "session_created") {
+    // Always-on recording: start the broadcaster as soon as the session is
+    // visible to tmux, so output that happens before any WS attach is logged.
+    try { await broadcasters.get(event.payload.name); }
+    catch (e) { console.error(`[tmux-hub] prime broadcaster failed for ${event.payload.name}:`, e); }
+  } else if (event.event === "session_removed") {
+    // Session is truly gone from tmux — delete the log file too.
+    await broadcasters.stop(event.payload.name, { deleteLog: true });
   }
 });
+
+// On startup, prime broadcasters for sessions that already exist. The first
+// registry.snapshot() is empty until polling fires; wait a tick.
+setTimeout(() => {
+  for (const s of registry.snapshot()) {
+    void broadcasters.get(s.name).catch((e) => {
+      console.error(`[tmux-hub] initial prime failed for ${s.name}:`, e);
+    });
+  }
+}, 100);
 
 const templates = loadTemplates();
 const templateRunner = new TemplateRunner(templates);
@@ -130,8 +146,6 @@ Bun.serve({
         try { ws.close(1011, "broadcaster failed"); } catch {}
         return;
       }
-      try { await b.sendInitialSnapshot((chunk) => { try { ws.send(chunk); } catch {} }); } catch {}
-
       if (b.ring.truncated()) sse.emit({ event: "replay_truncated", payload: { name: sessionName } });
 
       const unsubEvents = b.onEvent((ev) => {
@@ -139,17 +153,21 @@ Bun.serve({
           sse.emit({ event: "replay_truncated", payload: { name: sessionName } });
         }
       });
-      const unsubData = b.attach((chunk) => { try { ws.send(chunk); } catch {} });
+      // Replay buffered history (capped at 5 MB tail) then attach for live.
+      // Captures output from before this client connected — including time
+      // windows when no client was attached at all.
+      const unsubData = b.attachWithReplay((chunk) => { try { ws.send(chunk); } catch {} });
       ws.data.unsubs.push(unsubEvents, unsubData);
     },
     async close(ws: ServerWebSocket<WsData>) {
-      const { sessionName, unsubs } = ws.data;
+      const { unsubs } = ws.data;
       for (const fn of unsubs) try { fn(); } catch {}
       ws.data.unsubs.length = 0;
-      const b = broadcasters.has(sessionName) ? await broadcasters.get(sessionName) : null;
-      if (b && b.subscriberCount() === 0) {
-        await broadcasters.stop(sessionName);
-      }
+      // Do NOT stop the broadcaster when the last client disconnects. We
+      // intentionally keep recording so history captured while no one is
+      // attached is replayable on next attach. The broadcaster is only
+      // stopped when the underlying tmux session is removed (see registry
+      // session_removed handler).
     },
     message(ws: ServerWebSocket<WsData>, raw) {
       const { sessionName } = ws.data;
