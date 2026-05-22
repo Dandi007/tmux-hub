@@ -290,6 +290,28 @@ button.is-danger:hover { filter: brightness(1.15); }
   background: var(--color-accent);
   color: var(--color-bg);
 }
+.mobile-toolbar__quick-launch {
+  appearance: none;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: inherit;
+  font: inherit;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0.45rem 0.7rem;
+  border-radius: 0.4rem;
+  cursor: pointer;
+  margin-left: 0.4rem;
+}
+
+.mobile-toolbar__quick-launch:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.mobile-toolbar__quick-launch:not(:disabled):active {
+  background: rgba(255, 255, 255, 0.08);
+}
 .mobile-input {
   display: flex;
   flex-direction: column;
