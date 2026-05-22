@@ -46,7 +46,7 @@ export class InputRouter {
       if (!ALLOWED_KEYS.has(msg.name)) {
         throw new HubError(`unknown key: ${msg.name}`, 400);
       }
-      const r = await this.run(["send-keys", "-t", `${session}:@0.0`, msg.name]);
+      const r = await this.run(["send-keys", "-t", `${session}:0.0`, msg.name]);
       if (r.code !== 0) throw new HubError(`send-keys ${msg.name} failed: ${r.stderr}`, 500);
     }
     // kind=resize: no-op (viewport is pinned)
