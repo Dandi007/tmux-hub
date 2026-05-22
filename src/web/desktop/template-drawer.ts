@@ -16,29 +16,21 @@ export function renderTemplateDrawer(parent: HTMLElement, onStarted: (name: stri
   void hubFetch("/templates")
     .then((r) => r.json())
     .then((templates: TemplateDTO[]) => {
+      // One button per template; cwd auto-uses cwd_choices[0]. Users that
+      // want a different cwd/command cd / run from inside the new session.
       for (const t of templates) {
-        const row = document.createElement("div");
-        row.className = "template-drawer__row";
-
-        const select = document.createElement("select");
-        select.dataset.id = t.id;
-        for (const c of t.cwd_choices) {
-          const opt = document.createElement("option");
-          opt.value = c;
-          opt.textContent = c;
-          select.appendChild(opt);
-        }
-
         const btn = document.createElement("button");
         btn.type = "button";
+        btn.className = "template-drawer__btn";
         btn.textContent = t.name;
+        const cwd = t.cwd_choices[0] ?? "~";
         btn.addEventListener("click", async () => {
           btn.disabled = true;
           try {
             const r = await hubFetch(`/templates/${encodeURIComponent(t.id)}/run`, {
               method: "POST",
               headers: { "content-type": "application/json" },
-              body: JSON.stringify({ cwd: select.value }),
+              body: JSON.stringify({ cwd }),
             });
             if (r.ok) {
               const body = (await r.json()) as { name: string };
@@ -53,9 +45,7 @@ export function renderTemplateDrawer(parent: HTMLElement, onStarted: (name: stri
             btn.disabled = false;
           }
         });
-
-        row.append(select, btn);
-        el.appendChild(row);
+        el.appendChild(btn);
       }
     })
     .catch((e: unknown) => {

@@ -1,13 +1,7 @@
 templates:
-  - id: codex
-    name: "Codex 新会话"
-    cwd_choices: ["~/code/zettelkasten", "~/code/self", "~/code/company"]
-    cmd: "codex"
-  - id: claude
-    name: "Claude Code 新会话"
-    cwd_choices: ["~/code/zettelkasten"]
-    cmd: "claude"
+  # Minimal default: one button → new zsh in $HOME. User can cd and run
+  # any command from inside the session. Add more templates here if useful.
   - id: shell
-    name: "普通 zsh"
+    name: "新建 zsh"
     cwd_choices: ["~"]
     cmd: "zsh"
