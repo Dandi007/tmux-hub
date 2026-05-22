@@ -229,7 +229,7 @@ templates:
   - id: kb-cc                                       # 与 MOBILE_QUICK_LAUNCH_TEMPLATE_ID 对齐
     name: "知识库 cc"
     cwd_choices:
-      - "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/Zettelkasten"
+      - "~/path/to/your/knowledge-base"            # 替换成你自己的知识库目录绝对路径
     cmd: "cc -f"
 ```
 
