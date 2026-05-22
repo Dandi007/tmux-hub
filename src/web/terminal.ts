@@ -18,7 +18,7 @@ export type AttachOptions = {
   rows?: number;
 };
 
-const BUILD_MARKER = "predict-altbuffer-gate-v6";
+const BUILD_MARKER = "cursor-color-bg-match-v7";
 
 export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandle> {
   console.log(`[tmux-hub] ${BUILD_MARKER} attaching to ${opts.sessionName}`);
@@ -31,7 +31,12 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     fontSize: 13,
     theme: {
       background: "#1a1a1f",
-      cursor: "#6b7280",               // dim cursor as a belt-and-braces (DECSCUSR fallback)
+      // xterm.js 5.x DOM renderer paints the cursor cell's background with
+      // theme.cursor regardless of cursorStyle (block/underline/bar). Setting
+      // cursor to the background color makes the cell invisible. We rely on
+      // typed-character position + TUI apps' own cursor glyphs (claude code ✏️,
+      // vim's own cursor) for cursor-position feedback.
+      cursor: "#1a1a1f",
       cursorAccent: "#1a1a1f",
     },
     cols: opts.cols ?? 200,
