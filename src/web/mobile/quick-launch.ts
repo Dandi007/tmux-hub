@@ -39,7 +39,7 @@ export async function runQuickLaunch(opts: RunQuickLaunchOpts): Promise<void> {
     return;
   }
   if (!res.ok) {
-    const text = await res.text().catch(() => `HTTP ${res.status}`);
+    const text = await res.text().catch(() => "");
     onError("runtime", text || `HTTP ${res.status}`);
     return;
   }
