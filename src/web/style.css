@@ -50,6 +50,16 @@ body {
   overscroll-behavior: contain;
 }
 
+/* xterm.js DOM renderer paints the cursor cell with theme.cursor via color
+   slot 257 (.xterm-bg-257). The cursorStyle option only adds extra decoration
+   on top; theme.cursor is honored for the bg paint but several attempts to
+   set it to background color did NOT eliminate the visible block. Force the
+   cursor cell to be visually invisible at the CSS layer. TUI apps that render
+   their own cursor glyph (claude code's ✏️, vim's block) are unaffected since
+   those are normal cells, not .xterm-cursor. */
+.xterm-cursor.xterm-bg-257 { background-color: transparent !important; }
+.xterm-cursor.xterm-fg-257 { color: inherit !important; }
+
 button {
   font: inherit;
   color: inherit;

@@ -18,7 +18,7 @@ export type AttachOptions = {
   rows?: number;
 };
 
-const BUILD_MARKER = "cursor-color-bg-match-v7";
+const BUILD_MARKER = "cursor-css-override-v8";
 
 export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandle> {
   console.log(`[tmux-hub] ${BUILD_MARKER} attaching to ${opts.sessionName}`);
