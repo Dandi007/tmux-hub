@@ -100,14 +100,18 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
 
   try { fit.fit(); } catch { /* container size 0 in tests */ }
 
-  // Attach custom touch-momentum scroll on the actual xterm viewport
-  // element. iOS Safari's native momentum on nested overflow:scroll
-  // containers is unreliable; this matches the feel of native mobile
-  // terminal apps (fling → continues with friction-based decay).
+  // Attach custom touch-momentum scroll. Listener goes on the OUTER
+  // terminal-host (el) so touches anywhere — over the canvas, over the
+  // viewport gutter, even over the helper textarea — bubble to it. The
+  // scrollTop target is .xterm-viewport, which is xterm's actual
+  // scrollable element. Listening on .xterm-viewport directly only
+  // catches touches over the narrow scrollbar gutter on the right edge
+  // because .xterm-screen sits on top of it in the z-order as a sibling
+  // and intercepts touches in the body of the terminal.
   let detachMomentum: (() => void) | null = null;
-  const viewport = el.querySelector<HTMLElement>(".xterm-viewport");
-  if (viewport && "ontouchstart" in window) {
-    detachMomentum = attachMomentumScroll(viewport);
+  if ("ontouchstart" in window) {
+    const viewport = el.querySelector<HTMLElement>(".xterm-viewport");
+    if (viewport) detachMomentum = attachMomentumScroll(el, viewport);
   }
 
   // Pass client's actual fit() result to the server via WS query so the server
