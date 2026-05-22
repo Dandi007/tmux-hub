@@ -60,7 +60,7 @@ export class SessionBroadcaster {
     }
     this.fd = openSync(this.logPath, "r");
     this.offset = 0;
-    this.pollTimer = setInterval(() => { this.poll(); }, 15);
+    this.pollTimer = setInterval(() => { this.poll(); }, 5);
   }
 
   async sendInitialSnapshot(send: Subscriber): Promise<void> {

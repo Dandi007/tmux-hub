@@ -18,7 +18,10 @@ export type AttachOptions = {
   rows?: number;
 };
 
+const BUILD_MARKER = "predictive-echo-v2";
+
 export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandle> {
+  console.log(`[tmux-hub] ${BUILD_MARKER} attaching to ${opts.sessionName}`);
   const term = new Terminal({
     convertEol: true,
     cursorBlink: !opts.readOnly,
