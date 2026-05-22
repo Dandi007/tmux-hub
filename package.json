@@ -1,0 +1,29 @@
+{
+  "name": "tmux-hub",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --hot src/server/main.ts",
+    "build:web": "vite build",
+    "build": "bun run build:web",
+    "start": "bun run src/server/main.ts",
+    "lint:tests": "bun run tests/helpers/lint-no-default-socket.ts",
+    "test": "bun run lint:tests && bun test tests/unit tests/integration",
+    "test:e2e": "playwright test tests/e2e"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/bun": "^1.3.14",
+    "playwright": "^1.60.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.14",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0"
+  },
+  "dependencies": {
+    "hono": "^4.12.21",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
+  }
+}

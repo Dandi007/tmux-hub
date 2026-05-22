@@ -1,0 +1,9 @@
+node_modules/
+dist/
+playwright-report/
+test-results/
+.tmux-hub-cache/
+.DS_Store
+.env
+.env.local
+*.log
