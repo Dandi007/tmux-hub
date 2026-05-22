@@ -15,9 +15,34 @@
   border-radius: 6px;
   border-left: 3px solid var(--color-accent);
   font-size: 13px;
-  max-width: 360px;
+  max-width: 380px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
   transition: opacity var(--duration-fast) var(--ease-out-expo), transform var(--duration-fast) var(--ease-out-expo);
   pointer-events: auto;
 }
+.toast__body { flex: 1 1 auto; min-width: 0; }
+.toast__action {
+  flex: 0 0 auto;
+  background: transparent;
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  border-radius: 4px;
+  padding: 2px 10px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-expo), color var(--duration-fast) var(--ease-out-expo);
+}
+.toast__action:hover,
+.toast__action:focus-visible {
+  background: var(--color-accent);
+  color: var(--color-bg);
+  outline: none;
+}
 .toast--error { border-left-color: var(--color-danger); }
+.toast--error .toast__action { color: var(--color-danger); border-color: var(--color-danger); }
+.toast--error .toast__action:hover,
+.toast--error .toast__action:focus-visible { background: var(--color-danger); color: var(--color-bg); }
 .toast--leaving { opacity: 0; transform: translateX(20px); }

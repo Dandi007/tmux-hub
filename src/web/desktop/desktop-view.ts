@@ -78,4 +78,16 @@ export function renderDesktop(root: HTMLElement): void {
 
   list.onSelect((name) => { void open(name); });
   renderTemplateDrawer(left, (name) => { void open(name); });
+
+  // Expose imperative hooks for PWA manifest shortcuts. Bootstrap reads
+  // ?action=new-session / ?focus=session-list and calls into these.
+  window.__tmuxHub = {
+    ...(window.__tmuxHub ?? {}),
+    focusSessionList: () => {
+      const firstItem = left.querySelector<HTMLElement>(".session-list__item");
+      firstItem?.scrollIntoView({ block: "start", behavior: "smooth" });
+      firstItem?.focus();
+    },
+    openSession: (name: string) => { void open(name); },
+  };
 }
