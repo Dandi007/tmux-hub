@@ -42,9 +42,33 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   const ws = new WebSocket(wsUrl);
   ws.binaryType = "arraybuffer";
 
+  // Predictive local-echo queue: each entry is a byte we've already drawn locally
+  // for instant feedback. When the server's echo of that byte arrives, consume it
+  // (don't render again). Stale predictions are dropped after PREDICT_TIMEOUT_MS.
+  type Prediction = { byte: number; ts: number };
+  const predictions: Prediction[] = [];
+  const PREDICT_TIMEOUT_MS = 2000;
+  const isPrintable = (c: number) => c >= 0x20 && c < 0x7f;
+
+  const consumeOrPassThrough = (bytes: Uint8Array) => {
+    if (predictions.length === 0) { term.write(bytes); return; }
+    const now = Date.now();
+    const out: number[] = [];
+    for (const byte of bytes) {
+      while (predictions.length > 0 && now - predictions[0]!.ts > PREDICT_TIMEOUT_MS) {
+        predictions.shift();
+      }
+      if (predictions.length > 0 && predictions[0]!.byte === byte) {
+        predictions.shift();
+      } else {
+        out.push(byte);
+      }
+    }
+    if (out.length > 0) term.write(new Uint8Array(out));
+  };
+
   ws.onmessage = (m) => {
     if (typeof m.data === "string") {
-      // Hub may send JSON error frames as string
       try {
         const parsed = JSON.parse(m.data);
         if (parsed && typeof parsed === "object" && "error" in parsed) {
@@ -52,9 +76,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
           return;
         }
       } catch { /* fall through and write raw */ }
-      term.write(m.data);
+      consumeOrPassThrough(new TextEncoder().encode(m.data));
     } else {
-      term.write(new Uint8Array(m.data as ArrayBuffer));
+      consumeOrPassThrough(new Uint8Array(m.data as ArrayBuffer));
     }
   };
 
@@ -63,6 +87,16 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
 
   const send = (msg: ClientWsMessage) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  };
+
+  const predictLocalEcho = (data: string): void => {
+    // Only predict single printable ASCII chars. CJK / control / multi-byte / paste
+    // chunks fall through to "wait for server" — no prediction queue entry.
+    if (data.length !== 1) return;
+    const byte = data.charCodeAt(0);
+    if (!isPrintable(byte)) return;
+    predictions.push({ byte, ts: Date.now() });
+    term.write(data);
   };
 
   let resizeTimer: ReturnType<typeof setTimeout> | null = null;
