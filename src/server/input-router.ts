@@ -40,7 +40,7 @@ export class InputRouter {
     if (exists.code !== 0) throw new HubError(`session not found: ${session}`, 410);
 
     if (msg.kind === "keys") {
-      const r = await this.run(["send-keys", "-t", `${session}:@0.0`, "-l", msg.literal]);
+      const r = await this.run(["send-keys", "-t", `${session}:0.0`, "-l", msg.literal]);
       if (r.code !== 0) throw new HubError(`send-keys -l failed: ${r.stderr}`, 500);
     } else if (msg.kind === "key") {
       if (!ALLOWED_KEYS.has(msg.name)) {
