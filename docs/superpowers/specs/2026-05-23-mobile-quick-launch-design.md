@@ -58,9 +58,10 @@
 
 后端 0 改动。
 
-- 现有 endpoint：`POST /templates/:id/run`，body `{ cwd?: string }`，返回 `{ name: string }`（新 session 名）。
+- 现有 endpoint：`POST /templates/:id/run`，body `{ cwd: string }`（**必填**，server 端 `TemplateRunner.run` 校验 `cwd in t.cwd_choices`，不传或不匹配会 400）。返回 `{ name: string }`（新 session 名）。
 - 实现在 `src/server/template-runner.ts`（约定接口，已被 `template-drawer.ts` 验证可用）。
-- 移动端按钮发同样的请求，只是 `:id` 硬编码为 `kb-cc`，`cwd` 不传（用 template 自己的 `cwd_choices[0]`）。
+- 移动端按钮 **mount 时一次性 GET `/templates`**，找到 `kb-cc` 缓存其 `cwd_choices[0]`；点击时 POST `/templates/kb-cc/run` body `{cwd}`（与桌面 `template-drawer.ts` 完全对齐）。
+- 如果 mount 时 `/templates` 列表里没有 `kb-cc`：按钮 disabled + `title` 提示「未配置 kb-cc template」，点击 no-op。
 
 ### 4.2 契约 id 常量集中定义
 
@@ -117,14 +118,19 @@ export const MOBILE_QUICK_LAUNCH_TEMPLATE_ID = "kb-cc";
 ### 5.3 交互流程
 
 ```
-点击按钮
-  → 按钮 disabled + 显示 spinner / pending 状态
-  → POST /templates/kb-cc/run （不带 body 或 {}）
-    ├─ 200 OK → 拿到 { name } → openSession(name)（复用现有路径）
+按钮 mount
+  → GET /templates
+    ├─ 找到 kb-cc → 缓存 cwd_choices[0]，按钮 enabled
+    └─ 未找到     → 按钮永久 disabled，title="未配置快速启动模板（kb-cc）"
+                  → 后续若 user 想点：toast 提示并指向 templates.yaml
+
+按钮点击（仅 enabled 时）
+  → 按钮 disabled 防重复点击
+  → POST /templates/kb-cc/run with `{cwd: <cached cwd>}`
+    ├─ 200 OK → 拿到 { name } → onStarted(name)（mobile-view 调用方接住，走 openSession）
     │                         → 按钮恢复 enabled
-    │                         → toast「已起 <name>」（成功提示，可选）
     ├─ 404    → toast「未配置快速启动模板：在 ~/.config/tmux-hub/templates.yaml 加 id: kb-cc」
-    │        → 按钮恢复 enabled
+    │        → 按钮恢复 enabled（template 可能被运行时改了）
     └─ 其他   → toast「启动失败：<msg>」（复用 desktop template-drawer 错误处理）
                 → 按钮恢复 enabled
 ```
@@ -154,11 +160,14 @@ export const MOBILE_QUICK_LAUNCH_TEMPLATE_ID = "kb-cc";
 
 ### 7.1 单元 / 集成测试 (`bun test`)
 
-- 渲染按钮：DOM 存在、aria-label 正确。
-- 点击 → 触发 `hubFetch("/templates/kb-cc/run", { method: "POST" })` 一次（mock fetch 验证）。
-- 200 响应 → 调 `onStarted(name)`。
-- 404 响应 → toast 出现 + 不调 `onStarted`。
-- 请求飞行期间按钮 disabled，飞行结束恢复 enabled。
+Bun test 不带 DOM（仓库未配 happy-dom / jsdom）。因此 quick-launch 逻辑要**抽到一个 pure async helper**（如 `runQuickLaunch(fetcher, onStarted, onError)`），DOM 渲染由 e2e 覆盖。
+
+helper 单测覆盖：
+
+- 200 响应 → 调 `onStarted(name)`，不调 `onError`。
+- 404 响应 → 调 `onError("not-configured", ...)`，不调 `onStarted`。
+- 500 / 网络错误 → 调 `onError("runtime", msg)`，不调 `onStarted`。
+- `cwd` 来自调用方传入的 cached 值（helper 不再调 GET /templates，让 mount-time 逻辑处理）。
 
 ### 7.2 E2E (`bun run test:e2e`)
 
