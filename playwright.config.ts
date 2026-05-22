@@ -66,7 +66,16 @@ export default defineConfig({
   projects: [
     {
       name: "desktop",
+      // Note: this regex historically used `.spec.ts` which matches 0 files
+      // because actual files are `.e2e.ts`. Left as-is so this PR does not
+      // re-enable a suite that has pre-existing failures unrelated to PWA.
+      // PWA tests run via the dedicated `pwa` project below.
       testMatch: /(desktop|key-conformance)\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+    },
+    {
+      name: "pwa",
+      testMatch: /pwa\.e2e\.ts/,
       use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
     },
     {

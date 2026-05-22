@@ -81,4 +81,14 @@ export function renderMobile(root: HTMLElement): void {
   const send = (msg: ClientWsMessage) => { term?.send(msg); };
   renderInputBox(root, send);
   renderSpecialKeysBar(root, send);
+
+  // PWA manifest shortcut hooks — see src/web/pwa/shortcuts.ts.
+  window.__tmuxHub = {
+    ...(window.__tmuxHub ?? {}),
+    focusSessionList: () => {
+      select.focus();
+      select.scrollIntoView({ block: "start", behavior: "smooth" });
+    },
+    openSession: (name: string) => { void openSession(name); },
+  };
 }
