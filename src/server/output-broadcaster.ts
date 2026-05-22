@@ -4,7 +4,7 @@
 // for spike S1a/S1b analysis.
 import { tmux } from "./tmux-cmd";
 import { RingBuffer } from "./ring-buffer";
-import { RING_BUFFER_BYTES, CAPTURE_PANE_LINES } from "./config";
+import { RING_BUFFER_BYTES } from "./config";
 import { mkdirSync, openSync, readSync, closeSync, existsSync, unlinkSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -64,19 +64,10 @@ export class SessionBroadcaster {
   }
 
   async sendInitialSnapshot(send: Subscriber): Promise<void> {
-    const r = await this.run([
-      "capture-pane", "-ep",
-      "-t", `${this.session}:0.0`,
-      "-S", `-${CAPTURE_PANE_LINES}`,
-      "-p",
-    ]);
-    if (r.code === 0 && r.stdout) {
-      const enc = new TextEncoder();
-      send(enc.encode(r.stdout));
-      send(enc.encode("\n"));
-    }
-    const ringDump = this.ring.dump();
-    if (ringDump.length > 0) send(ringDump);
+    const enc = new TextEncoder();
+    send(enc.encode("\x1bc"));
+    const r = await this.run(["capture-pane", "-ep", "-t", `${this.session}:0.0`, "-p"]);
+    if (r.code === 0 && r.stdout) send(enc.encode(r.stdout));
   }
 
   attach(send: Subscriber): () => void {

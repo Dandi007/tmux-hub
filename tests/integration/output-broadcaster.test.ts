@@ -51,22 +51,23 @@ describe("output-broadcaster (S1b)", () => {
     expect(existsSync(b.logPath)).toBe(false);
   }, 8000);
 
-  test("ring buffer dump matches received bytes for late subscriber", async () => {
+  test("sendInitialSnapshot emits terminal reset then visible capture", async () => {
     const b = new SessionBroadcaster(S, tmuxTest);
     await b.start();
+    await new Promise((r) => setTimeout(r, 400));
 
-    // Let bytes accumulate before any subscriber attaches.
-    await new Promise((r) => setTimeout(r, 500));
+    const chunks: Uint8Array[] = [];
+    await b.sendInitialSnapshot((c) => chunks.push(c));
 
-    const lateSub: Uint8Array[] = [];
-    await b.sendInitialSnapshot((c) => lateSub.push(c));
+    expect(chunks[0]).toBeDefined();
+    const firstText = Buffer.from(chunks[0]!).toString("utf8");
+    expect(firstText.startsWith("\x1bc")).toBe(true);
 
-    const text = Buffer.concat(lateSub.map((c) => Buffer.from(c))).toString("utf8");
-    expect(text).toContain("tick");
-    expect(b.bytesBroadcast()).toBeGreaterThan(0);
+    const allText = Buffer.concat(chunks.map((c) => Buffer.from(c))).toString("utf8");
+    expect(allText).toContain("tick");
 
     await b.stop();
-  }, 8000);
+  }, 5000);
 
   test("stop is idempotent and cleans up", async () => {
     const b = new SessionBroadcaster(S, tmuxTest);

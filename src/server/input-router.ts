@@ -48,7 +48,10 @@ export class InputRouter {
       }
       const r = await this.run(["send-keys", "-t", `${session}:0.0`, msg.name]);
       if (r.code !== 0) throw new HubError(`send-keys ${msg.name} failed: ${r.stderr}`, 500);
+    } else if (msg.kind === "resize") {
+      const cols = Math.max(20, Math.min(500, Math.floor(msg.cols)));
+      const rows = Math.max(5, Math.min(200, Math.floor(msg.rows)));
+      await this.run(["resize-window", "-t", `${session}:0`, "-x", String(cols), "-y", String(rows)]);
     }
-    // kind=resize: no-op (viewport is pinned)
   }
 }

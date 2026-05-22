@@ -45,9 +45,28 @@ describe("InputRouter", () => {
     await expect(r.send("Bad.Name!", { kind: "key", name: "Enter" })).rejects.toThrow();
   });
 
-  test("resize is no-op (does not throw)", async () => {
-    const r = new InputRouter(tmuxTest);
-    await r.send(S, { kind: "resize", cols: 200, rows: 50 });
-    // no expectation other than not throwing
+  test("resize calls tmux resize-window", async () => {
+    const calls: string[][] = [];
+    const spy = async (args: string[]) => {
+      calls.push(args);
+      return { stdout: "", stderr: "", code: 0 };
+    };
+    const r = new InputRouter(spy);
+    await r.send(S, { kind: "resize", cols: 180, rows: 42 });
+    const resizeCall = calls.find((c) => c[0] === "resize-window");
+    expect(resizeCall).toEqual(["resize-window", "-t", `${S}:0`, "-x", "180", "-y", "42"]);
+  });
+
+  test("resize clamps to bounds", async () => {
+    const calls: string[][] = [];
+    const spy = async (args: string[]) => {
+      calls.push(args);
+      return { stdout: "", stderr: "", code: 0 };
+    };
+    const r = new InputRouter(spy);
+    await r.send(S, { kind: "resize", cols: 9999, rows: 9999 });
+    expect(calls.find((c) => c[0] === "resize-window")).toEqual(
+      ["resize-window", "-t", `${S}:0`, "-x", "500", "-y", "200"],
+    );
   });
 });

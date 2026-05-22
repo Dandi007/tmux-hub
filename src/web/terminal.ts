@@ -38,9 +38,6 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   term.open(el);
   try { fit.fit(); } catch { /* container size 0 in tests */ }
 
-  const onResize = () => { try { fit.fit(); } catch {} };
-  window.addEventListener("resize", onResize);
-
   const wsUrl = await hubWsUrl(`/ws/sessions/${encodeURIComponent(opts.sessionName)}`);
   const ws = new WebSocket(wsUrl);
   ws.binaryType = "arraybuffer";
@@ -68,6 +65,35 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
   };
 
+  let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+  const publishResize = () => {
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      resizeTimer = null;
+      const c = term.cols;
+      const r = term.rows;
+      if (c > 0 && r > 0 && ws.readyState === WebSocket.OPEN) {
+        send({ kind: "resize", cols: c, rows: r });
+      }
+    }, 150);
+  };
+
+  const onResize = () => {
+    try { fit.fit(); } catch {}
+    publishResize();
+  };
+  window.addEventListener("resize", onResize);
+
+  ws.addEventListener("open", () => {
+    setTimeout(() => {
+      const c = term.cols;
+      const r = term.rows;
+      if (c > 0 && r > 0 && ws.readyState === WebSocket.OPEN) {
+        send({ kind: "resize", cols: c, rows: r });
+      }
+    }, 100);
+  });
+
   if (!opts.readOnly) {
     // Desktop single input path per spec §设计原则 / Spike S2: only term.onData raw bytes,
     // NO attachCustomKeyEventHandler / keyEventToTmuxToken (those would double-send).
@@ -79,6 +105,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     send,
     close: () => {
       window.removeEventListener("resize", onResize);
+      if (resizeTimer) { clearTimeout(resizeTimer); resizeTimer = null; }
       try { ws.close(); } catch {}
       term.dispose();
       el.remove();
