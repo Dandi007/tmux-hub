@@ -106,6 +106,33 @@ button.is-danger:hover { filter: brightness(1.15); }
 .session-list__item.is-external { opacity: 0.5; cursor: not-allowed; }
 .session-list__name { font: 13px var(--font-mono); flex: 1; word-break: break-all; }
 .session-list__meta { color: var(--color-text-mute); font-size: 12px; }
+.session-list__rename {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--color-text-mute);
+  padding: 2px 6px;
+  font-size: 12px;
+  line-height: 1;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out-expo), background var(--duration-fast) var(--ease-out-expo);
+  cursor: pointer;
+}
+.session-list__item:hover .session-list__rename,
+.session-list__item:focus-within .session-list__rename {
+  opacity: 1;
+}
+.session-list__rename:hover { background: var(--color-surface-hi); color: var(--color-text); }
+.session-list__input {
+  font: 13px var(--font-mono);
+  flex: 1;
+  width: 100%;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-accent);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
 .badge { padding: 1px 6px; border-radius: 999px; font-size: 11px; background: var(--color-surface-hi); }
 .badge--external { background: var(--color-danger); }
 .template-drawer { display: flex; flex-direction: column; gap: var(--space-2); border-top: 1px solid var(--color-surface-hi); padding-top: var(--space-3); }

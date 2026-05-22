@@ -1,6 +1,20 @@
 import type { SessionInfo, ServerEvent } from "@shared/protocol";
 import { subscribeEvents } from "../sse-client";
 import { isGrammarOk } from "@shared/session-name";
+import { hubFetch } from "../hub-fetch";
+import { showToast } from "../ui/toast";
+
+async function renameSession(from: string, to: string): Promise<void> {
+  const r = await hubFetch(`/sessions/${encodeURIComponent(from)}/rename`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ to }),
+  });
+  if (!r.ok) {
+    const text = await r.text().catch(() => r.statusText);
+    throw new Error(text || `HTTP ${r.status}`);
+  }
+}
 
 export type SessionListHandle = {
   el: HTMLElement;
@@ -38,9 +52,72 @@ export function renderSessionList(parent: HTMLElement): SessionListHandle {
       li.appendChild(badge);
       li.setAttribute("aria-disabled", "true");
     } else {
+      // Rename affordance — pencil button reveals an inline <input>.
+      const renameBtn = document.createElement("button");
+      renameBtn.type = "button";
+      renameBtn.className = "session-list__rename";
+      renameBtn.title = "重命名";
+      renameBtn.setAttribute("aria-label", `重命名 ${s.name}`);
+      renameBtn.textContent = "✎";
+
+      const startEdit = (): void => {
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "session-list__input";
+        input.value = s.name;
+        input.spellcheck = false;
+        input.autocapitalize = "off";
+        input.autocomplete = "off";
+
+        const original = s.name;
+        let committed = false;
+        const cleanup = (): void => name.replaceChildren(document.createTextNode(original));
+
+        const commit = async (): Promise<void> => {
+          if (committed) return;
+          committed = true;
+          const next = input.value.trim();
+          if (next === "" || next === original) { cleanup(); return; }
+          if (!isGrammarOk(next)) {
+            showToast(`新名字不合法：${next}（只允许 [a-zA-Z0-9_-]，1-64 字符）`, "error");
+            cleanup();
+            return;
+          }
+          try {
+            await renameSession(original, next);
+            // SSE session_removed (old) + session_created (new) will repaint the list.
+          } catch (e) {
+            showToast(`重命名失败：${(e as Error).message}`, "error");
+            cleanup();
+          }
+        };
+
+        input.addEventListener("keydown", (e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") { e.preventDefault(); void commit(); }
+          else if (e.key === "Escape") { e.preventDefault(); committed = true; cleanup(); }
+        });
+        input.addEventListener("blur", () => { void commit(); });
+        input.addEventListener("click", (e) => e.stopPropagation());
+
+        name.replaceChildren(input);
+        input.focus();
+        input.select();
+      };
+
+      renameBtn.addEventListener("click", (e) => {
+        e.stopPropagation();   // do not trigger attach
+        startEdit();
+      });
+
+      li.appendChild(renameBtn);
+
       li.tabIndex = 0;
       li.addEventListener("click", () => selectFn(s.name));
-      li.addEventListener("keydown", (e) => { if (e.key === "Enter") selectFn(s.name); });
+      li.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") selectFn(s.name);
+        else if (e.key === "F2") { e.preventDefault(); startEdit(); }
+      });
     }
     return li;
   };
