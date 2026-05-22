@@ -28,6 +28,7 @@ export function renderDesktop(root: HTMLElement): void {
 
   const open = async (name: string) => {
     if (term) { term.close(); term = null; }
+    list.setActive(name);
     right.replaceChildren();
 
     const header = document.createElement("header");

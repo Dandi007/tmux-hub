@@ -19,19 +19,35 @@ async function renameSession(from: string, to: string): Promise<void> {
 export type SessionListHandle = {
   el: HTMLElement;
   onSelect: (fn: (name: string) => void) => void;
+  setActive: (name: string | null) => void;
   destroy: () => void;
 };
 
 export function renderSessionList(parent: HTMLElement): SessionListHandle {
   let sessions: SessionInfo[] = [];
   let selectFn: (name: string) => void = () => {};
+  let activeName: string | null = null;
   const el = document.createElement("ul");
   el.className = "session-list";
   parent.appendChild(el);
 
+  const refreshActiveMarker = () => {
+    for (const item of el.querySelectorAll<HTMLLIElement>(".session-list__item")) {
+      const matches = item.dataset.sessionName === activeName;
+      item.classList.toggle("is-active", matches);
+      if (matches) item.setAttribute("aria-current", "true");
+      else item.removeAttribute("aria-current");
+    }
+  };
+
   const buildItem = (s: SessionInfo): HTMLLIElement => {
     const li = document.createElement("li");
     li.className = "session-list__item";
+    li.dataset.sessionName = s.name;
+    if (s.name === activeName) {
+      li.classList.add("is-active");
+      li.setAttribute("aria-current", "true");
+    }
     const grammarOk = isGrammarOk(s.name);
     if (!grammarOk) li.classList.add("is-external");
 
@@ -144,6 +160,10 @@ export function renderSessionList(parent: HTMLElement): SessionListHandle {
   return {
     el,
     onSelect: (fn) => { selectFn = fn; },
+    setActive: (name) => {
+      activeName = name;
+      refreshActiveMarker();
+    },
     destroy: () => { unsub(); el.remove(); },
   };
 }

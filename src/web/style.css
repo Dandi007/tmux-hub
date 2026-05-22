@@ -2,9 +2,11 @@
   --color-bg: oklch(15% 0.02 250);
   --color-surface: oklch(20% 0.02 250);
   --color-surface-hi: oklch(26% 0.02 250);
+  --color-surface-active: oklch(32% 0.06 220);
   --color-text: oklch(95% 0 0);
   --color-text-mute: oklch(70% 0.02 250);
   --color-accent: oklch(70% 0.18 200);
+  --color-accent-mute: oklch(50% 0.14 200);
   --color-danger: oklch(60% 0.22 25);
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -14,6 +16,11 @@
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   --duration-fast: 120ms;
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --tap-min: 44px;
 }
 
 * { box-sizing: border-box; }
@@ -26,6 +33,14 @@ html, body {
   overscroll-behavior: none;
   position: fixed;
   inset: 0;
+  /* iOS Safari: kill the grey tap flash on every interactive element. We
+     re-introduce explicit focus / active styles per component. */
+  -webkit-tap-highlight-color: transparent;
+}
+/* Inputs / textareas inherit native iOS pinch zoom on focus when the
+   computed font-size is < 16px. Lock to 16px on touch devices. */
+@media (pointer: coarse) {
+  input, textarea, select { font-size: 16px; }
 }
 #app {
   position: absolute;
@@ -68,30 +83,45 @@ button {
   border-radius: 6px;
   padding: var(--space-2) var(--space-3);
   cursor: pointer;
+  /* Avoid the 300ms tap delay on iOS Safari and skip generic pinch-zoom on
+     repeat tap. */
+  touch-action: manipulation;
   transition: background var(--duration-fast) var(--ease-out-expo);
 }
 button:hover { background: var(--color-accent); }
 button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+button:active { background: var(--color-accent-mute); }
 button.is-danger { background: var(--color-danger); }
 button.is-danger:hover { filter: brightness(1.15); }
+/* On touch-only devices, ensure controls hit the Apple HIG 44pt minimum. */
+@media (pointer: coarse) {
+  button { min-height: var(--tap-min); min-width: var(--tap-min); }
+}
 
-/* Desktop shell */
+/* Desktop shell — sidebar width adapts to viewport; clamp keeps it legible
+   without dominating narrower windows (tablet landscape, half-screen). */
 .desktop-shell {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: clamp(220px, 22vw, 320px) 1fr;
   grid-template-rows: 100dvh;
   height: 100dvh;
   overflow: hidden;
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
 }
 .desktop-shell__sidebar {
   background: var(--color-surface);
   border-right: 1px solid var(--color-surface-hi);
   overflow-y: auto;
-  padding: var(--space-3);
+  padding: max(var(--space-3), var(--safe-top)) var(--space-3) max(var(--space-3), var(--safe-bottom));
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   min-height: 0;
+}
+/* Narrow desktop / tablet landscape: keep both columns but slim the rail. */
+@media (max-width: 1024px) {
+  .desktop-shell { grid-template-columns: clamp(200px, 30vw, 260px) 1fr; }
 }
 .desktop-shell__main {
   display: flex;
@@ -101,8 +131,29 @@ button.is-danger:hover { filter: brightness(1.15); }
   overflow: hidden;
 }
 .session-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-1); }
-.session-list__item { padding: var(--space-2) var(--space-3); border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: var(--space-2); }
+.session-list__item {
+  padding: var(--space-2) var(--space-3);
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap-min);
+  position: relative;
+  border-left: 3px solid transparent;
+  transition: background var(--duration-fast) var(--ease-out-expo), border-color var(--duration-fast) var(--ease-out-expo);
+}
 .session-list__item:hover { background: var(--color-surface-hi); }
+.session-list__item:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+.session-list__item.is-active {
+  background: var(--color-surface-active);
+  border-left-color: var(--color-accent);
+}
+.session-list__item.is-active .session-list__name {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+.session-list__item.is-active .session-list__meta { color: var(--color-text); }
 .session-list__item.is-external { opacity: 0.5; cursor: not-allowed; }
 .session-list__name { font: 13px var(--font-mono); flex: 1; word-break: break-all; }
 .session-list__meta { color: var(--color-text-mute); font-size: 12px; }
@@ -142,13 +193,87 @@ button.is-danger:hover { filter: brightness(1.15); }
 .session-header strong { font: 13px var(--font-mono); flex: 1; }
 .session-host { flex: 1; min-height: 0; padding: 0; overflow: hidden; }
 
-/* Mobile shell */
-.mobile-shell { display: flex; flex-direction: column; height: 100dvh; }
-.mobile-shell__header { padding: var(--space-2); background: var(--color-surface); border-bottom: 1px solid var(--color-surface-hi); }
-.mobile-shell__session-select { width: 100%; background: var(--color-bg); color: var(--color-text); border: 1px solid var(--color-surface-hi); border-radius: 6px; padding: var(--space-2); font: 13px var(--font-mono); }
+/* Mobile shell — uses safe-area insets so the notch / home indicator never
+   overlap the picker or special-keys row. Header sits below the status bar
+   inset on iOS; special-keys / input box pad the bottom inset. */
+.mobile-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+.mobile-shell__header {
+  padding: calc(var(--space-2) + var(--safe-top)) var(--space-2) var(--space-2);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-surface-hi);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.mobile-shell__session-select {
+  width: 100%;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-surface-hi);
+  border-radius: 8px;
+  padding: var(--space-2) var(--space-3);
+  font: 14px var(--font-mono);
+  min-height: var(--tap-min);
+  appearance: none;
+  -webkit-appearance: none;
+  /* Disclosure arrow drawn via background image, accent color. */
+  background-image: linear-gradient(45deg, transparent 50%, var(--color-accent) 50%),
+                    linear-gradient(135deg, var(--color-accent) 50%, transparent 50%);
+  background-position: calc(100% - 18px) center, calc(100% - 12px) center;
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+}
 .mobile-shell__term-host { flex: 1; min-height: 0; padding: var(--space-1); overflow: hidden; }
-.mobile-input { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2); background: var(--color-surface); }
-.mobile-input__textarea { width: 100%; font: 13px var(--font-mono); background: var(--color-bg); color: var(--color-text); border: 1px solid var(--color-surface-hi); border-radius: 6px; padding: var(--space-2); resize: vertical; }
+.mobile-input {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-surface-hi);
+}
+.mobile-input__textarea {
+  width: 100%;
+  font: 16px var(--font-mono); /* >=16px keeps iOS Safari from zooming on focus */
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-surface-hi);
+  border-radius: 8px;
+  padding: var(--space-2);
+  resize: vertical;
+  min-height: 60px;
+}
 .mobile-input__buttons { display: flex; justify-content: flex-end; gap: var(--space-2); }
-.special-keys { display: flex; gap: var(--space-1); padding: var(--space-2); overflow-x: auto; background: var(--color-surface); border-top: 1px solid var(--color-surface-hi); }
-.special-keys button { flex: 0 0 auto; padding: var(--space-2) var(--space-3); }
+.special-keys {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  padding-bottom: calc(var(--space-2) + var(--safe-bottom));
+  overflow-x: auto;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-surface-hi);
+  /* Smooth touch scroll on iOS; hide the scrollbar to keep the row compact. */
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.special-keys::-webkit-scrollbar { display: none; }
+.special-keys button {
+  flex: 0 0 auto;
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-mono);
+}
+/* Phones in landscape: header stays sticky but trims the top inset (no notch
+   on that axis). The term gets all available height. */
+@media (max-width: 720px) and (orientation: landscape) {
+  .mobile-shell__header { padding-top: var(--space-1); }
+  .mobile-input { padding: var(--space-1); }
+  .special-keys { padding-block: var(--space-1); }
+}

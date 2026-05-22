@@ -4,6 +4,7 @@ import type { SessionInfo, ServerEvent, ClientWsMessage } from "@shared/protocol
 import { isGrammarOk } from "@shared/session-name";
 import { renderInputBox } from "./input-box";
 import { renderSpecialKeysBar } from "./special-keys-bar";
+import { showToast } from "../ui/toast";
 
 export function renderMobile(root: HTMLElement): void {
   root.replaceChildren();
@@ -23,16 +24,33 @@ export function renderMobile(root: HTMLElement): void {
   let term: TerminalHandle | null = null;
   let sessions: SessionInfo[] = [];
   let openedName: string | null = null;
+  let attachSeq = 0;
 
   const openSession = async (name: string) => {
     if (!isGrammarOk(name)) return;
     if (openedName === name && term) return;
     if (term) { term.close(); term = null; }
+    // Wipe the host before attaching the next terminal. xterm.dispose() does
+    // not always clear leftover canvas/viewport nodes — without this, on iOS
+    // Safari the new xterm mounts behind the stale one and the user sees a
+    // blank session ("没加载"). Desktop view does the same.
+    termHost.replaceChildren();
     openedName = name;
+    attachSeq += 1;
+    const myAttach = attachSeq;
     try {
-      term = await attachTerminal({ sessionName: name, parent: termHost, readOnly: true });
-    } catch {
+      const next = await attachTerminal({ sessionName: name, parent: termHost, readOnly: true });
+      if (myAttach !== attachSeq) {
+        // A newer attach won the race — discard ours so we don't leak xterms.
+        next.close();
+        return;
+      }
+      term = next;
+    } catch (e) {
       openedName = null;
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[tmux-hub] attach failed for", name, msg);
+      showToast(`attach 失败: ${msg}`, "error");
     }
   };
 
