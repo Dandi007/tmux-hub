@@ -94,7 +94,7 @@ Icon 设计：`T` 字母或会话格子主题，配现有暗色 `#1a1a1f` + 灰�
 
 ## 4. Acceptance Criteria
 
-- [ ] Chrome 桌面在 `https://tui.qinglinzhang.xyz` 地址栏出现"安装 tmux-hub"按钮
+- [ ] Chrome 桌面在 `https://<your-deployment-host>` 地址栏出现"安装 tmux-hub"按钮
 - [ ] 安装后 Dock 出现图标，点击在独立窗口启动（无 tab / address bar）
 - [ ] 离线状态打开 PWA：壳能加载，看到"未连接 hub"占位（不是白屏）
 - [ ] CF Access cookie 过期：壳秒开 → ~1s 内出现重登提示 → 重登后无需重下载壳

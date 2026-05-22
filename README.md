@@ -19,9 +19,13 @@ bunx playwright test --project=pwa      # PWA smoke (5 tests)
 bun run test:e2e                        # full Playwright suite
 ```
 
+## Deploy
+
+`deploy/tmux-hub.zsh` is the launcher wrapper. Copy `deploy/hub.env.example` to `~/.config/tmux-hub/hub.env` and edit it. `TMUX_HUB_REPO_DIR` is required — set it to the absolute path of this checkout (the wrapper no longer has a hardcoded fallback).
+
 ## Install as a PWA (Phase 1)
 
-`tmux-hub` is installable from Chrome / Edge / Brave on `https://tui.qinglinzhang.xyz`:
+`tmux-hub` is installable from Chrome / Edge / Brave on `https://<your-deployment-host>`:
 
 1. Open the site, accept Cloudflare Access (passkey / email OTP).
 2. Address bar shows an "Install tmux-hub" button — click it.
