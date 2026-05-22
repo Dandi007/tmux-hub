@@ -24,33 +24,64 @@ export function renderMobile(root: HTMLElement): void {
   let term: TerminalHandle | null = null;
   let sessions: SessionInfo[] = [];
   let openedName: string | null = null;
-  let attachSeq = 0;
 
-  const openSession = async (name: string) => {
-    if (!isGrammarOk(name)) return;
-    if (openedName === name && term) return;
-    if (term) { term.close(); term = null; }
-    // Wipe the host before attaching the next terminal. xterm.dispose() does
-    // not always clear leftover canvas/viewport nodes — without this, on iOS
-    // Safari the new xterm mounts behind the stale one and the user sees a
-    // blank session ("没加载"). Desktop view does the same.
-    termHost.replaceChildren();
-    openedName = name;
-    attachSeq += 1;
-    const myAttach = attachSeq;
-    try {
-      const next = await attachTerminal({ sessionName: name, parent: termHost, readOnly: true });
-      if (myAttach !== attachSeq) {
-        // A newer attach won the race — discard ours so we don't leak xterms.
+  // Pending-target + serial transition queue.
+  // Each select-change requests a target session. Only one transition runs
+  // at a time; if a new target arrives while a transition is in flight, we
+  // overwrite `pendingTarget` and the running loop picks it up after its
+  // current attach finishes. This eliminates the overlap window in which
+  // two attaches could race and xterm internal state could be torn between
+  // dispose and new init.
+  let pendingTarget: string | null = null;
+  let runningTransition: Promise<void> | null = null;
+
+  const runTransitions = async (): Promise<void> => {
+    while (pendingTarget !== null) {
+      const target = pendingTarget;
+      pendingTarget = null;
+      if (target === openedName && term) continue;
+      if (!isGrammarOk(target)) continue;
+
+      // Fully tear down the current term BEFORE constructing the new one.
+      // The disposed-guard inside terminal.ts now also blocks straggler ws
+      // callbacks from writing into the disposed xterm.
+      if (term) { try { term.close(); } catch {} term = null; }
+      termHost.replaceChildren();
+      // Yield to the event loop so any pending ws.onclose / microtask
+      // scheduled by the just-torn term drains before we mount the new one.
+      await new Promise<void>((r) => setTimeout(r, 0));
+      // If another switch came in during the yield, restart with the latest
+      // target rather than wasting a connect on the stale one.
+      if (pendingTarget !== null) continue;
+
+      openedName = target;
+      let next: TerminalHandle | null = null;
+      try {
+        next = await attachTerminal({ sessionName: target, parent: termHost, readOnly: true });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error("[tmux-hub] attach failed for", target, msg);
+        showToast(`attach 失败: ${msg}`, "error");
+        openedName = null;
+        continue;
+      }
+
+      // While we were awaiting attachTerminal a newer pick may have arrived.
+      // Discard this attach in favour of the next loop iteration.
+      if (pendingTarget !== null && pendingTarget !== target) {
         next.close();
-        return;
+        continue;
       }
       term = next;
-    } catch (e) {
-      openedName = null;
-      const msg = e instanceof Error ? e.message : String(e);
-      console.error("[tmux-hub] attach failed for", name, msg);
-      showToast(`attach 失败: ${msg}`, "error");
+    }
+  };
+
+  const openSession = (name: string): void => {
+    pendingTarget = name;
+    if (!runningTransition) {
+      runningTransition = runTransitions().finally(() => {
+        runningTransition = null;
+      });
     }
   };
 

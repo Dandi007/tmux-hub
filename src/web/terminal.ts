@@ -106,6 +106,22 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   const sep = wsBase.includes("?") ? "&" : "?";
   const wsUrl = `${wsBase}${sep}cols=${initCols}&rows=${initRows}`;
   const ws = new WebSocket(wsUrl);
+
+  // Once `close()` is called we MUST stop touching `term`. Any write into a
+  // disposed xterm tunnels into `_renderService.onRequestRedraw` and throws
+  // "Cannot read properties of undefined", which on mobile leaves the new
+  // xterm without a renderer (the underlying root-cause of "切换 session 后
+  // 不 attach" flakes — straggler ws.onmessage/onclose/onerror events from
+  // the OUTGOING term land while the INCOMING term is being constructed,
+  // and the uncaught throw aborts xterm's renderer wiring).
+  let disposed = false;
+  const writeTerm = (data: string | Uint8Array): void => {
+    if (disposed) return;
+    try { term.write(data); } catch (e) {
+      // Last line of defence; should not happen with the disposed gate.
+      console.warn("[tmux-hub] term.write failed:", e);
+    }
+  };
   console.log(`[tmux-hub] ws init cols=${initCols} rows=${initRows}`);
   ws.binaryType = "arraybuffer";
 
@@ -150,8 +166,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   };
 
   const consumeOrPassThrough = (bytes: Uint8Array) => {
+    if (disposed) return;
     if (detectCursorPositioning(bytes)) lastTuiPositioningTs = Date.now();
-    if (predictions.length === 0) { term.write(bytes); return; }
+    if (predictions.length === 0) { writeTerm(bytes); return; }
     const now = Date.now();
     const out: number[] = [];
     for (const byte of bytes) {
@@ -164,15 +181,16 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
         out.push(byte);
       }
     }
-    if (out.length > 0) term.write(new Uint8Array(out));
+    if (out.length > 0) writeTerm(new Uint8Array(out));
   };
 
   ws.onmessage = (m) => {
+    if (disposed) return;
     if (typeof m.data === "string") {
       try {
         const parsed = JSON.parse(m.data);
         if (parsed && typeof parsed === "object" && "error" in parsed) {
-          term.write(`\r\n[hub] ${(parsed as { error: string }).error}\r\n`);
+          writeTerm(`\r\n[hub] ${(parsed as { error: string }).error}\r\n`);
           return;
         }
       } catch { /* fall through and write raw */ }
@@ -182,8 +200,8 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     }
   };
 
-  ws.onclose = () => term.write("\r\n[hub] connection closed\r\n");
-  ws.onerror = () => term.write("\r\n[hub] connection error\r\n");
+  ws.onclose = () => writeTerm("\r\n[hub] connection closed\r\n");
+  ws.onerror = () => writeTerm("\r\n[hub] connection error\r\n");
 
   const send = (msg: ClientWsMessage) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
@@ -207,7 +225,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     const byte = data.charCodeAt(0);
     if (!isPrintable(byte)) return;
     predictions.push({ byte, ts: Date.now() });
-    term.write(data);
+    writeTerm(data);
   };
 
   let resizeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -252,11 +270,22 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     el,
     send,
     close: () => {
+      // Flip the guard BEFORE any teardown so straggler ws callbacks no
+      // longer reach the disposed xterm. Without this, ws.close() schedules
+      // an async onclose that fires after term.dispose(), calls term.write,
+      // and trips the renderService-undefined trap that aborts xterm's
+      // setup loop and breaks subsequent attaches.
+      disposed = true;
       window.removeEventListener("resize", onResize);
       if (resizeTimer) { clearTimeout(resizeTimer); resizeTimer = null; }
+      // Detach handlers explicitly so the WS implementation cannot invoke
+      // them after the disposed gate either.
+      ws.onmessage = null;
+      ws.onclose = null;
+      ws.onerror = null;
       try { ws.close(); } catch {}
-      term.dispose();
-      el.remove();
+      try { term.dispose(); } catch {}
+      try { el.remove(); } catch {}
     },
   };
 }

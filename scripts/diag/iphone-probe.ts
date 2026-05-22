@@ -67,31 +67,49 @@ await page.screenshot({ path: "test-results/iphone-1-initial.png", fullPage: fal
 const firstXterm = await page.waitForSelector(".mobile-shell__term-host .xterm", { timeout: 8000 }).catch(() => null);
 console.log("[probe] first xterm mounted:", !!firstXterm);
 
-const switchTarget = options.filter((o) => !o.disabled && o.value !== initialValue)[0];
-if (switchTarget) {
-  console.log("[probe] switching to:", switchTarget.value);
-  const beforeXtermCount = await page.$$eval(".mobile-shell__term-host .xterm", (els) => els.length);
-  await page.selectOption(".mobile-shell__session-select", switchTarget.value);
-
-  // Sample DOM state every 500ms for 6s to see whether the new xterm ever
-  // mounts and what's in termHost meanwhile.
-  for (let i = 1; i <= 12; i++) {
-    await page.waitForTimeout(500);
-    const sample = await page.evaluate(() => {
-      const host = document.querySelector(".mobile-shell__term-host") as HTMLElement | null;
-      return {
-        xtermCount: document.querySelectorAll(".mobile-shell__term-host .xterm").length,
-        terminalHostCount: document.querySelectorAll(".mobile-shell__term-host .terminal-host").length,
-        hostChildren: host ? Array.from(host.children).map((c) => c.className) : null,
-        hostHeight: host?.getBoundingClientRect().height ?? null,
-      };
-    });
-    console.log(`[probe] t+${(i*500).toString().padStart(4)}ms`, sample);
+const switchable = options.filter((o) => !o.disabled);
+const sequence: string[] = [];
+// Mix slow switches (user reading) and rapid switches (user fumbling).
+const cycle = (() => {
+  const all = switchable.map((s) => s.value);
+  const out: Array<{ name: string; gap: number }> = [];
+  for (let round = 0; round < 3; round++) {
+    for (const v of all) {
+      out.push({ name: v, gap: round === 1 ? 80 : round === 2 ? 250 : 1500 });
+    }
   }
-  const afterSelection = await page.$eval(".mobile-shell__session-select", (e) => (e as HTMLSelectElement).value);
-  console.log(`[probe] xterm count before=${beforeXtermCount}, selection=${afterSelection}`);
-  await page.screenshot({ path: "test-results/iphone-2-after-switch.png", fullPage: false });
+  return out;
+})();
+
+const failures: Array<{ idx: number; from: string; to: string; xtermAfter: number }> = [];
+let prev = initialValue;
+let idx = 0;
+for (const step of cycle) {
+  idx += 1;
+  if (step.name === prev) continue;
+  await page.selectOption(".mobile-shell__session-select", step.name);
+  sequence.push(step.name);
+  await page.waitForTimeout(step.gap);
+  // Wait up to extra 2s for xterm to mount on this step.
+  let mounted = false;
+  for (let w = 0; w < 20; w++) {
+    const c = await page.$$eval(".mobile-shell__term-host .xterm", (els) => els.length);
+    if (c >= 1) { mounted = true; break; }
+    await page.waitForTimeout(100);
+  }
+  const xtermAfter = await page.$$eval(".mobile-shell__term-host .xterm", (els) => els.length);
+  const hostChildren = await page.evaluate(() => {
+    const h = document.querySelector(".mobile-shell__term-host") as HTMLElement | null;
+    return h ? Array.from(h.children).map((c) => c.className) : null;
+  });
+  const status = mounted ? "OK" : "FAIL";
+  console.log(`[probe] step ${idx.toString().padStart(2)} ${prev} → ${step.name} (gap ${step.gap}ms) ${status} xterm=${xtermAfter} host=${JSON.stringify(hostChildren)}`);
+  if (!mounted) failures.push({ idx, from: prev, to: step.name, xtermAfter });
+  prev = step.name;
 }
+console.log(`[probe] sequence (${sequence.length} switches):`, sequence.join(" → "));
+console.log(`[probe] failures (${failures.length}):`, failures);
+await page.screenshot({ path: "test-results/iphone-2-after-switch.png", fullPage: false });
 
 const computed = await page.evaluate(() => {
   const cs = getComputedStyle(document.documentElement);
