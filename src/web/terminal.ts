@@ -1,6 +1,7 @@
 import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
 import { CanvasAddon } from "xterm-addon-canvas";
+import { attachMomentumScroll } from "./momentum-scroll";
 import "xterm/css/xterm.css";
 import type { ClientWsMessage } from "@shared/protocol";
 import { hubWsUrl } from "./hub-fetch";
@@ -98,6 +99,16 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   }
 
   try { fit.fit(); } catch { /* container size 0 in tests */ }
+
+  // Attach custom touch-momentum scroll on the actual xterm viewport
+  // element. iOS Safari's native momentum on nested overflow:scroll
+  // containers is unreliable; this matches the feel of native mobile
+  // terminal apps (fling → continues with friction-based decay).
+  let detachMomentum: (() => void) | null = null;
+  const viewport = el.querySelector<HTMLElement>(".xterm-viewport");
+  if (viewport && "ontouchstart" in window) {
+    detachMomentum = attachMomentumScroll(viewport);
+  }
 
   // Pass client's actual fit() result to the server via WS query so the server
   // pins tmux window-size to match BEFORE capturing the initial snapshot.
@@ -281,6 +292,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       disposed = true;
       window.removeEventListener("resize", onResize);
       if (resizeTimer) { clearTimeout(resizeTimer); resizeTimer = null; }
+      try { detachMomentum?.(); } catch {}
       // Detach handlers explicitly so the WS implementation cannot invoke
       // them after the disposed gate either.
       ws.onmessage = null;
