@@ -97,7 +97,10 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   if (!opts.readOnly) {
     // Desktop single input path per spec §设计原则 / Spike S2: only term.onData raw bytes,
     // NO attachCustomKeyEventHandler / keyEventToTmuxToken (those would double-send).
-    term.onData((data) => send({ kind: "keys", literal: data }));
+    term.onData((data) => {
+      predictLocalEcho(data);
+      send({ kind: "keys", literal: data });
+    });
   }
 
   return {
