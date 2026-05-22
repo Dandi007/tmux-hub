@@ -66,9 +66,30 @@ button.is-danger { background: var(--color-danger); }
 button.is-danger:hover { filter: brightness(1.15); }
 
 /* Desktop shell */
-.desktop-shell { display: grid; grid-template-columns: 280px 1fr; height: 100dvh; }
-.desktop-shell__sidebar { background: var(--color-surface); border-right: 1px solid var(--color-surface-hi); overflow-y: auto; padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-3); }
-.desktop-shell__main { display: flex; flex-direction: column; min-width: 0; }
+.desktop-shell {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  grid-template-rows: 100dvh;
+  height: 100dvh;
+  overflow: hidden;
+}
+.desktop-shell__sidebar {
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-surface-hi);
+  overflow-y: auto;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+.desktop-shell__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
 .session-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-1); }
 .session-list__item { padding: var(--space-2) var(--space-3); border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: var(--space-2); }
 .session-list__item:hover { background: var(--color-surface-hi); }
@@ -83,7 +104,7 @@ button.is-danger:hover { filter: brightness(1.15); }
 .template-drawer__row select { flex: 1; background: var(--color-bg); color: var(--color-text); border: 1px solid var(--color-surface-hi); border-radius: 6px; padding: var(--space-2); }
 .session-header { display: flex; gap: var(--space-2); align-items: center; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-surface-hi); background: var(--color-surface); }
 .session-header strong { font: 13px var(--font-mono); flex: 1; }
-.session-host { flex: 1; min-height: 0; padding: var(--space-2); overflow: hidden; }
+.session-host { flex: 1; min-height: 0; padding: 0; overflow: hidden; }
 
 /* Mobile shell */
 .mobile-shell { display: flex; flex-direction: column; height: 100dvh; }
