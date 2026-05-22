@@ -1,7 +1,8 @@
-// Stub for Cloudflare Access JWT verification. Real implementation belongs to spike S3
-// (see work folder /Volumes/Data/code/self/tmux-hub-spikes). Until that lands, this returns null
-// for any input, so the loopback secret is the only path that authenticates state-changing endpoints.
-// Stage B (public deployment) MUST replace this with real JWT verification before going live.
+// Stub for Cloudflare Access JWT verification. Real implementation is tracked as
+// a Phase 2 follow-up on https://github.com/Dandi007/tmux-hub/issues/1. Until it
+// lands, this returns null for any input, so the loopback secret is the only path
+// that authenticates state-changing endpoints. Stage B (public deployment) MUST
+// replace this with real JWT verification before going live.
 
 export type CfAccessIdentity = { email: string; sub: string; aud: string };
 

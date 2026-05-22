@@ -2,7 +2,7 @@
 
 Browser bridge to tmux sessions on dev Mac. Pipe-pane based output broadcast + send-keys input + template-driven session spawn.
 
-Spec/plan live in the Zettelkasten work folder `智元工作/工作记录/2026/05/21/web-tui-hub/`.
+Spec and implementation plan live under [`docs/superpowers/`](docs/superpowers/).
 
 ## Dev
 

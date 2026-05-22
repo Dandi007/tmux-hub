@@ -2,7 +2,7 @@
 
 - **Date**: 2026-05-22
 - **Issue**: https://github.com/Dandi007/tmux-hub/issues/1
-- **Author**: knight.bluewind@gmail.com
+- **Author**: [@Dandi007](https://github.com/Dandi007)
 - **Status**: Approved
 
 ## 1. Goal (第一性原理)
