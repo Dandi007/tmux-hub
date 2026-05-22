@@ -19,7 +19,7 @@ export type AttachOptions = {
   rows?: number;
 };
 
-const BUILD_MARKER = "canvas-renderer-v9";
+const BUILD_MARKER = "tui-cursor-gate-v10";
 
 export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandle> {
   console.log(`[tmux-hub] ${BUILD_MARKER} attaching to ${opts.sessionName}`);
@@ -102,7 +102,40 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   const PREDICT_TIMEOUT_MS = 2000;
   const isPrintable = (c: number) => c >= 0x20 && c < 0x7f;
 
+  // Track when the server last emitted a cursor-positioning escape sequence
+  // (anything ESC[<params><final> with final != 'm'). When this is recent,
+  // the server is rendering with absolute or relative cursor moves (a TUI
+  // mode like claude code) and our predictive local echo would race with
+  // it — predicting characters moves xterm's cursor under the server's
+  // feet, so the server's next relative move lands in the wrong cell and
+  // old reverse cells are never overwritten. Shell prompts only emit SGR
+  // ('m') for color, which we deliberately exclude so shell typing keeps
+  // its instant local echo.
+  let lastTuiPositioningTs = 0;
+  const TUI_GATE_WINDOW_MS = 1500;
+  const detectCursorPositioning = (data: Uint8Array): boolean => {
+    let i = 0;
+    while (i < data.length - 1) {
+      if (data[i] === 0x1b && data[i + 1] === 0x5b /* [ */) {
+        let j = i + 2;
+        while (j < data.length) {
+          const b = data[j]!;
+          // params: 0-9, ; , ? > = <
+          if (b >= 0x30 && b <= 0x3f) { j++; continue; }
+          // final byte (0x40-0x7e). Exclude 'm' (SGR) since shells use it.
+          if (b >= 0x40 && b <= 0x7e && b !== 0x6d /* m */) return true;
+          break;
+        }
+        i = j + 1;
+      } else {
+        i++;
+      }
+    }
+    return false;
+  };
+
   const consumeOrPassThrough = (bytes: Uint8Array) => {
+    if (detectCursorPositioning(bytes)) lastTuiPositioningTs = Date.now();
     if (predictions.length === 0) { term.write(bytes); return; }
     const now = Date.now();
     const out: number[] = [];
@@ -142,16 +175,19 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   };
 
   const predictLocalEcho = (data: string): void => {
-    // Skip prediction in alternate screen buffer. Full-screen TUIs (claude code,
-    // vim, less, fzf) all switch to alt buffer via CSI ?1049h and render with
-    // partial repaints; our predict-write moves xterm's internal cursor without
-    // the app's knowledge, so when the app later draws its own cursor glyph
-    // (e.g. ✏️ in claude code) at the model position, the old glyph at the
-    // predicted position is left behind as residue (the 'white block').
-    // Predictions only help shell-prompt typing where the shell echoes each
-    // char back; full-screen apps don't echo so prediction has no benefit
-    // and active downsides.
+    // Skip prediction whenever the server is in TUI rendering mode. Two
+    // signals:
+    //   1. xterm reports the alternate screen buffer is active (vim, less,
+    //      fzf etc. switch via CSI ?1049h)
+    //   2. recent server bytes contained a cursor-positioning escape with
+    //      a final byte other than 'm' (claude code in particular runs on
+    //      the normal buffer but renders with CSI<n>A/B/C/D/G/H/K/...)
+    // Without (2) claude code escapes the gate and our predict-write races
+    // its partial repaints, leaving stale reverse cells (the white block).
+    // Shell prompt echo only emits ESC[<n>m (SGR for color), which is
+    // deliberately excluded so shell typing stays instant.
     if (term.buffer.active.type === "alternate") return;
+    if (Date.now() - lastTuiPositioningTs < TUI_GATE_WINDOW_MS) return;
     if (data.length !== 1) return;
     const byte = data.charCodeAt(0);
     if (!isPrintable(byte)) return;
