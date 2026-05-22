@@ -20,8 +20,8 @@
 html, body {
   margin: 0;
   padding: 0;
-  height: 100%;
-  width: 100%;
+  height: 100dvh;
+  width: 100vw;
   overflow: hidden;
   overscroll-behavior: none;
   position: fixed;
@@ -66,7 +66,7 @@ button.is-danger { background: var(--color-danger); }
 button.is-danger:hover { filter: brightness(1.15); }
 
 /* Desktop shell */
-.desktop-shell { display: grid; grid-template-columns: 280px 1fr; height: 100%; }
+.desktop-shell { display: grid; grid-template-columns: 280px 1fr; height: 100dvh; }
 .desktop-shell__sidebar { background: var(--color-surface); border-right: 1px solid var(--color-surface-hi); overflow-y: auto; padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-3); }
 .desktop-shell__main { display: flex; flex-direction: column; min-width: 0; }
 .session-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-1); }
@@ -86,7 +86,7 @@ button.is-danger:hover { filter: brightness(1.15); }
 .session-host { flex: 1; min-height: 0; padding: var(--space-2); overflow: hidden; }
 
 /* Mobile shell */
-.mobile-shell { display: flex; flex-direction: column; height: 100%; }
+.mobile-shell { display: flex; flex-direction: column; height: 100dvh; }
 .mobile-shell__header { padding: var(--space-2); background: var(--color-surface); border-bottom: 1px solid var(--color-surface-hi); }
 .mobile-shell__session-select { width: 100%; background: var(--color-bg); color: var(--color-text); border: 1px solid var(--color-surface-hi); border-radius: 6px; padding: var(--space-2); font: 13px var(--font-mono); }
 .mobile-shell__term-host { flex: 1; min-height: 0; padding: var(--space-1); overflow: hidden; }
