@@ -20,6 +20,13 @@ export class HubError extends Error {
   }
 }
 
+function classifyTmuxError(session: string, stderr: string): HubError {
+  if (/can't find|no such session|no session/i.test(stderr)) {
+    return new HubError(`session not found: ${session}`, 410);
+  }
+  return new HubError(`send-keys failed: ${stderr}`, 500);
+}
+
 export class InputRouter {
   private locks = new Map<string, Promise<unknown>>();
 
@@ -36,18 +43,15 @@ export class InputRouter {
   }
 
   private async doSend(session: string, msg: ClientWsMessage): Promise<void> {
-    const exists = await this.run(["has-session", "-t", session]);
-    if (exists.code !== 0) throw new HubError(`session not found: ${session}`, 410);
-
     if (msg.kind === "keys") {
       const r = await this.run(["send-keys", "-t", `${session}:0.0`, "-l", msg.literal]);
-      if (r.code !== 0) throw new HubError(`send-keys -l failed: ${r.stderr}`, 500);
+      if (r.code !== 0) throw classifyTmuxError(session, r.stderr);
     } else if (msg.kind === "key") {
       if (!ALLOWED_KEYS.has(msg.name)) {
         throw new HubError(`unknown key: ${msg.name}`, 400);
       }
       const r = await this.run(["send-keys", "-t", `${session}:0.0`, msg.name]);
-      if (r.code !== 0) throw new HubError(`send-keys ${msg.name} failed: ${r.stderr}`, 500);
+      if (r.code !== 0) throw classifyTmuxError(session, r.stderr);
     } else if (msg.kind === "resize") {
       const cols = Math.max(20, Math.min(500, Math.floor(msg.cols)));
       const rows = Math.max(5, Math.min(200, Math.floor(msg.rows)));
