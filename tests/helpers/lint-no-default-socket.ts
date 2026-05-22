@@ -1,10 +1,22 @@
 // tests/helpers/lint-no-default-socket.ts
-// Fails CI if any test code calls tmux without -L (which would hit the user's default socket).
+// Fail if any test code spawns the tmux binary without -L (which would touch the user's
+// default tmux server). We restrict to call-site patterns to keep false positives low.
 import { Glob } from "bun";
 import { readFileSync } from "node:fs";
 
 const SELF_RE = /tests\/helpers\/(tmux-test|lint-no-default-socket)\.ts$/;
-const BAD_RE = /\btmux\b(?!-)/; // matches `tmux` not part of e.g. `tmux-cmd`
+
+// Look for actual spawn-call patterns, not arbitrary occurrences of the word "tmux":
+//   - Bun.spawn(["tmux", ...])
+//   - spawn(["tmux", ...])
+//   - spawnSync(["tmux", ...])
+//   - execSync("tmux ...")
+//   - exec("tmux ...")
+// Each of these forms must contain "-L" within the same statement or be exempt.
+const CALL_PATTERNS: RegExp[] = [
+  /\bspawn(?:Sync)?\s*\(\s*\[\s*["']tmux["']/, // [...] form
+  /\bexec(?:Sync)?\s*\(\s*["']tmux\b/,         // string form
+];
 
 const glob = new Glob("tests/**/*.{ts,js}");
 const offenders: string[] = [];
@@ -12,22 +24,10 @@ const offenders: string[] = [];
 for await (const file of glob.scan(".")) {
   if (SELF_RE.test(file)) continue;
   const src = readFileSync(file, "utf8");
-  // crude scan: each non-comment line containing `tmux` must also contain `-L` or `tmuxTest`/`tmuxTestKillServer`/`tmux-cmd`/`tmux-test`
-  src.split("\n").forEach((line, i) => {
-    if (line.trim().startsWith("//") || line.trim().startsWith("*")) return;
-    if (!BAD_RE.test(line)) return;
-    if (
-      line.includes("-L") ||
-      line.includes("tmuxTest") ||
-      line.includes("tmuxTestKillServer") ||
-      line.includes("tmux-cmd") ||
-      line.includes("tmux-test") ||
-      line.includes("import") ||
-      line.includes("require")
-    ) {
-      return;
-    }
-    offenders.push(`${file}:${i + 1}: ${line.trim()}`);
+  src.split("\n").forEach((line, idx) => {
+    if (!CALL_PATTERNS.some((re) => re.test(line))) return;
+    if (line.includes("-L")) return;
+    offenders.push(`${file}:${idx + 1}: ${line.trim()}`);
   });
 }
 

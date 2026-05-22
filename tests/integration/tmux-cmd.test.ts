@@ -9,12 +9,12 @@ afterAll(async () => {
   await tmuxTestKillServer();
 });
 
-describe("tmux subprocess wrapper", () => { // tmux-cmd smoke
-  test("returns stdout and exit 0 for -V", async () => { // tmux-cmd
+describe("tmux subprocess wrapper", () => {
+  test("returns stdout and exit 0 for tmux -V", async () => {
     // Use tmuxTest so we never touch the default socket; -V is server-agnostic so it works fine
     const { stdout, code } = await tmuxTest(["-V"]);
     expect(code).toBe(0);
-    expect(stdout).toMatch(/^tmux \d/); // tmux-cmd version output
+    expect(stdout).toMatch(/^tmux \d/);
   });
 
   test("returns nonzero code for missing session", async () => {
