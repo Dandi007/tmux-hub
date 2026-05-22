@@ -71,7 +71,7 @@ export default defineConfig({
     },
     {
       name: "mobile",
-      testMatch: /mobile\.spec\.ts/,
+      testMatch: /mobile\.e2e\.ts/,
       use: { ...devices["iPhone 14"] },
     },
   ],
