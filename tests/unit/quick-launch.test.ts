@@ -21,4 +21,17 @@ describe("runQuickLaunch", () => {
     expect(onStarted.mock.calls[0]?.[0]).toBe("kb-cc-20260523010000");
     expect(onError).not.toHaveBeenCalled();
   });
+
+  test("404 → onError('not-configured'); no onStarted", async () => {
+    const fetcher = mock(async (_input: string, _init?: RequestInit) => new Response("template not found: kb-cc", { status: 404 }));
+    const onStarted = mock((_name: string) => {});
+    const onError = mock((_kind: "not-configured" | "runtime", _message: string) => {});
+
+    await runQuickLaunch({ fetcher, cwd: "~", onStarted, onError });
+
+    expect(onStarted).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0]?.[0]).toBe("not-configured");
+    expect(onError.mock.calls[0]?.[1]).toContain("kb-cc");
+  });
 });
