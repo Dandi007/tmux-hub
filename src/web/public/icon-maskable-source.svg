@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#1a1a1f"/>
+  <g transform="translate(56 56) scale(0.78)" fill="none" stroke="#5cd1e5" stroke-width="14" stroke-linecap="round">
+    <rect x="64" y="80" width="384" height="288" rx="20" stroke-width="10"/>
+    <line x1="96" y1="120" x2="416" y2="120"/>
+    <circle cx="112" cy="100" r="6" fill="#5cd1e5" stroke="none"/>
+    <circle cx="132" cy="100" r="6" fill="#e8c364" stroke="none"/>
+    <circle cx="152" cy="100" r="6" fill="#9aca6e" stroke="none"/>
+  </g>
+  <g transform="translate(56 56) scale(0.78)" fill="#5cd1e5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-weight="700">
+    <text x="100" y="200" font-size="58">$</text>
+    <text x="148" y="200" font-size="58" fill="#9aca6e">tmux-hub</text>
+    <rect x="100" y="232" width="40" height="22" fill="#5cd1e5"/>
+  </g>
+</svg>

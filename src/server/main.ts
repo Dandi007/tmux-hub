@@ -82,12 +82,43 @@ app.get("/system/auth-check", async (c) => {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB_DIST = join(HERE, "../../dist/web");
 const SERVE_STATIC = existsSync(WEB_DIST);
+
+// PWA: explicit headers per resource type. SW must be served with
+// `Service-Worker-Allowed: /` so it can claim the entire origin even when
+// emitted under a subpath, and `Cache-Control: no-cache` so a stale SW does
+// not trap the PWA on an old shell. The manifest needs the
+// `application/manifest+json` content-type to be picked up by Lighthouse and
+// Edge's install heuristics; `no-store` keeps the install metadata fresh.
+function staticHeaders(pathname: string): HeadersInit | undefined {
+  if (pathname === "/sw.js") {
+    return {
+      "Service-Worker-Allowed": "/",
+      "Cache-Control": "no-cache",
+      "Content-Type": "application/javascript; charset=utf-8",
+    };
+  }
+  if (pathname === "/manifest.webmanifest") {
+    return {
+      "Content-Type": "application/manifest+json; charset=utf-8",
+      "Cache-Control": "no-store, must-revalidate",
+    };
+  }
+  if (pathname === "/registerSW.js") {
+    return {
+      "Cache-Control": "no-cache",
+      "Content-Type": "application/javascript; charset=utf-8",
+    };
+  }
+  return undefined;
+}
+
 if (SERVE_STATIC) {
   app.get("/*", async (c) => {
     const url = new URL(c.req.url);
     const path = url.pathname === "/" ? "/index.html" : url.pathname;
     const file = Bun.file(join(WEB_DIST, path));
-    if (await file.exists()) return new Response(file);
+    const headers = staticHeaders(url.pathname);
+    if (await file.exists()) return new Response(file, headers ? { headers } : undefined);
     return new Response(Bun.file(join(WEB_DIST, "index.html")));
   });
 }

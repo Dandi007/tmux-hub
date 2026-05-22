@@ -4,18 +4,26 @@ import { verifyCfAccessJwt } from "./cf-access";
 
 const SECRET = loadOrCreateSecret();
 
-const PUBLIC_PATHS = new Set(["/system/health"]);
+// PUBLIC_PATHS bypass auth entirely. PWA install detection (manifest + SW
+// bootstrap) needs to work even before the SPA has called /system/auth-check
+// to acquire the hub.secret; Cloudflare Access still wraps everything at the
+// edge in production, so this is not weakening the trust boundary.
+const PUBLIC_PATHS = new Set([
+  "/system/health",
+  "/manifest.webmanifest",
+  "/sw.js",
+]);
 
 function isReadOnly(method: string, path: string): boolean {
   if (method !== "GET") return false;
-  return (
-    path === "/" ||
-    path === "/templates" ||
-    path === "/events" ||
-    path === "/system/auth-check" ||
-    path.startsWith("/web/") ||
-    path.startsWith("/assets/")
-  );
+  if (path === "/" || path === "/templates" || path === "/events") return true;
+  if (path === "/system/auth-check") return true;
+  if (path === "/manifest.webmanifest" || path === "/sw.js") return true;
+  if (path.startsWith("/web/") || path.startsWith("/assets/")) return true;
+  // PWA icons and other static files emitted by Vite into dist/web/ are
+  // referenced from manifest/index.html at the site root.
+  if (/^\/(pwa-|favicon-|apple-touch-icon-|registerSW\.js$)/.test(path)) return true;
+  return false;
 }
 
 declare module "hono" {
