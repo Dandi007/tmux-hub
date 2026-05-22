@@ -10,6 +10,7 @@ import { loadOrCreateSecret, safeEqual } from "./secret";
 import { authGate } from "./auth";
 import { isGrammarOk } from "../shared/session-name";
 import { buildSessionControlRoutes } from "./session-control";
+import { TemplateRunner, TemplateError } from "./template-runner";
 
 const SECRET = loadOrCreateSecret();
 const registry = new SessionRegistry();
@@ -27,6 +28,7 @@ registry.subscribe(async (event) => {
 });
 
 const templates = loadTemplates();
+const templateRunner = new TemplateRunner(templates);
 
 const app = new Hono();
 app.use("*", authGate);
@@ -37,6 +39,17 @@ app.get("/system/health", (c) =>
 app.get("/templates", (c) =>
   c.json(templates.map((t) => ({ id: t.id, name: t.name, cwd_choices: t.cwd_choices }))),
 );
+app.post("/templates/:id/run", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.json<{ cwd: string }>().catch(() => ({ cwd: "" }));
+  try {
+    const name = await templateRunner.run(id, body.cwd);
+    return c.json({ name }, 201);
+  } catch (e) {
+    if (e instanceof TemplateError) return c.json({ error: e.message }, e.status as 400 | 404 | 409 | 500);
+    return c.json({ error: (e as Error).message }, 500);
+  }
+});
 app.get("/events", () => sse.attach({ event: "snapshot", payload: registry.snapshot() }));
 app.route("/", buildSessionControlRoutes({ broadcasters }));
 app.get("/system/auth-check", async (c) => {
