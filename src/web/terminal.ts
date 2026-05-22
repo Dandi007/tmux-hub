@@ -62,10 +62,25 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // as a real underline/bar without bleeding the cursor color over the cell
   // background. If WebGL context-loss-style issues recur, this can be swapped
   // back to DOM by removing the addon.
-  try {
-    term.loadAddon(new CanvasAddon());
-  } catch (e) {
-    console.warn("[tmux-hub] CanvasAddon failed to load, falling back to DOM:", e);
+  // CanvasAddon is loaded with a small setTimeout deferral. Synchronous /
+  // rAF-deferred load races with xterm's _renderService setup on second+
+  // attaches (mobile session switch reproduces: dispose → new Terminal →
+  // open → loadAddon all in one tick triggers
+  // `Cannot read properties of undefined (reading 'onRequestRedraw')`,
+  // leaving xterm without a renderer). A small queueMicrotask + setTimeout
+  // breaks out of the current task and lets xterm finish its renderer wiring
+  // before the addon subscribes. We also skip loading the addon entirely in
+  // readOnly mode — the canvas renderer was added to suppress a cursor
+  // white-block during typed claude-code input, which read-only mirror views
+  // can't trigger anyway.
+  if (!opts.readOnly) {
+    setTimeout(() => {
+      try {
+        term.loadAddon(new CanvasAddon());
+      } catch (e) {
+        console.warn("[tmux-hub] CanvasAddon failed to load, falling back to DOM:", e);
+      }
+    }, 50);
   }
 
   // Intercept DECSCUSR (CSI Ps SP q) so TUI apps cannot force cursorStyle back to
