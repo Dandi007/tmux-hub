@@ -63,6 +63,21 @@ body {
    contain its scroll so iOS rubber-band cannot bubble up to body. */
 .xterm-viewport {
   overscroll-behavior: contain;
+  /* iOS Safari touch scroll: hand off to the compositor and constrain the
+     gesture to vertical so horizontal swipes don't fight xterm.
+     `will-change: transform` promotes the layer; `-webkit-overflow-
+     scrolling: touch` enables momentum scroll on older iOS. */
+  touch-action: pan-y;
+  will-change: transform;
+  -webkit-overflow-scrolling: touch;
+}
+/* Promote the xterm screen + renderer canvases to their own compositor
+   layer so scrolling no longer triggers cell-by-cell repaints on the
+   main thread (visible as jank on iOS Safari). */
+.xterm .xterm-screen,
+.xterm canvas {
+  will-change: transform;
+  transform: translateZ(0);
 }
 
 /* xterm.js DOM renderer paints the cursor cell with theme.cursor via color
@@ -230,13 +245,56 @@ button.is-danger:hover { filter: brightness(1.15); }
   background-repeat: no-repeat;
 }
 .mobile-shell__term-host { flex: 1; min-height: 0; padding: var(--space-1); overflow: hidden; }
+/* Collapsible composer drawer. Default closed: max-height collapses to 0,
+   transition keeps the open/close motion smooth without layout thrash. */
+.mobile-drawer {
+  max-height: 0;
+  overflow: hidden;
+  background: var(--color-surface);
+  border-top: 1px solid transparent;
+  transition: max-height var(--duration-fast) var(--ease-out-expo),
+              border-color var(--duration-fast) var(--ease-out-expo);
+}
+.mobile-drawer.is-open {
+  max-height: 50dvh;
+  border-top-color: var(--color-surface-hi);
+}
+/* Toolbar row: toggle button + special-keys scroller on the same line. */
+.mobile-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-left: var(--space-2);
+  padding-right: var(--space-2);
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-surface-hi);
+  padding-bottom: var(--safe-bottom);
+}
+.mobile-toolbar > .special-keys {
+  flex: 1 1 auto;
+  border-top: none;
+  padding: var(--space-2) 0;
+  padding-bottom: var(--space-2);
+  background: transparent;
+}
+.mobile-toolbar__toggle {
+  flex: 0 0 auto;
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  background: var(--color-surface-hi);
+  border-radius: 999px;
+  font-size: 18px;
+  line-height: 1;
+}
+.mobile-toolbar__toggle.is-active {
+  background: var(--color-accent);
+  color: var(--color-bg);
+}
 .mobile-input {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
   padding: var(--space-2);
-  background: var(--color-surface);
-  border-top: 1px solid var(--color-surface-hi);
 }
 .mobile-input__textarea {
   width: 100%;

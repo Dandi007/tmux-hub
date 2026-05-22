@@ -23,6 +23,10 @@ const BUILD_MARKER = "tui-cursor-gate-v10";
 
 export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandle> {
   console.log(`[tmux-hub] ${BUILD_MARKER} attaching to ${opts.sessionName}`);
+  // Disposed gate — hoisted to the top so the deferred CanvasAddon load
+  // and any straggler ws callbacks can skip when the caller has already
+  // torn this attach down (mobile session switch race).
+  let disposed = false;
   const term = new Terminal({
     convertEol: true,
     cursorBlink: false,
@@ -62,26 +66,25 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // as a real underline/bar without bleeding the cursor color over the cell
   // background. If WebGL context-loss-style issues recur, this can be swapped
   // back to DOM by removing the addon.
-  // CanvasAddon is loaded with a small setTimeout deferral. Synchronous /
-  // rAF-deferred load races with xterm's _renderService setup on second+
-  // attaches (mobile session switch reproduces: dispose → new Terminal →
-  // open → loadAddon all in one tick triggers
-  // `Cannot read properties of undefined (reading 'onRequestRedraw')`,
-  // leaving xterm without a renderer). A small queueMicrotask + setTimeout
-  // breaks out of the current task and lets xterm finish its renderer wiring
-  // before the addon subscribes. We also skip loading the addon entirely in
-  // readOnly mode — the canvas renderer was added to suppress a cursor
-  // white-block during typed claude-code input, which read-only mirror views
-  // can't trigger anyway.
-  if (!opts.readOnly) {
-    setTimeout(() => {
-      try {
-        term.loadAddon(new CanvasAddon());
-      } catch (e) {
-        console.warn("[tmux-hub] CanvasAddon failed to load, falling back to DOM:", e);
-      }
-    }, 50);
-  }
+  // CanvasAddon is loaded with a small setTimeout deferral so xterm has time
+  // to finish wiring _renderService before the addon subscribes. Without the
+  // deferral, second+ attaches (mobile session switch) trigger
+  // `Cannot read properties of undefined (reading 'onRequestRedraw')`.
+  //
+  // We load it for read-only views too — the canvas renderer composites
+  // visible cells onto a single GPU layer, which on iOS Safari gives much
+  // smoother touch-scroll than the default DOM renderer (every scroll
+  // pixel under DOM mutates dozens of <span>s and stalls the main thread).
+  // The session-switch race that originally motivated the readOnly skip is
+  // now contained by the disposed-guard + serial transition queue.
+  setTimeout(() => {
+    if (disposed) return;
+    try {
+      term.loadAddon(new CanvasAddon());
+    } catch (e) {
+      console.warn("[tmux-hub] CanvasAddon failed to load, falling back to DOM:", e);
+    }
+  }, 50);
 
   // Intercept DECSCUSR (CSI Ps SP q) so TUI apps cannot force cursorStyle back to
   // block at runtime. Returning true marks the sequence as handled, so xterm's
@@ -114,7 +117,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // 不 attach" flakes — straggler ws.onmessage/onclose/onerror events from
   // the OUTGOING term land while the INCOMING term is being constructed,
   // and the uncaught throw aborts xterm's renderer wiring).
-  let disposed = false;
+  // `disposed` is hoisted to the top of attachTerminal.
   const writeTerm = (data: string | Uint8Array): void => {
     if (disposed) return;
     try { term.write(data); } catch (e) {
