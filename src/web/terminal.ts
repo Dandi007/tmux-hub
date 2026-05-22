@@ -18,17 +18,22 @@ export type AttachOptions = {
   rows?: number;
 };
 
-const BUILD_MARKER = "size-handshake-v3";
+const BUILD_MARKER = "cursor-inactive-none-v5";
 
 export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandle> {
   console.log(`[tmux-hub] ${BUILD_MARKER} attaching to ${opts.sessionName}`);
   const term = new Terminal({
     convertEol: true,
     cursorBlink: false,
-    cursorStyle: "underline",      // underline avoids WebGL/canvas cursor-cell residue (bug 1)
+    cursorStyle: "underline",          // focused cursor: subtle 1px underline
+    cursorInactiveStyle: "none",       // blur state: hide cursor entirely (was 'outline' = the white block)
     fontFamily: "ui-monospace, Menlo, monospace",
     fontSize: 13,
-    theme: { background: "#1a1a1f" },
+    theme: {
+      background: "#1a1a1f",
+      cursor: "#6b7280",               // dim cursor as a belt-and-braces (DECSCUSR fallback)
+      cursorAccent: "#1a1a1f",
+    },
     cols: opts.cols ?? 200,
     rows: opts.rows ?? 50,
     disableStdin: opts.readOnly ?? false,
@@ -46,6 +51,17 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // Canvas renderer (xterm default) is more stable for cursor cell invalidation
   // than the WebGL addon, which left stale white cursor blocks after TUI redraws.
   // Trade GPU paint speed for visual correctness on a low-fps text workload.
+
+  // Intercept DECSCUSR (CSI Ps SP q) so TUI apps cannot force cursorStyle back to
+  // block at runtime. Returning true marks the sequence as handled, so xterm's
+  // built-in handler does NOT mutate term.options.cursorStyle.
+  // Format: \x1b[<n> q  where n in {0..6}. The space before `q` is the
+  // intermediate byte; xterm's parser uses { final: 'q', intermediates: ' ' }.
+  try {
+    term.parser.registerCsiHandler({ final: "q", intermediates: " " }, () => true);
+  } catch (e) {
+    console.warn("[tmux-hub] DECSCUSR intercept failed:", e);
+  }
 
   try { fit.fit(); } catch { /* container size 0 in tests */ }
 
