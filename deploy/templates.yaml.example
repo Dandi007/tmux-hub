@@ -1,0 +1,13 @@
+templates:
+  - id: codex
+    name: "Codex 新会话"
+    cwd_choices: ["~/code/zettelkasten", "~/code/self", "~/code/company"]
+    cmd: "codex"
+  - id: claude
+    name: "Claude Code 新会话"
+    cwd_choices: ["~/code/zettelkasten"]
+    cmd: "claude"
+  - id: shell
+    name: "普通 zsh"
+    cwd_choices: ["~"]
+    cmd: "zsh"
