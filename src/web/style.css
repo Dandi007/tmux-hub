@@ -17,11 +17,37 @@
 }
 
 * { box-sizing: border-box; }
-html, body, #app { height: 100%; margin: 0; }
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  position: fixed;
+  inset: 0;
+}
+#app {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
 body {
   background: var(--color-bg);
   color: var(--color-text);
   font: var(--text-base)/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+}
+.terminal-host {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+}
+/* xterm injects .xterm-viewport which is the scrollable area for scrollback;
+   contain its scroll so iOS rubber-band cannot bubble up to body. */
+.xterm-viewport {
+  overscroll-behavior: contain;
 }
 
 button {
