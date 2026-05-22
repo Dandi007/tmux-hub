@@ -1,5 +1,8 @@
 import { Hono } from "hono";
 import type { ServerWebSocket } from "bun";
+import { join, dirname } from "node:path";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { SessionRegistry } from "./session-registry";
 import { SseHub } from "./sse";
 import { BroadcasterRegistry } from "./output-broadcaster";
@@ -59,6 +62,20 @@ app.get("/system/auth-check", async (c) => {
   if (devBind) return c.json({ secret: SECRET, identity: "dev" });
   return c.json({ error: "unauthorized" }, 401);
 });
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const WEB_DIST = join(HERE, "../../dist/web");
+const SERVE_STATIC = existsSync(WEB_DIST);
+if (SERVE_STATIC) {
+  app.get("/*", async (c) => {
+    const url = new URL(c.req.url);
+    const path = url.pathname === "/" ? "/index.html" : url.pathname;
+    const file = Bun.file(join(WEB_DIST, path));
+    if (await file.exists()) return new Response(file);
+    return new Response(Bun.file(join(WEB_DIST, "index.html")));
+  });
+}
+console.error(`[tmux-hub] static dir ${WEB_DIST} ${SERVE_STATIC ? "(serving)" : "(not built)"}`);
 
 type WsData = {
   sessionName: string;
