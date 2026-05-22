@@ -1,5 +1,6 @@
 import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
+import { CanvasAddon } from "xterm-addon-canvas";
 import "xterm/css/xterm.css";
 import type { ClientWsMessage } from "@shared/protocol";
 import { hubWsUrl } from "./hub-fetch";
@@ -18,7 +19,7 @@ export type AttachOptions = {
   rows?: number;
 };
 
-const BUILD_MARKER = "cursor-css-override-v8";
+const BUILD_MARKER = "canvas-renderer-v9";
 
 export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandle> {
   console.log(`[tmux-hub] ${BUILD_MARKER} attaching to ${opts.sessionName}`);
@@ -53,9 +54,19 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   opts.parent.appendChild(el);
   term.open(el);
 
-  // Canvas renderer (xterm default) is more stable for cursor cell invalidation
-  // than the WebGL addon, which left stale white cursor blocks after TUI redraws.
-  // Trade GPU paint speed for visual correctness on a low-fps text workload.
+  // Use the canvas renderer addon instead of xterm's default DOM renderer.
+  // The DOM renderer paints cursor cells via theme.cursor color slot in a way
+  // that several mitigation rounds (cursorStyle, cursorInactiveStyle,
+  // theme.cursor=bg, CSS !important) could not suppress. The canvas renderer
+  // owns its own cell-painting path and has been observed to draw the cursor
+  // as a real underline/bar without bleeding the cursor color over the cell
+  // background. If WebGL context-loss-style issues recur, this can be swapped
+  // back to DOM by removing the addon.
+  try {
+    term.loadAddon(new CanvasAddon());
+  } catch (e) {
+    console.warn("[tmux-hub] CanvasAddon failed to load, falling back to DOM:", e);
+  }
 
   // Intercept DECSCUSR (CSI Ps SP q) so TUI apps cannot force cursorStyle back to
   // block at runtime. Returning true marks the sequence as handled, so xterm's
