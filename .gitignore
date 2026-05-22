@@ -7,3 +7,4 @@ test-results/
 .env
 .env.local
 *.log
+.claude/worktrees/

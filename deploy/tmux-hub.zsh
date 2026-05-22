@@ -1,16 +1,16 @@
 #!/bin/zsh
 set -eu
-export PATH="/opt/homebrew/bin:/Users/uther/.bun/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="/opt/homebrew/bin:$HOME/.bun/bin:/usr/local/bin:/usr/bin:/bin"
 ulimit -n 16384
 
-ENV_FILE="${TMUX_HUB_ENV_FILE:-/Users/uther/.config/tmux-hub/hub.env}"
+ENV_FILE="${TMUX_HUB_ENV_FILE:-$HOME/.config/tmux-hub/hub.env}"
 if [ -f "$ENV_FILE" ]; then
   set -a
   . "$ENV_FILE"
   set +a
 fi
 
-REPO_DIR="${TMUX_HUB_REPO_DIR:-/Volumes/Data/code/self/tmux-hub}"
+REPO_DIR="${TMUX_HUB_REPO_DIR:?TMUX_HUB_REPO_DIR must be set to the absolute path of your tmux-hub checkout}"
 cd "$REPO_DIR"
 
 print -r -- "[wrapper] starting tmux-hub at $(date '+%Y-%m-%d %H:%M:%S') from $REPO_DIR"

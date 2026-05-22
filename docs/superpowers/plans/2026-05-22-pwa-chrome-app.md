@@ -174,7 +174,7 @@ T3 (sw registration) ───┘                          │
 
 ## 完成定义（Phase 1 done）
 
-所有 6 个 task 的 Acceptance 全部勾选 + spec §4 所有 Acceptance Criteria 全部勾选 → 提 PR → 合并到 main → 部署到 `tui.qinglinzhang.xyz` → 手动在 macOS Chrome 实测一次完整流程（装 → 用 → 重登 → 卸载）。
+所有 6 个 task 的 Acceptance 全部勾选 + spec §4 所有 Acceptance Criteria 全部勾选 → 提 PR → 合并到 main → 部署到 `<your-deployment-host>` → 手动在 macOS Chrome 实测一次完整流程（装 → 用 → 重登 → 卸载）。
 
 # References
 
