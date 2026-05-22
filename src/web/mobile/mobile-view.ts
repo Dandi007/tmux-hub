@@ -4,6 +4,7 @@ import type { SessionInfo, ServerEvent, ClientWsMessage } from "@shared/protocol
 import { isGrammarOk } from "@shared/session-name";
 import { renderInputBox } from "./input-box";
 import { renderSpecialKeysBar } from "./special-keys-bar";
+import { renderQuickLaunchButton } from "./quick-launch";
 import { showToast } from "../ui/toast";
 
 export function renderMobile(root: HTMLElement): void {
@@ -164,6 +165,13 @@ export function renderMobile(root: HTMLElement): void {
   toggleBtn.addEventListener("click", () => setDrawer(!drawerOpen));
   // Auto-collapse after submit so the terminal returns to full height.
   inputForm.addEventListener("submit", () => { setDrawer(false); });
+
+  // Mobile quick-launch: one tap → new session from the kb-cc template.
+  // Sits between the input drawer toggle (✎) and the special-keys bar.
+  renderQuickLaunchButton({
+    parent: toolbar,
+    onStarted: (name) => { openSession(name); },
+  });
 
   renderSpecialKeysBar(toolbar, send);
 
