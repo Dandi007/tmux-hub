@@ -1,8 +1,7 @@
-const TEMPLATE_RE = /^[a-z0-9][a-z0-9-]{0,15}-[0-9]{14}$/;
-const USER_RE = /^user-[a-z0-9_-]{1,32}$/;
+const NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 
 export function isGrammarOk(name: string): boolean {
-  return TEMPLATE_RE.test(name) || USER_RE.test(name);
+  return NAME_RE.test(name);
 }
 
 export class GrammarError extends Error {

@@ -37,6 +37,7 @@ export function loadTemplates(): Template[] {
 }
 
 export function expandHome(p: string): string {
+  if (p === "~") return homedir();
   return p.startsWith("~/") ? resolve(homedir(), p.slice(2)) : p;
 }
 

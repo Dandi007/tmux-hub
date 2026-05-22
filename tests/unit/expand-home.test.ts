@@ -6,6 +6,9 @@ describe("expandHome", () => {
   test("expands leading ~/", () => {
     expect(expandHome("~/foo/bar")).toBe(`${homedir()}/foo/bar`);
   });
+  test("expands bare ~", () => {
+    expect(expandHome("~")).toBe(homedir());
+  });
   test("leaves absolute paths alone", () => {
     expect(expandHome("/abs/path")).toBe("/abs/path");
   });
