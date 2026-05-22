@@ -79,8 +79,15 @@ console.error(`[tmux-hub] static dir ${WEB_DIST} ${SERVE_STATIC ? "(serving)" : 
 
 type WsData = {
   sessionName: string;
+  cols: number;
+  rows: number;
   unsubs: Array<() => void>;
 };
+
+function clampInt(v: number, lo: number, hi: number, fallback: number): number {
+  if (!Number.isFinite(v) || v <= 0) return fallback;
+  return Math.max(lo, Math.min(hi, Math.floor(v)));
+}
 
 console.error(`[tmux-hub] listening on http://${HUB_HOST}:${HUB_PORT}`);
 
@@ -98,7 +105,9 @@ Bun.serve({
       if (!registry.snapshot().find((s) => s.name === sessionName)) {
         return new Response("session not found", { status: 410 });
       }
-      const data: WsData = { sessionName, unsubs: [] };
+      const cols = clampInt(Number(url.searchParams.get("cols")), 20, 500, WINDOW_COLS);
+      const rows = clampInt(Number(url.searchParams.get("rows")), 5, 200, WINDOW_ROWS);
+      const data: WsData = { sessionName, cols, rows, unsubs: [] };
       if (server.upgrade(req, { data })) return undefined;
       return new Response("upgrade failed", { status: 426 });
     }
@@ -106,8 +115,11 @@ Bun.serve({
   },
   websocket: {
     async open(ws: ServerWebSocket<WsData>) {
-      const { sessionName } = ws.data;
-      try { await pinViewport(sessionName, WINDOW_COLS, WINDOW_ROWS); }
+      const { sessionName, cols, rows } = ws.data;
+      // Pin tmux window to client's actual fit() size BEFORE capturing snapshot.
+      // Previously hardcoded to WINDOW_COLS/ROWS (200x50), which made xterm wrap
+      // wide lines and accumulate scroll-offset (bug 2 root cause).
+      try { await pinViewport(sessionName, cols, rows); }
       catch (e) { try { ws.send(`[hub] viewport pin failed: ${(e as Error).message}\n`); } catch {} }
 
       let b: Awaited<ReturnType<typeof broadcasters.get>>;

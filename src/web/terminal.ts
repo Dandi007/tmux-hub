@@ -1,6 +1,5 @@
 import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
-import { WebglAddon } from "xterm-addon-webgl";
 import "xterm/css/xterm.css";
 import type { ClientWsMessage } from "@shared/protocol";
 import { hubWsUrl } from "./hub-fetch";
@@ -19,13 +18,14 @@ export type AttachOptions = {
   rows?: number;
 };
 
-const BUILD_MARKER = "predictive-echo-v2";
+const BUILD_MARKER = "size-handshake-v3";
 
 export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandle> {
   console.log(`[tmux-hub] ${BUILD_MARKER} attaching to ${opts.sessionName}`);
   const term = new Terminal({
     convertEol: true,
-    cursorBlink: false,            // disabled — no constant repaint, reduces flicker
+    cursorBlink: false,
+    cursorStyle: "underline",      // underline avoids WebGL/canvas cursor-cell residue (bug 1)
     fontFamily: "ui-monospace, Menlo, monospace",
     fontSize: 13,
     theme: { background: "#1a1a1f" },
@@ -43,19 +43,23 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   opts.parent.appendChild(el);
   term.open(el);
 
-  // GPU-accelerated renderer for snappier paints, falls back to canvas on context loss.
-  try {
-    const webgl = new WebglAddon();
-    webgl.onContextLoss(() => { try { webgl.dispose(); } catch {} });
-    term.loadAddon(webgl);
-  } catch (e) {
-    console.warn("[tmux-hub] WebGL renderer unavailable, falling back:", e);
-  }
+  // Canvas renderer (xterm default) is more stable for cursor cell invalidation
+  // than the WebGL addon, which left stale white cursor blocks after TUI redraws.
+  // Trade GPU paint speed for visual correctness on a low-fps text workload.
 
   try { fit.fit(); } catch { /* container size 0 in tests */ }
 
-  const wsUrl = await hubWsUrl(`/ws/sessions/${encodeURIComponent(opts.sessionName)}`);
+  // Pass client's actual fit() result to the server via WS query so the server
+  // pins tmux window-size to match BEFORE capturing the initial snapshot.
+  // Without this the server pins to hardcoded 200x50, captures a 200-wide
+  // snapshot, and xterm wraps it at client width (bug 2: prompt scroll-drift).
+  const initCols = term.cols > 0 ? term.cols : (opts.cols ?? 200);
+  const initRows = term.rows > 0 ? term.rows : (opts.rows ?? 50);
+  const wsBase = await hubWsUrl(`/ws/sessions/${encodeURIComponent(opts.sessionName)}`);
+  const sep = wsBase.includes("?") ? "&" : "?";
+  const wsUrl = `${wsBase}${sep}cols=${initCols}&rows=${initRows}`;
   const ws = new WebSocket(wsUrl);
+  console.log(`[tmux-hub] ws init cols=${initCols} rows=${initRows}`);
   ws.binaryType = "arraybuffer";
 
   // Predictive local-echo queue: each entry is a byte we've already drawn locally
