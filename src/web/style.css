@@ -57,13 +57,13 @@ button.is-danger:hover { filter: brightness(1.15); }
 .template-drawer__row select { flex: 1; background: var(--color-bg); color: var(--color-text); border: 1px solid var(--color-surface-hi); border-radius: 6px; padding: var(--space-2); }
 .session-header { display: flex; gap: var(--space-2); align-items: center; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-surface-hi); background: var(--color-surface); }
 .session-header strong { font: 13px var(--font-mono); flex: 1; }
-.session-host { flex: 1; min-height: 0; padding: var(--space-2); }
+.session-host { flex: 1; min-height: 0; padding: var(--space-2); overflow: hidden; }
 
 /* Mobile shell */
 .mobile-shell { display: flex; flex-direction: column; height: 100%; }
 .mobile-shell__header { padding: var(--space-2); background: var(--color-surface); border-bottom: 1px solid var(--color-surface-hi); }
 .mobile-shell__session-select { width: 100%; background: var(--color-bg); color: var(--color-text); border: 1px solid var(--color-surface-hi); border-radius: 6px; padding: var(--space-2); font: 13px var(--font-mono); }
-.mobile-shell__term-host { flex: 1; min-height: 0; padding: var(--space-1); }
+.mobile-shell__term-host { flex: 1; min-height: 0; padding: var(--space-1); overflow: hidden; }
 .mobile-input { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2); background: var(--color-surface); }
 .mobile-input__textarea { width: 100%; font: 13px var(--font-mono); background: var(--color-bg); color: var(--color-text); border: 1px solid var(--color-surface-hi); border-radius: 6px; padding: var(--space-2); resize: vertical; }
 .mobile-input__buttons { display: flex; justify-content: flex-end; gap: var(--space-2); }

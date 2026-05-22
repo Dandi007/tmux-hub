@@ -1,5 +1,6 @@
 import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
+import { WebglAddon } from "xterm-addon-webgl";
 import "xterm/css/xterm.css";
 import type { ClientWsMessage } from "@shared/protocol";
 import { hubWsUrl } from "./hub-fetch";
@@ -24,13 +25,15 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   console.log(`[tmux-hub] ${BUILD_MARKER} attaching to ${opts.sessionName}`);
   const term = new Terminal({
     convertEol: true,
-    cursorBlink: !opts.readOnly,
+    cursorBlink: false,            // disabled — no constant repaint, reduces flicker
     fontFamily: "ui-monospace, Menlo, monospace",
     fontSize: 13,
     theme: { background: "#1a1a1f" },
     cols: opts.cols ?? 200,
     rows: opts.rows ?? 50,
     disableStdin: opts.readOnly ?? false,
+    scrollback: 5000,
+    smoothScrollDuration: 0,
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
@@ -39,6 +42,16 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   el.className = "terminal-host";
   opts.parent.appendChild(el);
   term.open(el);
+
+  // GPU-accelerated renderer for snappier paints, falls back to canvas on context loss.
+  try {
+    const webgl = new WebglAddon();
+    webgl.onContextLoss(() => { try { webgl.dispose(); } catch {} });
+    term.loadAddon(webgl);
+  } catch (e) {
+    console.warn("[tmux-hub] WebGL renderer unavailable, falling back:", e);
+  }
+
   try { fit.fit(); } catch { /* container size 0 in tests */ }
 
   const wsUrl = await hubWsUrl(`/ws/sessions/${encodeURIComponent(opts.sessionName)}`);
