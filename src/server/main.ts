@@ -9,6 +9,7 @@ import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS } from "./c
 import { loadOrCreateSecret, safeEqual } from "./secret";
 import { authGate } from "./auth";
 import { isGrammarOk } from "../shared/session-name";
+import { buildSessionControlRoutes } from "./session-control";
 
 const SECRET = loadOrCreateSecret();
 const registry = new SessionRegistry();
@@ -37,6 +38,7 @@ app.get("/templates", (c) =>
   c.json(templates.map((t) => ({ id: t.id, name: t.name, cwd_choices: t.cwd_choices }))),
 );
 app.get("/events", () => sse.attach({ event: "snapshot", payload: registry.snapshot() }));
+app.route("/", buildSessionControlRoutes({ broadcasters }));
 app.get("/system/auth-check", async (c) => {
   const devBind = process.env.TMUX_HUB_DEV_BIND_SECRET === "1";
   const ident = c.var.identity;
