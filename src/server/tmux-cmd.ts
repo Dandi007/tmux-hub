@@ -9,7 +9,9 @@ export type TmuxResult = {
 };
 
 export async function tmux(args: string[]): Promise<TmuxResult> {
-  const proc = Bun.spawn(["tmux", ...args], {
+  const socket = process.env.TMUX_HUB_SOCKET;
+  const finalArgs = socket && !args.includes("-L") ? ["-L", socket, ...args] : args;
+  const proc = Bun.spawn(["tmux", ...finalArgs], {
     stdout: "pipe",
     stderr: "pipe",
   });

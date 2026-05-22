@@ -110,7 +110,14 @@ Bun.serve({
       try { await pinViewport(sessionName, WINDOW_COLS, WINDOW_ROWS); }
       catch (e) { try { ws.send(`[hub] viewport pin failed: ${(e as Error).message}\n`); } catch {} }
 
-      const b = await broadcasters.get(sessionName);
+      let b: Awaited<ReturnType<typeof broadcasters.get>>;
+      try {
+        b = await broadcasters.get(sessionName);
+      } catch (e) {
+        try { ws.send(`[hub] broadcaster failed: ${(e as Error).message}\n`); } catch {}
+        try { ws.close(1011, "broadcaster failed"); } catch {}
+        return;
+      }
       try { await b.sendInitialSnapshot((chunk) => { try { ws.send(chunk); } catch {} }); } catch {}
 
       if (b.ring.truncated()) sse.emit({ event: "replay_truncated", payload: { name: sessionName } });
