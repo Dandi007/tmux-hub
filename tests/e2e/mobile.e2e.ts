@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { test, expect } from "./fixtures";
 import { bindSecret, uniqSession } from "./helpers";
 
@@ -175,6 +176,34 @@ test.describe("mobile view", () => {
 
     await expect(page.locator(".mobile-shell__session-select")).toBeVisible();
     await expect(page.locator(".mobile-shell__session-select")).toHaveValue(name);
+
+    ctx.tmuxE2E(["kill-session", "-t", name]);
+  });
+
+  test("image attach: picker → upload → drawer opens + path appears in textarea", async ({ page, ctx }) => {
+    const name = uniqSession("shell");
+    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
+
+    await page.goto("/");
+    await bindSecret(page);
+    await page.reload();
+
+    await expect(page.locator(`.mobile-shell__session-select option[value="${name}"]`))
+      .toHaveCount(1, { timeout: 10_000 });
+    await page.locator(".mobile-shell__session-select").selectOption({ label: name });
+    await page.waitForTimeout(800);
+
+    // The 📎 button + hidden <input type=file> are siblings inside the toolbar.
+    const hiddenInput = page.locator(".mobile-toolbar__image-attach-input");
+    const fixturePath = join(process.cwd(), "tests/e2e/fixtures/red.png");
+    await hiddenInput.setInputFiles(fixturePath);
+
+    // After upload: drawer auto-opens, textarea contains the absolute path.
+    const drawer = page.locator(".mobile-drawer");
+    await expect(drawer).toHaveClass(/is-open/, { timeout: 5_000 });
+    const ta = page.locator(".mobile-input__textarea");
+    const taValue = await ta.inputValue();
+    expect(taValue).toMatch(/\.png\s*$/);
 
     ctx.tmuxE2E(["kill-session", "-t", name]);
   });

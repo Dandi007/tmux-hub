@@ -5,6 +5,7 @@ import { isGrammarOk } from "@shared/session-name";
 import { renderInputBox } from "./input-box";
 import { renderSpecialKeysBar } from "./special-keys-bar";
 import { renderQuickLaunchButton } from "./quick-launch";
+import { renderImageAttachButton } from "./image-attach";
 import { showToast } from "../ui/toast";
 import { onForegroundAfterIdle } from "../visibility-recovery";
 import { renameSession } from "../shared/rename-controller";
@@ -289,6 +290,13 @@ export function renderMobile(root: HTMLElement): void {
         }
       }, 5000);
     },
+  });
+
+  renderImageAttachButton({
+    parent: toolbar,
+    getSession: () => openedName,
+    getTextarea: () => drawer.querySelector<HTMLTextAreaElement>(".mobile-input__textarea"),
+    openDrawer: () => setDrawer(true),
   });
 
   renderSpecialKeysBar(toolbar, send);
