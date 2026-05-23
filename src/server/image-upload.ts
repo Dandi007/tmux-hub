@@ -35,9 +35,14 @@ export function imagePathFor(
   return `${root}/${date}/${uuid}.${ext}`;
 }
 
-// Local-TZ YYYY-MM-DD. en-CA happens to format as ISO-8601 date.
-export function todayLocalDate(): string {
-  return new Date().toLocaleDateString("en-CA");
+// Local-TZ YYYY-MM-DD via explicit zero-padding — does not depend on
+// implementation-dependent locale formatting (toLocaleDateString output
+// shape can drift across ICU/runtime versions).
+export function todayLocalDate(d: Date = new Date()): string {
+  const y = d.getFullYear().toString().padStart(4, "0");
+  const m = (d.getMonth() + 1).toString().padStart(2, "0");
+  const day = d.getDate().toString().padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 export type ImageUploadDeps = {

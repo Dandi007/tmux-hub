@@ -44,4 +44,12 @@ describe("todayLocalDate", () => {
   test("returns YYYY-MM-DD format", () => {
     expect(todayLocalDate()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
+  test("formats fixed dates with zero-padding", () => {
+    expect(todayLocalDate(new Date(2026, 0, 1))).toBe("2026-01-01");
+    expect(todayLocalDate(new Date(2026, 11, 31))).toBe("2026-12-31");
+    expect(todayLocalDate(new Date(2026, 4, 23))).toBe("2026-05-23");
+  });
+  test("handles year boundaries with 4-digit padding", () => {
+    expect(todayLocalDate(new Date(99, 0, 1))).toMatch(/^\d{4}-01-01$/);
+  });
 });
