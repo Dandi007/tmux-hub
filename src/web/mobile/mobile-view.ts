@@ -197,33 +197,9 @@ export function renderMobile(root: HTMLElement): void {
   const inputForm = renderInputBox(drawer, send);
   root.appendChild(drawer);
 
-  // Action buttons go in header alongside session picker.
-  const actionRow = picker.actionRow;
-
-  const toggleBtn = document.createElement("button");
-  toggleBtn.type = "button";
-  toggleBtn.className = "session-picker__action";
-  toggleBtn.setAttribute("aria-expanded", "false");
-  toggleBtn.setAttribute("aria-label", "切换多行输入");
-  toggleBtn.textContent = "✎";
-  actionRow.appendChild(toggleBtn);
-
-  let drawerOpen = false;
-  const setDrawer = (open: boolean) => {
-    drawerOpen = open;
-    drawer.classList.toggle("is-open", open);
-    toggleBtn.classList.toggle("is-active", open);
-    toggleBtn.setAttribute("aria-expanded", String(open));
-    if (open) {
-      const ta = drawer.querySelector<HTMLTextAreaElement>(".mobile-input__textarea");
-      ta?.focus();
-    }
-  };
-  toggleBtn.addEventListener("click", () => setDrawer(!drawerOpen));
-  inputForm.addEventListener("submit", () => { setDrawer(false); });
-
+  // Quick-launch (+) goes in header alongside session picker.
   renderQuickLaunchButton({
-    parent: actionRow,
+    parent: picker.actionRow,
     onStarted: (name) => {
       if (sessions.some((s) => s.name === name)) {
         openSession(name);
@@ -241,17 +217,39 @@ export function renderMobile(root: HTMLElement): void {
     },
   });
 
+  // Bottom toolbar: input toggle + image attach + keys grid.
+  const toolbar = document.createElement("div");
+  toolbar.className = "mobile-toolbar";
+  root.appendChild(toolbar);
+
+  const toggleBtn = document.createElement("button");
+  toggleBtn.type = "button";
+  toggleBtn.className = "mobile-toolbar__toggle";
+  toggleBtn.setAttribute("aria-expanded", "false");
+  toggleBtn.setAttribute("aria-label", "切换多行输入");
+  toggleBtn.textContent = "✎";
+  toolbar.appendChild(toggleBtn);
+
+  let drawerOpen = false;
+  const setDrawer = (open: boolean) => {
+    drawerOpen = open;
+    drawer.classList.toggle("is-open", open);
+    toggleBtn.classList.toggle("is-active", open);
+    toggleBtn.setAttribute("aria-expanded", String(open));
+    if (open) {
+      const ta = drawer.querySelector<HTMLTextAreaElement>(".mobile-input__textarea");
+      ta?.focus();
+    }
+  };
+  toggleBtn.addEventListener("click", () => setDrawer(!drawerOpen));
+  inputForm.addEventListener("submit", () => { setDrawer(false); });
+
   renderImageAttachButton({
-    parent: actionRow,
+    parent: toolbar,
     getSession: () => openedName,
     getTextarea: () => drawer.querySelector<HTMLTextAreaElement>(".mobile-input__textarea"),
     openDrawer: () => setDrawer(true),
   });
-
-  // Bottom toolbar: keys grid only.
-  const toolbar = document.createElement("div");
-  toolbar.className = "mobile-toolbar";
-  root.appendChild(toolbar);
 
   renderToolbarKeys(toolbar, send);
 

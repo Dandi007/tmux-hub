@@ -329,8 +329,7 @@ button.is-danger:hover { filter: brightness(1.15); }
   max-height: 50dvh;
   border-top-color: var(--color-surface-hi);
 }
-/* Header action buttons: uniform style next to rename button. */
-.session-picker__action,
+/* Header quick-launch button: matches rename button style. */
 .mobile-toolbar__quick-launch {
   flex: 0 0 auto;
   min-width: var(--tap-min);
@@ -342,24 +341,36 @@ button.is-danger:hover { filter: brightness(1.15); }
   border-radius: .25rem;
   color: var(--color-text-mute);
   cursor: pointer;
+  margin-left: 0;
 }
-.session-picker__action:active,
 .mobile-toolbar__quick-launch:active { color: var(--color-accent); }
-.session-picker__action.is-active {
-  background: var(--color-accent);
-  color: var(--color-bg);
-  border-color: var(--color-accent);
-}
 .mobile-toolbar__quick-launch:disabled {
   opacity: 0.35;
   cursor: not-allowed;
 }
 
-/* Bottom toolbar: keys grid only. */
+/* Bottom toolbar: toggle + image-attach + keys grid. */
 .mobile-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
   background: var(--color-surface);
   border-top: 1px solid var(--color-surface-hi);
   padding-bottom: var(--safe-bottom);
+}
+.mobile-toolbar__toggle {
+  flex: 0 0 auto;
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  background: var(--color-surface-hi);
+  border-radius: 999px;
+  font-size: 18px;
+  line-height: 1;
+}
+.mobile-toolbar__toggle.is-active {
+  background: var(--color-accent);
+  color: var(--color-bg);
 }
 
 /* Combined keys grid: [Esc][Tab][↑][^C][^D][^Z] in row 1,
