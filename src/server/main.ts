@@ -217,6 +217,12 @@ Bun.serve({
         try { ws.send(JSON.stringify({ error: "invalid json" })); } catch {}
         return;
       }
+      // Heartbeat: echo pong immediately, do not route to tmux.
+      if (typeof parsed === "object" && parsed !== null && (parsed as { kind?: string }).kind === "ping") {
+        const ts = (parsed as { ts?: number }).ts ?? 0;
+        try { ws.send(JSON.stringify({ kind: "pong", ts })); } catch {}
+        return;
+      }
       input.send(sessionName, parsed as Parameters<typeof input.send>[1]).catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : String(e);
         try { ws.send(JSON.stringify({ error: msg })); } catch {}
