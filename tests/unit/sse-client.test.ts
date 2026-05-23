@@ -57,7 +57,7 @@ describe("sse-client", () => {
     expect(FakeEventSource.instances.length).toBe(2);
 
     // Wait > 1s and confirm no third instance was opened by the cancelled retry.
-    await new Promise((r) => setTimeout(r, 1100));
+    await new Promise((r) => setTimeout(r, 1500));
     expect(FakeEventSource.instances.length).toBe(2);
     handle.stop();
   });
@@ -85,7 +85,7 @@ describe("sse-client", () => {
 
     // Simulate error on the latest (now closed via stop) ES; should NOT schedule a retry.
     FakeEventSource.instances[1]!.onerror?.();
-    await new Promise((r) => setTimeout(r, 1100));
+    await new Promise((r) => setTimeout(r, 1500));
     expect(FakeEventSource.instances.length).toBe(2);
   });
 
