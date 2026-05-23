@@ -7,6 +7,7 @@ import { renderSpecialKeysBar } from "./special-keys-bar";
 import { renderQuickLaunchButton } from "./quick-launch";
 import { showToast } from "../ui/toast";
 import { onForegroundAfterIdle } from "../visibility-recovery";
+import { renameSession } from "../shared/rename-controller";
 
 export function renderMobile(root: HTMLElement): void {
   root.replaceChildren();
@@ -14,9 +15,17 @@ export function renderMobile(root: HTMLElement): void {
 
   const header = document.createElement("header");
   header.className = "mobile-shell__header";
+
   const select = document.createElement("select");
   select.className = "mobile-shell__session-select";
-  header.appendChild(select);
+
+  const renameBtn = document.createElement("button");
+  renameBtn.type = "button";
+  renameBtn.className = "mobile-shell__rename";
+  renameBtn.setAttribute("aria-label", "重命名当前 session");
+  renameBtn.textContent = "✎";
+
+  header.append(select, renameBtn);
   root.appendChild(header);
 
   const termHost = document.createElement("div");
@@ -114,6 +123,65 @@ export function renderMobile(root: HTMLElement): void {
       }
     }
   };
+
+  const enterRenameMode = (current: string): void => {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "mobile-shell__rename-input";
+    input.value = current;
+    input.spellcheck = false;
+    input.autocapitalize = "off";
+    input.autocomplete = "off";
+
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "mobile-shell__rename-save";
+    saveBtn.textContent = "保存";
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "mobile-shell__rename-cancel";
+    cancelBtn.textContent = "取消";
+
+    // Replace [select][✎] with [input][保存][取消]
+    header.replaceChildren(input, saveBtn, cancelBtn);
+
+    const exitRenameMode = (): void => {
+      header.replaceChildren(select, renameBtn);
+    };
+
+    const commit = async (): Promise<void> => {
+      const next = input.value.trim();
+      if (next === "" || next === current) { exitRenameMode(); return; }
+      if (!isGrammarOk(next)) {
+        showToast(`新名字不合法：${next}（只允许 [a-zA-Z0-9_-]，1-64 字符）`, "error");
+        return; // stay in edit mode so user can fix it
+      }
+      try {
+        await renameSession(current, next);
+        // SSE session_removed (old) + session_created (new) repaint the select
+        // and refreshSelect() picks the new name as current.
+        exitRenameMode();
+      } catch (e) {
+        showToast(`重命名失败：${(e as Error).message}`, "error");
+      }
+    };
+
+    saveBtn.addEventListener("click", () => { void commit(); });
+    cancelBtn.addEventListener("click", exitRenameMode);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); void commit(); }
+      else if (e.key === "Escape") { e.preventDefault(); exitRenameMode(); }
+    });
+
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+  };
+
+  renameBtn.addEventListener("click", () => {
+    const current = select.value;
+    if (!current) return;
+    enterRenameMode(current);
+  });
 
   select.addEventListener("change", () => { void openSession(select.value); });
 

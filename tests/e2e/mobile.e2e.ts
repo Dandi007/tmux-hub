@@ -123,4 +123,59 @@ test.describe("mobile view", () => {
 
     ctx.tmuxE2E(["kill-session", "-t", name]);
   });
+
+  test("rename button switches header to edit-mode and renames session", async ({ page, ctx }) => {
+    const name = uniqSession("shell");
+    const renamed = `${name}-r`;
+    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
+
+    await page.goto("/");
+    await bindSecret(page);
+    await page.reload();
+
+    await expect(page.locator(`.mobile-shell__session-select option[value="${name}"]`))
+      .toHaveCount(1, { timeout: 10_000 });
+    await page.locator(".mobile-shell__session-select").selectOption({ label: name });
+    await page.waitForTimeout(800);
+
+    // Tap ✎ → edit mode appears
+    await page.locator(".mobile-shell__rename").click();
+    const input = page.locator(".mobile-shell__rename-input");
+    await expect(input).toBeVisible();
+    await expect(input).toHaveValue(name);
+
+    // Replace value + save
+    await input.fill(renamed);
+    await page.locator(".mobile-shell__rename-save").click();
+
+    // After SSE roundtrip the select repaints with the new name selected
+    await expect(page.locator(`.mobile-shell__session-select option[value="${renamed}"]`))
+      .toHaveCount(1, { timeout: 5_000 });
+    await expect(page.locator(".mobile-shell__session-select")).toHaveValue(renamed);
+
+    try { ctx.tmuxE2E(["kill-session", "-t", renamed]); } catch { /* best-effort */ }
+  });
+
+  test("rename cancel restores select without firing request", async ({ page, ctx }) => {
+    const name = uniqSession("shell");
+    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
+
+    await page.goto("/");
+    await bindSecret(page);
+    await page.reload();
+
+    await expect(page.locator(`.mobile-shell__session-select option[value="${name}"]`))
+      .toHaveCount(1, { timeout: 10_000 });
+    await page.locator(".mobile-shell__session-select").selectOption({ label: name });
+    await page.waitForTimeout(800);
+
+    await page.locator(".mobile-shell__rename").click();
+    await page.locator(".mobile-shell__rename-input").fill("ignored-value");
+    await page.locator(".mobile-shell__rename-cancel").click();
+
+    await expect(page.locator(".mobile-shell__session-select")).toBeVisible();
+    await expect(page.locator(".mobile-shell__session-select")).toHaveValue(name);
+
+    ctx.tmuxE2E(["kill-session", "-t", name]);
+  });
 });
