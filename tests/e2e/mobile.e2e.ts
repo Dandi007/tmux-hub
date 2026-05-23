@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { test, expect } from "./fixtures";
 import { bindSecret, uniqSession } from "./helpers";
 
@@ -90,5 +91,120 @@ test.describe("mobile view", () => {
     await expect(page.locator(".mobile-shell__session-select")).toHaveValue(newName!, { timeout: 10_000 });
 
     ctx.tmuxE2E(["kill-session", "-t", newName!]);
+  });
+
+  test("empty textarea submit sends a bare Enter to the pane", async ({ page, ctx }) => {
+    const name = uniqSession("shell");
+    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
+
+    await page.goto("/");
+    await bindSecret(page);
+    await page.reload();
+
+    await expect(page.locator(`.mobile-shell__session-select option[value="${name}"]`))
+      .toHaveCount(1, { timeout: 10_000 });
+    await page.locator(".mobile-shell__session-select").selectOption({ label: name });
+    await page.waitForTimeout(1500);
+
+    // Open the drawer so the form is visible
+    await page.locator(".mobile-toolbar__toggle").click();
+
+    // textarea is empty; click submit
+    await page.locator(".mobile-input button[type=submit]").evaluate((btn: HTMLButtonElement) => btn.click());
+    await page.waitForTimeout(700);
+
+    // After Enter into sh prompt: a fresh prompt line appears.
+    // We assert that capture-pane contains 2+ shell prompts (the one we started
+    // with + the one after Enter). Match a literal `$` since macOS sh emits
+    // `sh-3.2$\n` (no trailing space) while bash emits `bash-5.x$ ` — counting
+    // `$` is the most portable signal.
+    const captured = ctx.tmuxE2E(["capture-pane", "-p", "-t", name]);
+    const promptOccurrences = (captured.match(/\$/g) ?? []).length;
+    expect(promptOccurrences).toBeGreaterThanOrEqual(2);
+
+    ctx.tmuxE2E(["kill-session", "-t", name]);
+  });
+
+  test("rename button switches header to edit-mode and renames session", async ({ page, ctx }) => {
+    const name = uniqSession("shell");
+    const renamed = `${name}-r`;
+    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
+
+    await page.goto("/");
+    await bindSecret(page);
+    await page.reload();
+
+    await expect(page.locator(`.mobile-shell__session-select option[value="${name}"]`))
+      .toHaveCount(1, { timeout: 10_000 });
+    await page.locator(".mobile-shell__session-select").selectOption({ label: name });
+    await page.waitForTimeout(800);
+
+    // Tap ✎ → edit mode appears
+    await page.locator(".mobile-shell__rename").click();
+    const input = page.locator(".mobile-shell__rename-input");
+    await expect(input).toBeVisible();
+    await expect(input).toHaveValue(name);
+
+    // Replace value + save
+    await input.fill(renamed);
+    await page.locator(".mobile-shell__rename-save").click();
+
+    // After SSE roundtrip the select repaints with the new name selected
+    await expect(page.locator(`.mobile-shell__session-select option[value="${renamed}"]`))
+      .toHaveCount(1, { timeout: 5_000 });
+    await expect(page.locator(".mobile-shell__session-select")).toHaveValue(renamed);
+
+    try { ctx.tmuxE2E(["kill-session", "-t", renamed]); } catch { /* best-effort */ }
+  });
+
+  test("rename cancel restores select without firing request", async ({ page, ctx }) => {
+    const name = uniqSession("shell");
+    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
+
+    await page.goto("/");
+    await bindSecret(page);
+    await page.reload();
+
+    await expect(page.locator(`.mobile-shell__session-select option[value="${name}"]`))
+      .toHaveCount(1, { timeout: 10_000 });
+    await page.locator(".mobile-shell__session-select").selectOption({ label: name });
+    await page.waitForTimeout(800);
+
+    await page.locator(".mobile-shell__rename").click();
+    await page.locator(".mobile-shell__rename-input").fill("ignored-value");
+    await page.locator(".mobile-shell__rename-cancel").click();
+
+    await expect(page.locator(".mobile-shell__session-select")).toBeVisible();
+    await expect(page.locator(".mobile-shell__session-select")).toHaveValue(name);
+
+    ctx.tmuxE2E(["kill-session", "-t", name]);
+  });
+
+  test("image attach: picker → upload → drawer opens + path appears in textarea", async ({ page, ctx }) => {
+    const name = uniqSession("shell");
+    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
+
+    await page.goto("/");
+    await bindSecret(page);
+    await page.reload();
+
+    await expect(page.locator(`.mobile-shell__session-select option[value="${name}"]`))
+      .toHaveCount(1, { timeout: 10_000 });
+    await page.locator(".mobile-shell__session-select").selectOption({ label: name });
+    await page.waitForTimeout(800);
+
+    // The 📎 button + hidden <input type=file> are siblings inside the toolbar.
+    const hiddenInput = page.locator(".mobile-toolbar__image-attach-input");
+    const fixturePath = join(process.cwd(), "tests/e2e/fixtures/red.png");
+    await hiddenInput.setInputFiles(fixturePath);
+
+    // After upload: drawer auto-opens, textarea contains the absolute path.
+    const drawer = page.locator(".mobile-drawer");
+    await expect(drawer).toHaveClass(/is-open/, { timeout: 5_000 });
+    const ta = page.locator(".mobile-input__textarea");
+    const taValue = await ta.inputValue();
+    expect(taValue).toMatch(/\.png\s*$/);
+
+    ctx.tmuxE2E(["kill-session", "-t", name]);
   });
 });
