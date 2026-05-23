@@ -18,7 +18,11 @@ export type ServerEvent =
 export type ClientWsMessage =
   | { kind: "keys"; literal: string }
   | { kind: "key"; name: string }
-  | { kind: "resize"; cols: number; rows: number };
+  | { kind: "resize"; cols: number; rows: number }
+  | { kind: "ping"; ts: number };
+
+export type ServerWsMessage =
+  | { kind: "pong"; ts: number };
 
 /**
  * 移动端 quick-launch 按钮硬编码调用的 template id。
