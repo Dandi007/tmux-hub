@@ -111,9 +111,22 @@ export function renderMobile(root: HTMLElement): void {
 
   select.addEventListener("change", () => { void openSession(select.value); });
 
+  // Quick-launch: server admits WS attach only after registry poll (≤2s) snapshots
+  // the new session. Defer openSession until session_created SSE confirms presence;
+  // 5s timeout fallback warns if the event never arrives.
+  let pendingQuickLaunchName: string | null = null;
+  let pendingQuickLaunchTimer: ReturnType<typeof setTimeout> | null = null;
+
   subscribeEvents((e: ServerEvent) => {
     if (e.event === "snapshot") sessions = e.payload;
-    else if (e.event === "session_created") sessions = [...sessions, e.payload];
+    else if (e.event === "session_created") {
+      sessions = [...sessions, e.payload];
+      if (pendingQuickLaunchName === e.payload.name) {
+        pendingQuickLaunchName = null;
+        if (pendingQuickLaunchTimer) { clearTimeout(pendingQuickLaunchTimer); pendingQuickLaunchTimer = null; }
+        openSession(e.payload.name);
+      }
+    }
     else if (e.event === "session_removed") {
       sessions = sessions.filter((s) => s.name !== e.payload.name);
       if (openedName === e.payload.name) {
@@ -170,7 +183,23 @@ export function renderMobile(root: HTMLElement): void {
   // Sits between the input drawer toggle (✎) and the special-keys bar.
   renderQuickLaunchButton({
     parent: toolbar,
-    onStarted: (name) => { openSession(name); },
+    onStarted: (name) => {
+      // If the session is already in our known list (SSE arrived first), open now.
+      if (sessions.some((s) => s.name === name)) {
+        openSession(name);
+        return;
+      }
+      // Otherwise queue and wait for session_created SSE (handled above).
+      pendingQuickLaunchName = name;
+      if (pendingQuickLaunchTimer) clearTimeout(pendingQuickLaunchTimer);
+      pendingQuickLaunchTimer = setTimeout(() => {
+        if (pendingQuickLaunchName === name) {
+          pendingQuickLaunchName = null;
+          pendingQuickLaunchTimer = null;
+          showToast(`新建会话 ${name} 等待超时，请手动从列表选择`, "error");
+        }
+      }, 5000);
+    },
   });
 
   renderSpecialKeysBar(toolbar, send);
