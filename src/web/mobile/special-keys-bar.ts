@@ -1,8 +1,11 @@
 import type { ClientWsMessage } from "@shared/protocol";
 
-const FUNC_KEYS: ReadonlyArray<readonly [string, string]> = [
+const FUNC_KEYS_BEFORE: ReadonlyArray<readonly [string, string]> = [
   ["Esc", "Escape"],
   ["Tab", "Tab"],
+];
+
+const FUNC_KEYS_AFTER: ReadonlyArray<readonly [string, string]> = [
   ["^C", "C-c"],
   ["^D", "C-d"],
   ["^Z", "C-z"],
@@ -27,13 +30,17 @@ export function renderToolbarKeys(
   const grid = document.createElement("div");
   grid.className = "special-keys toolbar-keys";
 
-  for (const [label, name] of FUNC_KEYS) {
+  for (const [label, name] of FUNC_KEYS_BEFORE) {
     grid.appendChild(makeKey(label, name, send));
   }
 
   const up = makeKey("↑", "Up", send);
   up.className = "tk-up";
   grid.appendChild(up);
+
+  for (const [label, name] of FUNC_KEYS_AFTER) {
+    grid.appendChild(makeKey(label, name, send));
+  }
 
   const left = makeKey("←", "Left", send);
   left.className = "tk-left";
