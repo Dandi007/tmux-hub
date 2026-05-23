@@ -389,20 +389,19 @@ button.is-danger:hover { filter: brightness(1.15); }
   background: rgba(255, 255, 255, 0.08);
 }
 
-/* Arrow keys: keyboard-style cross layout via CSS grid.
-   ↑ sits centered in row 1; ← ↓ → fill row 2. */
+/* Arrow keys row: ← ↓ → in a compact horizontal strip. */
 .arrow-keys {
-  display: grid;
-  grid-template-columns: repeat(3, var(--tap-min));
-  grid-template-rows: repeat(2, calc(var(--tap-min) - 4px));
+  display: flex;
   gap: 2px;
+  justify-content: center;
 }
 .arrow-keys__btn {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: var(--tap-min);
   min-width: unset;
-  min-height: unset;
+  min-height: calc(var(--tap-min) - 4px);
   padding: 0;
   font-family: var(--font-mono);
   font-size: 16px;
@@ -410,10 +409,6 @@ button.is-danger:hover { filter: brightness(1.15); }
   border-radius: 6px;
 }
 .arrow-keys__btn:active { background: var(--color-accent-mute); }
-.arrow-up   { grid-column: 2; grid-row: 1; }
-.arrow-left  { grid-column: 1; grid-row: 2; }
-.arrow-down  { grid-column: 2; grid-row: 2; }
-.arrow-right { grid-column: 3; grid-row: 2; }
 .mobile-input {
   display: flex;
   flex-direction: column;
@@ -455,7 +450,7 @@ button.is-danger:hover { filter: brightness(1.15); }
   .mobile-input { padding: var(--space-1); }
   .special-keys { padding-block: var(--space-1); }
   .mobile-toolbar__row2 { padding-bottom: var(--space-1); }
-  .arrow-keys { grid-template-rows: repeat(2, calc(var(--tap-min) - 8px)); }
+  .arrow-keys__btn { min-height: calc(var(--tap-min) - 8px); }
 }
 
 /* Session picker: rename button beside trigger */

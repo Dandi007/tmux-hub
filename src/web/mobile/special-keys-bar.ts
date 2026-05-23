@@ -6,13 +6,13 @@ const FUNC_KEYS: ReadonlyArray<readonly [string, string]> = [
   ["^C", "C-c"],
   ["^D", "C-d"],
   ["^Z", "C-z"],
+  ["↑", "Up"],
 ];
 
-const ARROW_KEYS: ReadonlyArray<readonly [label: string, name: string, cls: string]> = [
-  ["↑", "Up", "arrow-up"],
-  ["←", "Left", "arrow-left"],
-  ["↓", "Down", "arrow-down"],
-  ["→", "Right", "arrow-right"],
+const ARROW_KEYS: ReadonlyArray<readonly [string, string]> = [
+  ["←", "Left"],
+  ["↓", "Down"],
+  ["→", "Right"],
 ];
 
 function makeKey(
@@ -46,11 +46,11 @@ export function renderArrowKeys(
   parent: HTMLElement,
   send: (m: ClientWsMessage) => void,
 ): HTMLElement {
-  const grid = document.createElement("div");
-  grid.className = "arrow-keys";
-  for (const [label, name, cls] of ARROW_KEYS) {
-    grid.appendChild(makeKey(label, name, send, `arrow-keys__btn ${cls}`));
+  const row = document.createElement("div");
+  row.className = "arrow-keys";
+  for (const [label, name] of ARROW_KEYS) {
+    row.appendChild(makeKey(label, name, send, "arrow-keys__btn"));
   }
-  parent.appendChild(grid);
-  return grid;
+  parent.appendChild(row);
+  return row;
 }
