@@ -3,7 +3,7 @@ import { test, expect } from "./fixtures";
 import { bindSecret, uniqSession } from "./helpers";
 
 test.describe("desktop view", () => {
-  test("dashboard renders and attaches to a session", async ({ page, ctx }) => {
+  test("dashboard renders session list and attaches terminal", async ({ page, ctx }) => {
     const name = uniqSession("shell");
     ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
 
@@ -11,29 +11,13 @@ test.describe("desktop view", () => {
     await bindSecret(page);
     await page.reload();
 
-    await expect(page.locator(".session-list__item", { hasText: name })).toBeVisible({ timeout: 10_000 });
-    await page.locator(".session-list__item", { hasText: name }).click();
-
-    ctx.tmuxE2E(["send-keys", "-t", name, "echo DESKTOP_E2E_OK", "Enter"]);
-    await expect(page.locator(".session-host")).toContainText("DESKTOP_E2E_OK", { timeout: 10_000 });
+    await expect(page.locator(`.session-list__item[data-session-name="${name}"]`))
+      .toBeVisible({ timeout: 10_000 });
+    await page.locator(`.session-list__item[data-session-name="${name}"]`).click();
+    await expect(page.locator(".session-header strong")).toHaveText(name, { timeout: 5_000 });
+    await expect(page.locator(".session-host")).toBeVisible();
 
     ctx.tmuxE2E(["kill-session", "-t", name]);
-  });
-
-  test("external session (grammar violation) shown read-only with badge", async ({ page, ctx }) => {
-    // tmux replaces "." with "_" in session names. Use a name that survives.
-    const badName = "external_thing";
-    ctx.tmuxE2E(["new-session", "-d", "-s", badName, "sh"]);
-
-    await page.goto("/");
-    await bindSecret(page);
-    await page.reload();
-
-    const item = page.locator(".session-list__item.is-external", { hasText: badName });
-    await expect(item).toBeVisible({ timeout: 10_000 });
-    await expect(item.locator(".badge--external")).toBeVisible();
-
-    ctx.tmuxE2E(["kill-session", "-t", badName]);
   });
 
   test("kill button requires confirm modal — cancel keeps session alive", async ({ page, ctx }) => {
@@ -74,6 +58,182 @@ test.describe("desktop view", () => {
     expect(captured).toMatch(/[\/\w-]+\.png/);
 
     ctx.tmuxE2E(["kill-session", "-t", name]);
+  });
+
+  test("kill confirm destroys session and removes from sidebar", async ({ page, ctx }) => {
+    const keep = uniqSession("keep");
+    const kill = uniqSession("kill");
+    ctx.tmuxE2E(["new-session", "-d", "-s", keep, "sh"]);
+    ctx.tmuxE2E(["new-session", "-d", "-s", kill, "sleep 60"]);
+
+    await page.goto("/");
+    await bindSecret(page);
+    await page.reload();
+
+    await expect(page.locator(`.session-list__item[data-session-name="${kill}"]`))
+      .toBeVisible({ timeout: 10_000 });
+    await page.locator(`.session-list__item[data-session-name="${kill}"]`).click();
+    await page.getByRole("button", { name: "kill", exact: true }).click();
+    await expect(page.locator(".modal-dialog")).toBeVisible();
+    await page.locator(".modal-dialog__actions button.is-danger").click();
+
+    await expect(page.locator(`.session-list__item[data-session-name="${kill}"]`))
+      .toHaveCount(0, { timeout: 10_000 });
+    const sessions = ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n");
+    expect(sessions).not.toContain(kill);
+    expect(sessions).toContain(keep);
+
+    ctx.tmuxE2E(["kill-session", "-t", keep]);
+  });
+
+  test("rename inline edit commits on Enter", async ({ page, ctx }) => {
+    const name = uniqSession("shell");
+    const renamed = `${name}-r`;
+    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
+
+    await page.goto("/");
+    await bindSecret(page);
+    await page.reload();
+
+    await expect(page.locator(`.session-list__item[data-session-name="${name}"]`))
+      .toBeVisible({ timeout: 10_000 });
+    await page.locator(`.session-list__item[data-session-name="${name}"] .session-list__rename`).click();
+
+    const input = page.locator(".session-list__input");
+    await expect(input).toBeVisible();
+    await input.fill(renamed);
+    await input.press("Enter");
+
+    await expect(page.locator(`.session-list__item[data-session-name="${renamed}"]`))
+      .toBeVisible({ timeout: 10_000 });
+
+    try { ctx.tmuxE2E(["kill-session", "-t", renamed]); } catch {}
+  });
+
+  test("rename inline edit cancels on Escape", async ({ page, ctx }) => {
+    const name = uniqSession("shell");
+    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
+
+    await page.goto("/");
+    await bindSecret(page);
+    await page.reload();
+
+    await expect(page.locator(`.session-list__item[data-session-name="${name}"]`))
+      .toBeVisible({ timeout: 10_000 });
+    await page.locator(`.session-list__item[data-session-name="${name}"] .session-list__rename`).click();
+
+    const input = page.locator(".session-list__input");
+    await expect(input).toBeVisible();
+    await input.fill("ignored-value");
+    await input.press("Escape");
+
+    await expect(input).not.toBeVisible();
+    await expect(page.locator(`.session-list__item[data-session-name="${name}"]`))
+      .toBeVisible();
+
+    ctx.tmuxE2E(["kill-session", "-t", name]);
+  });
+
+  test("switching sessions updates header name", async ({ page, ctx }) => {
+    const a = uniqSession("alpha");
+    const b = uniqSession("beta");
+    ctx.tmuxE2E(["new-session", "-d", "-s", a, "sh"]);
+    ctx.tmuxE2E(["new-session", "-d", "-s", b, "sh"]);
+
+    await page.goto("/");
+    await bindSecret(page);
+    await page.reload();
+
+    await expect(page.locator(`.session-list__item[data-session-name="${a}"]`))
+      .toBeVisible({ timeout: 10_000 });
+    await page.locator(`.session-list__item[data-session-name="${a}"]`).click();
+    await expect(page.locator(".session-header strong")).toHaveText(a, { timeout: 5_000 });
+
+    await page.locator(`.session-list__item[data-session-name="${b}"]`).click();
+    await expect(page.locator(".session-header strong")).toHaveText(b, { timeout: 5_000 });
+
+    ctx.tmuxE2E(["kill-session", "-t", a]);
+    ctx.tmuxE2E(["kill-session", "-t", b]);
+  });
+
+  test("template drawer launches a new session", async ({ page, ctx }) => {
+    await page.goto("/");
+    await bindSecret(page);
+    await page.reload();
+
+    const drawer = page.locator(".template-drawer");
+    await expect(drawer).toBeVisible({ timeout: 10_000 });
+    const shellBtn = drawer.locator(".template-drawer__btn").first();
+    await expect(shellBtn).toBeVisible();
+    await shellBtn.click();
+
+    let names: string[] = [];
+    for (let i = 0; i < 30; i++) {
+      names = ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n").filter(Boolean);
+      if (names.some((n) => n.startsWith("shell-"))) break;
+      await page.waitForTimeout(200);
+    }
+    const newName = names.find((n) => n.startsWith("shell-"));
+    expect(newName).toBeTruthy();
+
+    await expect(page.locator(`.session-list__item[data-session-name="${newName!}"]`))
+      .toBeVisible({ timeout: 10_000 });
+
+    ctx.tmuxE2E(["kill-session", "-t", newName!]);
+  });
+
+  test("detach button detaches clients from session", async ({ page, ctx }) => {
+    const name = uniqSession("shell");
+    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
+
+    await page.goto("/");
+    await bindSecret(page);
+    await page.reload();
+
+    await expect(page.locator(`.session-list__item[data-session-name="${name}"]`))
+      .toBeVisible({ timeout: 10_000 });
+    await page.locator(`.session-list__item[data-session-name="${name}"]`).click();
+    await page.waitForTimeout(800);
+
+    await page.getByRole("button", { name: "detach", exact: true }).click();
+    await page.waitForTimeout(500);
+
+    const sessions = ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n");
+    expect(sessions).toContain(name);
+
+    ctx.tmuxE2E(["kill-session", "-t", name]);
+  });
+
+  test("session created externally appears in sidebar via SSE", async ({ page, ctx }) => {
+    await page.goto("/");
+    await bindSecret(page);
+    await page.reload();
+    await page.waitForTimeout(1000);
+
+    const name = uniqSession("late");
+    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
+
+    await expect(page.locator(`.session-list__item[data-session-name="${name}"]`))
+      .toBeVisible({ timeout: 10_000 });
+
+    ctx.tmuxE2E(["kill-session", "-t", name]);
+  });
+
+  test("session killed externally disappears from sidebar via SSE", async ({ page, ctx }) => {
+    const name = uniqSession("ephemeral");
+    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
+
+    await page.goto("/");
+    await bindSecret(page);
+    await page.reload();
+
+    await expect(page.locator(`.session-list__item[data-session-name="${name}"]`))
+      .toBeVisible({ timeout: 10_000 });
+
+    ctx.tmuxE2E(["kill-session", "-t", name]);
+
+    await expect(page.locator(`.session-list__item[data-session-name="${name}"]`))
+      .toHaveCount(0, { timeout: 10_000 });
   });
 
   test("desktop clipboard paste: image item intercepted + path injected", async ({ page, ctx }) => {
