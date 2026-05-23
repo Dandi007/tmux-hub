@@ -201,9 +201,9 @@ export function renderMobile(root: HTMLElement): void {
   toolbar.className = "mobile-toolbar";
   root.appendChild(toolbar);
 
-  const row1 = document.createElement("div");
-  row1.className = "mobile-toolbar__row1";
-  toolbar.appendChild(row1);
+  const left = document.createElement("div");
+  left.className = "mobile-toolbar__left";
+  toolbar.appendChild(left);
 
   const toggleBtn = document.createElement("button");
   toggleBtn.type = "button";
@@ -211,7 +211,7 @@ export function renderMobile(root: HTMLElement): void {
   toggleBtn.setAttribute("aria-expanded", "false");
   toggleBtn.setAttribute("aria-label", "切换多行输入");
   toggleBtn.textContent = "✎";
-  row1.appendChild(toggleBtn);
+  left.appendChild(toggleBtn);
 
   let drawerOpen = false;
   const setDrawer = (open: boolean) => {
@@ -228,7 +228,7 @@ export function renderMobile(root: HTMLElement): void {
   inputForm.addEventListener("submit", () => { setDrawer(false); });
 
   renderQuickLaunchButton({
-    parent: row1,
+    parent: left,
     onStarted: (name) => {
       if (sessions.some((s) => s.name === name)) {
         openSession(name);
@@ -247,19 +247,15 @@ export function renderMobile(root: HTMLElement): void {
   });
 
   renderImageAttachButton({
-    parent: row1,
+    parent: left,
     getSession: () => openedName,
     getTextarea: () => drawer.querySelector<HTMLTextAreaElement>(".mobile-input__textarea"),
     openDrawer: () => setDrawer(true),
   });
 
-  renderFunctionKeys(row1, send);
+  renderFunctionKeys(left, send);
 
-  const row2 = document.createElement("div");
-  row2.className = "mobile-toolbar__row2";
-  toolbar.appendChild(row2);
-
-  renderArrowKeys(row2, send);
+  renderArrowKeys(toolbar, send);
 
   window.__tmuxHub = {
     ...(window.__tmuxHub ?? {}),
