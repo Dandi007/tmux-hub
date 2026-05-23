@@ -385,14 +385,15 @@ button.is-danger:hover { filter: brightness(1.15); }
   background: rgba(255, 255, 255, 0.08);
 }
 
-/* Arrow keys: keyboard cross layout, fixed to toolbar right edge.
-   ↑ centered on row 1, ← ↓ → on row 2. */
+/* Arrow keys: MacBook-style compact cluster. ← → full height,
+   ↑ ↓ half-height stacked in center column. Total height = tap-min. */
 .arrow-keys {
   flex: 0 0 auto;
   display: grid;
   grid-template-columns: repeat(3, calc(var(--tap-min) - 4px));
-  grid-template-rows: repeat(2, calc(var(--tap-min) / 2));
+  grid-template-rows: 1fr 1fr;
   gap: 2px;
+  height: var(--tap-min);
   align-self: center;
   padding-right: var(--space-2);
 }
@@ -404,15 +405,15 @@ button.is-danger:hover { filter: brightness(1.15); }
   min-height: unset;
   padding: 0;
   font-family: var(--font-mono);
-  font-size: 16px;
+  font-size: 14px;
   background: var(--color-surface-hi);
   border-radius: 4px;
 }
 .arrow-keys__btn:active { background: var(--color-accent-mute); }
 .arrow-up    { grid-column: 2; grid-row: 1; }
-.arrow-left  { grid-column: 1; grid-row: 2; }
 .arrow-down  { grid-column: 2; grid-row: 2; }
-.arrow-right { grid-column: 3; grid-row: 2; }
+.arrow-left  { grid-column: 1; grid-row: 1 / 3; }
+.arrow-right { grid-column: 3; grid-row: 1 / 3; }
 .mobile-input {
   display: flex;
   flex-direction: column;
@@ -453,7 +454,7 @@ button.is-danger:hover { filter: brightness(1.15); }
   .mobile-shell__header { padding-top: var(--space-1); }
   .mobile-input { padding: var(--space-1); }
   .special-keys { padding-block: var(--space-1); }
-  .arrow-keys { grid-template-rows: repeat(2, calc(var(--tap-min) / 2 - 2px)); }
+  .arrow-keys { height: calc(var(--tap-min) - 6px); }
 }
 
 /* Session picker: rename button beside trigger */
