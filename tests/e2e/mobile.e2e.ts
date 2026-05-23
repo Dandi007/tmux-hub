@@ -11,9 +11,10 @@ test.describe("mobile view", () => {
     await bindSecret(page);
     await page.reload();
 
-    await expect(page.locator(`.mobile-shell__session-select option[value="${name}"]`))
+    await expect(page.locator(`.session-picker__item[data-session="${name}"]`))
       .toHaveCount(1, { timeout: 10_000 });
-    await page.locator(".mobile-shell__session-select").selectOption({ label: name });
+    await page.locator(".session-picker__trigger").click();
+    await page.locator(`.session-picker__item[data-session="${name}"]`).click();
     await page.waitForTimeout(1500);
 
     await page.locator(".mobile-input__textarea").fill("echo MOBILE_E2E_OK");
@@ -36,10 +37,10 @@ test.describe("mobile view", () => {
     await bindSecret(page);
     await page.reload();
 
-    // Wait for the option to actually appear (registry poll is 2s)
-    await expect(page.locator(`.mobile-shell__session-select option[value="${name}"]`))
+    await expect(page.locator(`.session-picker__item[data-session="${name}"]`))
       .toHaveCount(1, { timeout: 10_000 });
-    await page.locator(".mobile-shell__session-select").selectOption({ label: name });
+    await page.locator(".session-picker__trigger").click();
+    await page.locator(`.session-picker__item[data-session="${name}"]`).click();
     await page.waitForTimeout(1500);
 
     // Avoid using a marker substring inside the command text itself: the typed
@@ -85,10 +86,10 @@ test.describe("mobile view", () => {
     const newName = names.find((n) => n.startsWith("kb-cc-"));
     expect(newName, `expected a kb-cc-* session in ${JSON.stringify(names)}`).toBeTruthy();
 
-    // Front-end: select should auto-switch to the new session option.
-    await expect(page.locator(`.mobile-shell__session-select option[value="${newName!}"]`))
+    // Front-end: picker should auto-switch to the new session.
+    await expect(page.locator(`.session-picker__item[data-session="${newName!}"]`))
       .toHaveCount(1, { timeout: 10_000 });
-    await expect(page.locator(".mobile-shell__session-select")).toHaveValue(newName!, { timeout: 10_000 });
+    await expect(page.locator(".session-picker__name")).toHaveText(newName!, { timeout: 10_000 });
 
     ctx.tmuxE2E(["kill-session", "-t", newName!]);
   });
@@ -101,9 +102,10 @@ test.describe("mobile view", () => {
     await bindSecret(page);
     await page.reload();
 
-    await expect(page.locator(`.mobile-shell__session-select option[value="${name}"]`))
+    await expect(page.locator(`.session-picker__item[data-session="${name}"]`))
       .toHaveCount(1, { timeout: 10_000 });
-    await page.locator(".mobile-shell__session-select").selectOption({ label: name });
+    await page.locator(".session-picker__trigger").click();
+    await page.locator(`.session-picker__item[data-session="${name}"]`).click();
     await page.waitForTimeout(1500);
 
     // Open the drawer so the form is visible
@@ -134,13 +136,14 @@ test.describe("mobile view", () => {
     await bindSecret(page);
     await page.reload();
 
-    await expect(page.locator(`.mobile-shell__session-select option[value="${name}"]`))
+    await expect(page.locator(`.session-picker__item[data-session="${name}"]`))
       .toHaveCount(1, { timeout: 10_000 });
-    await page.locator(".mobile-shell__session-select").selectOption({ label: name });
+    await page.locator(".session-picker__trigger").click();
+    await page.locator(`.session-picker__item[data-session="${name}"]`).click();
     await page.waitForTimeout(800);
 
     // Tap ✎ → edit mode appears
-    await page.locator(".mobile-shell__rename").click();
+    await page.locator(".session-picker__rename").click();
     const input = page.locator(".mobile-shell__rename-input");
     await expect(input).toBeVisible();
     await expect(input).toHaveValue(name);
@@ -149,10 +152,10 @@ test.describe("mobile view", () => {
     await input.fill(renamed);
     await page.locator(".mobile-shell__rename-save").click();
 
-    // After SSE roundtrip the select repaints with the new name selected
-    await expect(page.locator(`.mobile-shell__session-select option[value="${renamed}"]`))
+    // After SSE roundtrip the picker repaints with the new name active
+    await expect(page.locator(`.session-picker__item[data-session="${renamed}"]`))
       .toHaveCount(1, { timeout: 5_000 });
-    await expect(page.locator(".mobile-shell__session-select")).toHaveValue(renamed);
+    await expect(page.locator(".session-picker__name")).toHaveText(renamed);
 
     try { ctx.tmuxE2E(["kill-session", "-t", renamed]); } catch { /* best-effort */ }
   });
@@ -165,17 +168,18 @@ test.describe("mobile view", () => {
     await bindSecret(page);
     await page.reload();
 
-    await expect(page.locator(`.mobile-shell__session-select option[value="${name}"]`))
+    await expect(page.locator(`.session-picker__item[data-session="${name}"]`))
       .toHaveCount(1, { timeout: 10_000 });
-    await page.locator(".mobile-shell__session-select").selectOption({ label: name });
+    await page.locator(".session-picker__trigger").click();
+    await page.locator(`.session-picker__item[data-session="${name}"]`).click();
     await page.waitForTimeout(800);
 
-    await page.locator(".mobile-shell__rename").click();
+    await page.locator(".session-picker__rename").click();
     await page.locator(".mobile-shell__rename-input").fill("ignored-value");
     await page.locator(".mobile-shell__rename-cancel").click();
 
-    await expect(page.locator(".mobile-shell__session-select")).toBeVisible();
-    await expect(page.locator(".mobile-shell__session-select")).toHaveValue(name);
+    await expect(page.locator(".session-picker__trigger")).toBeVisible();
+    await expect(page.locator(".session-picker__name")).toHaveText(name);
 
     ctx.tmuxE2E(["kill-session", "-t", name]);
   });
@@ -188,9 +192,10 @@ test.describe("mobile view", () => {
     await bindSecret(page);
     await page.reload();
 
-    await expect(page.locator(`.mobile-shell__session-select option[value="${name}"]`))
+    await expect(page.locator(`.session-picker__item[data-session="${name}"]`))
       .toHaveCount(1, { timeout: 10_000 });
-    await page.locator(".mobile-shell__session-select").selectOption({ label: name });
+    await page.locator(".session-picker__trigger").click();
+    await page.locator(`.session-picker__item[data-session="${name}"]`).click();
     await page.waitForTimeout(800);
 
     // The 📎 button + hidden <input type=file> are siblings inside the toolbar.

@@ -219,35 +219,101 @@ button.is-danger:hover { filter: brightness(1.15); }
   padding-right: var(--safe-right);
 }
 .mobile-shell__header {
-  padding: calc(var(--space-2) + var(--safe-top)) var(--space-2) var(--space-2);
+  padding: calc(var(--space-2) + var(--safe-top)) 0 0;
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-surface-hi);
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: 10;
+}
+
+/* Custom session picker — replaces native <select>. */
+.session-picker { position: relative; }
+.session-picker__trigger-row {
+  display: flex;
+  align-items: center;
+}
+.session-picker__trigger {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-}
-.mobile-shell__session-select {
-  flex: 1 1 auto;
-  min-width: 0;
-  background: var(--color-bg);
-  color: var(--color-text);
-  border: 1px solid var(--color-surface-hi);
-  border-radius: 8px;
   padding: var(--space-2) var(--space-3);
-  font: 14px var(--font-mono);
   min-height: var(--tap-min);
-  appearance: none;
-  -webkit-appearance: none;
-  /* Disclosure arrow drawn via background image, accent color. */
-  background-image: linear-gradient(45deg, transparent 50%, var(--color-accent) 50%),
-                    linear-gradient(135deg, var(--color-accent) 50%, transparent 50%);
-  background-position: calc(100% - 18px) center, calc(100% - 12px) center;
-  background-size: 6px 6px, 6px 6px;
-  background-repeat: no-repeat;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  font: 14px var(--font-mono);
+  color: var(--color-text);
+  text-align: left;
 }
+.session-picker__trigger:hover { background: var(--color-surface-hi); }
+.session-picker__trigger:active { background: var(--color-surface-active); }
+.session-picker__name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-picker__chevron {
+  flex: 0 0 auto;
+  color: var(--color-accent);
+  font-size: 16px;
+  transition: transform var(--duration-fast) var(--ease-out-expo);
+}
+.session-picker.is-open .session-picker__chevron { transform: rotate(180deg); }
+
+.session-picker__backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+}
+.session-picker.is-open .session-picker__backdrop { display: block; }
+
+.session-picker__dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 11;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-surface-hi);
+  border-bottom: 1px solid var(--color-surface-hi);
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height var(--duration-fast) var(--ease-out-expo);
+}
+.session-picker.is-open .session-picker__dropdown {
+  max-height: 50dvh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.session-picker__item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  min-height: var(--tap-min);
+  background: transparent;
+  border: none;
+  border-left: 3px solid transparent;
+  border-radius: 0;
+  font: 14px var(--font-mono);
+  color: var(--color-text);
+  text-align: left;
+  transition: background var(--duration-fast) var(--ease-out-expo);
+}
+.session-picker__item:active { background: var(--color-surface-hi); }
+.session-picker__item.is-active {
+  background: var(--color-surface-active);
+  border-left-color: var(--color-accent);
+}
+.session-picker__item.is-active .session-picker__item-name {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+.session-picker__item.is-external { opacity: 0.5; }
+.session-picker__item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-picker__item-meta { flex: 0 0 auto; color: var(--color-text-mute); font-size: 12px; }
 .mobile-shell__term-host { flex: 1; min-height: 0; padding: var(--space-1); overflow: hidden; }
 /* Collapsible composer drawer. Default closed: max-height collapses to 0,
    transition keeps the open/close motion smooth without layout thrash. */
@@ -263,23 +329,31 @@ button.is-danger:hover { filter: brightness(1.15); }
   max-height: 50dvh;
   border-top-color: var(--color-surface-hi);
 }
-/* Toolbar row: toggle button + special-keys scroller on the same line. */
+/* Two-row toolbar: Row 1 = toggle + quick-launch + function keys (scrollable).
+   Row 2 = arrow keys grid, extends into safe-area-inset-bottom. */
 .mobile-toolbar {
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-surface-hi);
+}
+.mobile-toolbar__row1 {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  padding-left: var(--space-2);
-  padding-right: var(--space-2);
-  background: var(--color-surface);
-  border-top: 1px solid var(--color-surface-hi);
-  padding-bottom: var(--safe-bottom);
+  padding: 0 var(--space-2);
 }
-.mobile-toolbar > .special-keys {
+.mobile-toolbar__row1 > .special-keys {
   flex: 1 1 auto;
   border-top: none;
   padding: var(--space-2) 0;
-  padding-bottom: var(--space-2);
   background: transparent;
+}
+.mobile-toolbar__row2 {
+  display: flex;
+  justify-content: center;
+  padding: 0 var(--space-2) var(--safe-bottom);
+  background: var(--color-bg);
 }
 .mobile-toolbar__toggle {
   flex: 0 0 auto;
@@ -307,15 +381,39 @@ button.is-danger:hover { filter: brightness(1.15); }
   cursor: pointer;
   margin-left: 0.4rem;
 }
-
 .mobile-toolbar__quick-launch:disabled {
   opacity: 0.35;
   cursor: not-allowed;
 }
-
 .mobile-toolbar__quick-launch:not(:disabled):active {
   background: rgba(255, 255, 255, 0.08);
 }
+
+/* Arrow keys: keyboard-style cross layout via CSS grid.
+   ↑ sits centered in row 1; ← ↓ → fill row 2. */
+.arrow-keys {
+  display: grid;
+  grid-template-columns: repeat(3, var(--tap-min));
+  grid-template-rows: repeat(2, calc(var(--tap-min) - 4px));
+  gap: 2px;
+}
+.arrow-keys__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: unset;
+  min-height: unset;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  background: var(--color-surface-hi);
+  border-radius: 6px;
+}
+.arrow-keys__btn:active { background: var(--color-accent-mute); }
+.arrow-up   { grid-column: 2; grid-row: 1; }
+.arrow-left  { grid-column: 1; grid-row: 2; }
+.arrow-down  { grid-column: 2; grid-row: 2; }
+.arrow-right { grid-column: 3; grid-row: 2; }
 .mobile-input {
   display: flex;
   flex-direction: column;
@@ -338,11 +436,9 @@ button.is-danger:hover { filter: brightness(1.15); }
   display: flex;
   gap: var(--space-1);
   padding: var(--space-2);
-  padding-bottom: calc(var(--space-2) + var(--safe-bottom));
   overflow-x: auto;
   background: var(--color-surface);
   border-top: 1px solid var(--color-surface-hi);
-  /* Smooth touch scroll on iOS; hide the scrollbar to keep the row compact. */
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
 }
@@ -354,25 +450,30 @@ button.is-danger:hover { filter: brightness(1.15); }
   padding: var(--space-2) var(--space-3);
   font-family: var(--font-mono);
 }
-/* Phones in landscape: header stays sticky but trims the top inset (no notch
-   on that axis). The term gets all available height. */
 @media (max-width: 720px) and (orientation: landscape) {
   .mobile-shell__header { padding-top: var(--space-1); }
   .mobile-input { padding: var(--space-1); }
   .special-keys { padding-block: var(--space-1); }
+  .mobile-toolbar__row2 { padding-bottom: var(--space-1); }
+  .arrow-keys { grid-template-rows: repeat(2, calc(var(--tap-min) - 8px)); }
 }
 
-/* --- Mobile: rename mode in header --- */
-.mobile-shell__rename {
+/* Session picker: rename button beside trigger */
+.session-picker__rename {
   flex: 0 0 auto;
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
   padding: 0 .5rem;
   font-size: 1rem;
   background: transparent;
   border: 1px solid currentColor;
   border-radius: .25rem;
-  color: inherit;
+  color: var(--color-text-mute);
   cursor: pointer;
 }
+.session-picker__rename:active { color: var(--color-accent); }
+
+/* --- Mobile: rename mode in header --- */
 .mobile-shell__rename-input {
   flex: 1 1 auto;
   min-width: 0;
