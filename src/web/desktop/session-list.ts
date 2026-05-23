@@ -1,5 +1,6 @@
 import type { SessionInfo, ServerEvent } from "@shared/protocol";
 import { subscribeEvents } from "../sse-client";
+import { onForegroundAfterIdle } from "../visibility-recovery";
 import { isGrammarOk } from "@shared/session-name";
 import { hubFetch } from "../hub-fetch";
 import { showToast } from "../ui/toast";
@@ -156,7 +157,8 @@ export function renderSessionList(parent: HTMLElement): SessionListHandle {
     render();
   };
 
-  const unsub = subscribeEvents(apply);
+  const sse = subscribeEvents(apply);
+  const cancelRecover = onForegroundAfterIdle(3000, () => sse.reconnect());
   return {
     el,
     onSelect: (fn) => { selectFn = fn; },
@@ -164,6 +166,6 @@ export function renderSessionList(parent: HTMLElement): SessionListHandle {
       activeName = name;
       refreshActiveMarker();
     },
-    destroy: () => { unsub(); el.remove(); },
+    destroy: () => { cancelRecover(); sse.stop(); el.remove(); },
   };
 }

@@ -6,6 +6,7 @@ import { renderInputBox } from "./input-box";
 import { renderSpecialKeysBar } from "./special-keys-bar";
 import { renderQuickLaunchButton } from "./quick-launch";
 import { showToast } from "../ui/toast";
+import { onForegroundAfterIdle } from "../visibility-recovery";
 
 export function renderMobile(root: HTMLElement): void {
   root.replaceChildren();
@@ -33,14 +34,15 @@ export function renderMobile(root: HTMLElement): void {
   // current attach finishes. This eliminates the overlap window in which
   // two attaches could race and xterm internal state could be torn between
   // dispose and new init.
-  let pendingTarget: string | null = null;
+  type PendingTarget = { name: string; force: boolean } | null;
+  let pendingTarget: PendingTarget = null;
   let runningTransition: Promise<void> | null = null;
 
   const runTransitions = async (): Promise<void> => {
     while (pendingTarget !== null) {
-      const target = pendingTarget;
+      const { name: target, force } = pendingTarget;
       pendingTarget = null;
-      if (target === openedName && term) continue;
+      if (!force && target === openedName && term) continue;
       if (!isGrammarOk(target)) continue;
 
       // Fully tear down the current term BEFORE constructing the new one.
@@ -69,7 +71,7 @@ export function renderMobile(root: HTMLElement): void {
 
       // While we were awaiting attachTerminal a newer pick may have arrived.
       // Discard this attach in favour of the next loop iteration.
-      if (pendingTarget !== null && pendingTarget !== target) {
+      if (pendingTarget !== null && pendingTarget.name !== target) {
         next.close();
         continue;
       }
@@ -77,8 +79,12 @@ export function renderMobile(root: HTMLElement): void {
     }
   };
 
-  const openSession = (name: string): void => {
-    pendingTarget = name;
+  const openSession = (name: string, opts?: { force?: boolean }): void => {
+    // force=true wins over force=false so a concurrent recovery doesn't
+    // get downgraded by a same-target user pick that's still in-queue.
+    const prevForce = pendingTarget?.name === name ? pendingTarget.force : false;
+    const force = (opts?.force ?? false) || prevForce;
+    pendingTarget = { name, force };
     if (!runningTransition) {
       runningTransition = runTransitions().finally(() => {
         runningTransition = null;
@@ -117,8 +123,18 @@ export function renderMobile(root: HTMLElement): void {
   let pendingQuickLaunchName: string | null = null;
   let pendingQuickLaunchTimer: ReturnType<typeof setTimeout> | null = null;
 
-  subscribeEvents((e: ServerEvent) => {
-    if (e.event === "snapshot") sessions = e.payload;
+  const sse = subscribeEvents((e: ServerEvent) => {
+    if (e.event === "snapshot") {
+      sessions = e.payload;
+      // Reconcile any pending quick-launch that arrived in the snapshot
+      // (e.g. SSE reconnect after foreground recovery missed the session_created event).
+      if (pendingQuickLaunchName !== null && sessions.some((s) => s.name === pendingQuickLaunchName)) {
+        const resolvedName = pendingQuickLaunchName;
+        pendingQuickLaunchName = null;
+        if (pendingQuickLaunchTimer) { clearTimeout(pendingQuickLaunchTimer); pendingQuickLaunchTimer = null; }
+        openSession(resolvedName);
+      }
+    }
     else if (e.event === "session_created") {
       sessions = [...sessions, e.payload];
       if (pendingQuickLaunchName === e.payload.name) {
@@ -139,6 +155,11 @@ export function renderMobile(root: HTMLElement): void {
       return;
     }
     refreshSelect();
+  });
+
+  onForegroundAfterIdle(3000, () => {
+    sse.reconnect();
+    if (openedName !== null) openSession(openedName, { force: true });
   });
 
   const send = (msg: ClientWsMessage) => { term?.send(msg); };
