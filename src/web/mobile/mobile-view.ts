@@ -158,8 +158,10 @@ export function renderMobile(root: HTMLElement): void {
   });
 
   onForegroundAfterIdle(3000, () => {
-    sse.reconnect();
-    if (openedName !== null) openSession(openedName, { force: true });
+    sse.reconnectIfNeeded();
+    if (openedName !== null && term && !term.isConnected) {
+      openSession(openedName, { force: true });
+    }
   });
 
   const send = (msg: ClientWsMessage) => { term?.send(msg); };

@@ -10,6 +10,7 @@ export type TerminalHandle = {
   el: HTMLElement;
   send: (msg: ClientWsMessage) => void;
   close: () => void;
+  readonly isConnected: boolean;
 };
 
 export type AttachOptions = {
@@ -287,6 +288,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   return {
     el,
     send,
+    get isConnected() {
+      return !disposed && ws.readyState === WebSocket.OPEN;
+    },
     close: () => {
       // Flip the guard BEFORE any teardown so straggler ws callbacks no
       // longer reach the disposed xterm. Without this, ws.close() schedules

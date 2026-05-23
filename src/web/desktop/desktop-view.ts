@@ -86,7 +86,7 @@ export function renderDesktop(root: HTMLElement): void {
   renderTemplateDrawer(left, (name) => { void open(name); });
 
   onForegroundAfterIdle(3000, () => {
-    if (activeName !== null) void open(activeName);
+    if (activeName !== null && term && !term.isConnected) void open(activeName);
   });
 
   // Expose imperative hooks for PWA manifest shortcuts. Bootstrap reads

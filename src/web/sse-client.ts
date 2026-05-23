@@ -3,6 +3,8 @@ import type { ServerEvent } from "@shared/protocol";
 export type SseHandle = {
   stop: () => void;
   reconnect: () => void;
+  reconnectIfNeeded: () => void;
+  isConnected: () => boolean;
 };
 
 export type SseDeps = {
@@ -50,6 +52,16 @@ export function subscribeEvents(
     connect();
   };
 
+  const ES_CLOSED = 2;
+  const isConnected = (): boolean =>
+    es !== null && es.readyState !== ES_CLOSED;
+
+  const reconnectIfNeeded = (): void => {
+    if (stopped) return;
+    if (isConnected()) return;
+    reconnect();
+  };
+
   connect();
-  return { stop, reconnect };
+  return { stop, reconnect, reconnectIfNeeded, isConnected };
 }
