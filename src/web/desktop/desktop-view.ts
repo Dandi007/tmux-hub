@@ -29,6 +29,7 @@ export function renderDesktop(root: HTMLElement): void {
   let activeName: string | null = null;
 
   const open = async (name: string) => {
+    activeName = null;
     if (term) { term.close(); term = null; }
     list.setActive(name);
     right.replaceChildren();
