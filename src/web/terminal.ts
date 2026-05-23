@@ -348,6 +348,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
 
   const enterReconnecting = (): void => {
     if (disposed) return;
+    console.log(`[tmux-hub] entering reconnect for ${opts.sessionName}`);
     stopHeartbeat();
     try { ws.onmessage = null; ws.onclose = null; ws.onerror = null; ws.close(); } catch {}
     predictions.length = 0;
@@ -369,28 +370,33 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   const attemptReconnect = async (): Promise<void> => {
     if (disposed) return;
     reconnectAttempt++;
+    console.log(`[tmux-hub] reconnect attempt ${reconnectAttempt}/${RECONNECT_MAX_RETRIES} for ${opts.sessionName}`);
     setState("reconnecting", reconnectAttempt);
 
     let url: string;
     try {
       await refreshSecret();
       url = await buildWsUrl();
-    } catch {
+    } catch (e) {
+      console.error(`[tmux-hub] reconnect: token/url build failed`, e);
       setState("dead");
       startDeadProbe();
       return;
     }
+    console.log(`[tmux-hub] reconnect: opening ws`);
 
     const socket = new WebSocket(url);
     socket.binaryType = "arraybuffer";
 
     const connectTimeout = setTimeout(() => {
+      console.warn(`[tmux-hub] reconnect: connect timeout (${HEARTBEAT_TIMEOUT_MS}ms)`);
       try { socket.close(); } catch {}
     }, HEARTBEAT_TIMEOUT_MS);
 
     socket.onopen = () => {
       clearTimeout(connectTimeout);
       if (disposed) { try { socket.close(); } catch {} return; }
+      console.log(`[tmux-hub] reconnect: ws open — success`);
       ws = socket;
       wireWs(ws);
       reconnectAttempt = 0;
@@ -403,17 +409,21 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       if (c > 0 && r > 0) queuedSend({ kind: "resize", cols: c, rows: r });
     };
 
-    socket.onclose = () => {
+    socket.onclose = (ev) => {
       clearTimeout(connectTimeout);
+      console.warn(`[tmux-hub] reconnect: ws closed code=${ev.code} reason=${ev.reason}`);
       if (disposed) return;
       if (reconnectAttempt >= RECONNECT_MAX_RETRIES) {
+        console.error(`[tmux-hub] reconnect: max retries reached — dead`);
         setState("dead");
         startDeadProbe();
       } else {
         scheduleReconnectAttempt();
       }
     };
-    socket.onerror = () => {};
+    socket.onerror = (ev) => {
+      console.error(`[tmux-hub] reconnect: ws error`, ev);
+    };
   };
 
   const startDeadProbe = (): void => {

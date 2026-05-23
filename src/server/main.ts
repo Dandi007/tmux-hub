@@ -148,6 +148,7 @@ console.error(`[tmux-hub] listening on http://${HUB_HOST}:${HUB_PORT}`);
 Bun.serve({
   hostname: HUB_HOST,
   port: HUB_PORT,
+  idleTimeout: 255,
   fetch(req, server) {
     const url = new URL(req.url);
     const wsMatch = url.pathname.match(/^\/ws\/sessions\/([^/]+)$/);
@@ -170,6 +171,7 @@ Bun.serve({
   websocket: {
     async open(ws: ServerWebSocket<WsData>) {
       const { sessionName, cols, rows } = ws.data;
+      console.error(`[tmux-hub] ws open: session=${sessionName} cols=${cols} rows=${rows}`);
       // Pin tmux window to client's actual fit() size BEFORE capturing snapshot.
       // Previously hardcoded to WINDOW_COLS/ROWS (200x50), which made xterm wrap
       // wide lines and accumulate scroll-offset (bug 2 root cause).
@@ -198,6 +200,7 @@ Bun.serve({
       ws.data.unsubs.push(unsubEvents, unsubData);
     },
     async close(ws: ServerWebSocket<WsData>) {
+      console.error(`[tmux-hub] ws close: session=${ws.data.sessionName}`);
       const { unsubs } = ws.data;
       for (const fn of unsubs) try { fn(); } catch {}
       ws.data.unsubs.length = 0;
