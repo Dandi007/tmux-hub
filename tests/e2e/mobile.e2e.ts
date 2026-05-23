@@ -184,6 +184,65 @@ test.describe("mobile view", () => {
     ctx.tmuxE2E(["kill-session", "-t", name]);
   });
 
+  test("kill button shows confirm modal — cancel keeps session alive", async ({ page, ctx }) => {
+    const name = uniqSession("shell");
+    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sleep 60"]);
+
+    await page.goto("/");
+    await bindSecret(page);
+    await page.reload();
+
+    await expect(page.locator(`.session-picker__item[data-session="${name}"]`))
+      .toHaveCount(1, { timeout: 10_000 });
+    await page.locator(".session-picker__trigger").click();
+    await page.locator(`.session-picker__item[data-session="${name}"]`).click();
+    await page.waitForTimeout(800);
+
+    await page.locator(".session-picker__kill").click();
+    await expect(page.locator(".modal-dialog")).toBeVisible();
+    await expect(page.locator(".modal-dialog__title")).toHaveText("关闭会话");
+
+    await page.locator(".modal-dialog__actions button:first-child").click();
+    await expect(page.locator(".modal-dialog")).not.toBeVisible();
+
+    const sessions = ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n");
+    expect(sessions).toContain(name);
+
+    ctx.tmuxE2E(["kill-session", "-t", name]);
+  });
+
+  test("kill button confirm destroys session and switches to next", async ({ page, ctx }) => {
+    const keep = uniqSession("keep");
+    const kill = uniqSession("kill");
+    ctx.tmuxE2E(["new-session", "-d", "-s", keep, "sh"]);
+    ctx.tmuxE2E(["new-session", "-d", "-s", kill, "sleep 60"]);
+
+    await page.goto("/");
+    await bindSecret(page);
+    await page.reload();
+
+    await expect(page.locator(`.session-picker__item[data-session="${kill}"]`))
+      .toHaveCount(1, { timeout: 10_000 });
+    await page.locator(".session-picker__trigger").click();
+    await page.locator(`.session-picker__item[data-session="${kill}"]`).click();
+    await page.waitForTimeout(800);
+
+    await page.locator(".session-picker__kill").click();
+    await expect(page.locator(".modal-dialog")).toBeVisible();
+    await page.locator(".modal-dialog__actions button.is-danger").click();
+
+    await expect(page.locator(`.session-picker__item[data-session="${kill}"]`))
+      .toHaveCount(0, { timeout: 10_000 });
+
+    const sessions = ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n");
+    expect(sessions).not.toContain(kill);
+    expect(sessions).toContain(keep);
+
+    await expect(page.locator(".session-picker__name")).toHaveText(keep, { timeout: 5_000 });
+
+    ctx.tmuxE2E(["kill-session", "-t", keep]);
+  });
+
   test("image attach: picker → upload → drawer opens + path appears in textarea", async ({ page, ctx }) => {
     const name = uniqSession("shell");
     ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
