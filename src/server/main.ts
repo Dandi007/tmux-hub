@@ -72,7 +72,11 @@ app.post("/templates/:id/run", async (c) => {
 });
 app.get("/events", () => sse.attach({ event: "snapshot", payload: registry.snapshot() }));
 app.route("/", buildSessionControlRoutes({ broadcasters }));
-app.route("/", buildImageUploadRoutes({ imageDir: IMAGE_DIR, maxBytes: MAX_IMAGE_BYTES }));
+app.route("/", buildImageUploadRoutes({
+  imageDir: IMAGE_DIR,
+  maxBytes: MAX_IMAGE_BYTES,
+  sessionExists: (name) => registry.snapshot().some((s) => s.name === name),
+}));
 app.get("/system/auth-check", async (c) => {
   const devBind = process.env.TMUX_HUB_DEV_BIND_SECRET === "1";
   const ident = c.var.identity;

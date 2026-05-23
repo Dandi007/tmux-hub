@@ -21,9 +21,13 @@ afterAll(async () => {
   await rm(tmpRoot, { recursive: true, force: true });
 });
 
-function makeApp() {
+function makeApp(opts?: { sessionExists?: (name: string) => boolean }) {
   const app = new Hono();
-  app.route("/", buildImageUploadRoutes({ imageDir: tmpRoot, maxBytes: 1024 * 1024 }));
+  app.route("/", buildImageUploadRoutes({
+    imageDir: tmpRoot,
+    maxBytes: 1024 * 1024,
+    sessionExists: opts?.sessionExists ?? (() => true),
+  }));
   return app;
 }
 
@@ -104,5 +108,24 @@ describe("POST /sessions/:name/upload-image", () => {
       method: "POST", body: new FormData(),
     }));
     expect(r.status).toBe(400);
+  });
+
+  test("rejects upload for non-existent session with 410", async () => {
+    const app = makeApp({ sessionExists: () => false });
+    const r = await app.fetch(new Request(`http://localhost/sessions/${SESSION}/upload-image`, {
+      method: "POST", body: multipart(pngFile()),
+    }));
+    expect(r.status).toBe(410);
+  });
+
+  test("bodyLimit rejects oversize Content-Length before parseBody (413)", async () => {
+    // Build a multipart body whose Content-Length will exceed the 1MB cap.
+    const big = new Uint8Array(2 * 1024 * 1024);
+    const bigFile = new File([big], "big.png", { type: "image/png" });
+    const app = makeApp();
+    const r = await app.fetch(new Request(`http://localhost/sessions/${SESSION}/upload-image`, {
+      method: "POST", body: multipart(bigFile),
+    }));
+    expect(r.status).toBe(413);
   });
 });
