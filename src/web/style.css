@@ -373,31 +373,29 @@ button.is-danger:hover { filter: brightness(1.15); }
   color: var(--color-bg);
 }
 
-/* Combined keys grid 6×2:
-   Row 1: Esc  Tab  ↑   ^C  ^D  (empty)
-   Row 2:  ←    ↓   →   ^Z      ↵       */
+/* Combined keys grid 6×2. Enter spans 2 cols × 2 rows at right edge.
+   Row 1: Esc  Tab  ↑   ^C  ┌─────┐
+   Row 2: ^Z    ←   ↓   →   │  ↵  │
+                             └─────┘  */
 .toolbar-keys {
   display: grid !important;
-  grid-template-columns: repeat(6, var(--tap-min));
+  grid-template-columns: repeat(4, var(--tap-min)) calc(var(--tap-min) * 2 + 2px);
   grid-template-rows: var(--tap-min) var(--tap-min);
   gap: 2px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   margin-left: auto;
   border-top: none;
-  padding: var(--space-1) 0;
+  padding: var(--space-1) var(--space-2) var(--space-1) 0;
   background: transparent;
 }
-.toolbar-keys::-webkit-scrollbar { display: none; }
 .toolbar-keys > button           { grid-row: 1; }
 .toolbar-keys > .tk-up     { grid-row: 1; grid-column: 3; }
-.toolbar-keys > .tk-left   { grid-row: 2; grid-column: 1; }
-.toolbar-keys > .tk-down   { grid-row: 2; grid-column: 2; }
-.toolbar-keys > .tk-right  { grid-row: 2; grid-column: 3; }
-.toolbar-keys > .tk-ctrlz  { grid-row: 2; grid-column: 4; }
-.toolbar-keys > .tk-enter  { grid-row: 2; grid-column: 6; }
+.toolbar-keys > .tk-enter  { grid-row: 1 / 3; grid-column: 5; font-size: 22px; background: var(--color-accent-mute); }
+.toolbar-keys > .tk-enter:active { background: var(--color-accent); }
+.toolbar-keys > .tk-ctrlz  { grid-row: 2; grid-column: 1; }
+.toolbar-keys > .tk-left   { grid-row: 2; grid-column: 2; }
+.toolbar-keys > .tk-down   { grid-row: 2; grid-column: 3; }
+.toolbar-keys > .tk-right  { grid-row: 2; grid-column: 4; }
 .mobile-input {
   display: flex;
   flex-direction: column;

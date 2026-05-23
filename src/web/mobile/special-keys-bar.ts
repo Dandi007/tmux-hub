@@ -7,7 +7,6 @@ const FUNC_KEYS_BEFORE: ReadonlyArray<readonly [string, string]> = [
 
 const FUNC_KEYS_AFTER: ReadonlyArray<readonly [string, string]> = [
   ["^C", "C-c"],
-  ["^D", "C-d"],
 ];
 
 function makeKey(
@@ -41,6 +40,14 @@ export function renderToolbarKeys(
     grid.appendChild(makeKey(label, name, send));
   }
 
+  const enter = makeKey("↵", "Enter", send);
+  enter.className = "tk-enter";
+  grid.appendChild(enter);
+
+  const ctrlz = makeKey("^Z", "C-z", send);
+  ctrlz.className = "tk-ctrlz";
+  grid.appendChild(ctrlz);
+
   const left = makeKey("←", "Left", send);
   left.className = "tk-left";
   grid.appendChild(left);
@@ -52,14 +59,6 @@ export function renderToolbarKeys(
   const right = makeKey("→", "Right", send);
   right.className = "tk-right";
   grid.appendChild(right);
-
-  const ctrlz = makeKey("^Z", "C-z", send);
-  ctrlz.className = "tk-ctrlz";
-  grid.appendChild(ctrlz);
-
-  const enter = makeKey("↵", "Enter", send);
-  enter.className = "tk-enter";
-  grid.appendChild(enter);
 
   parent.appendChild(grid);
   return grid;
