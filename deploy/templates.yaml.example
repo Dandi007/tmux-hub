@@ -9,8 +9,19 @@ templates:
   # Mobile quick-launch contract. id MUST match MOBILE_QUICK_LAUNCH_TEMPLATE_ID
   # exported from src/shared/protocol.ts. When you copy this file to
   # ~/.config/tmux-hub/templates.yaml, change cwd_choices to your knowledge-base
-  # absolute path and cmd to `cc -f` (or `zsh -ic 'cc -f; exec zsh'` if you want
-  # to keep the shell alive after Claude Code exits).
+  # absolute path and cmd to your launcher (e.g. `cc -f`).
+  #
+  # IMPORTANT — shell functions / aliases will NOT work as a bare cmd. tmux
+  # spawns commands via `/bin/sh -c <cmd>`, which does not load zsh/bash rc
+  # files, so any function or alias defined in your shell rc resolves to the
+  # wrong thing (or fails). For example, `cc` is commonly a zsh function;
+  # `/bin/sh -c "cc -f"` will fall through PATH and hit `/usr/bin/cc` (the
+  # macOS C compiler), pass an invalid `-f`, exit immediately, and the tmux
+  # session dies before the registry poll sees it.
+  #
+  # If cmd needs a shell function / alias, wrap it explicitly and keep a
+  # fallback shell so the session survives the inner command exiting:
+  #   cmd: "zsh -ic 'cc -f; exec zsh -i'"
   - id: kb-cc
     name: "知识库 cc"
     cwd_choices: ["~"]
