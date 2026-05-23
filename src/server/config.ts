@@ -48,9 +48,31 @@ export const WINDOW_ROWS = Number(process.env.TMUX_HUB_ROWS ?? 50);
 export const REGISTRY_INTERVAL_MS = Number(process.env.TMUX_HUB_REGISTRY_INTERVAL_MS ?? 2000);
 export const RING_BUFFER_BYTES = Number(process.env.TMUX_HUB_RING_BUFFER_BYTES ?? 1024 * 1024);
 export const CAPTURE_PANE_LINES = Number(process.env.TMUX_HUB_CAPTURE_LINES ?? 2000);
+const DEFAULT_MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+
+function parsePositiveInt(raw: string | undefined, fallback: number, envName: string): number {
+  if (raw === undefined) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    console.error(
+      `[tmux-hub] ${envName}=${raw} is not a positive finite number; falling back to ${fallback}`,
+    );
+    return fallback;
+  }
+  return parsed;
+}
+
 export const IMAGE_DIR = expandHome(
   process.env.TMUX_HUB_IMAGE_DIR ?? "~/Pictures/tmux-hub",
 );
-export const MAX_IMAGE_BYTES = Number(
-  process.env.TMUX_HUB_MAX_IMAGE_BYTES ?? 20 * 1024 * 1024,
+if (IMAGE_DIR.includes(" ")) {
+  console.error(
+    `[tmux-hub] WARNING: TMUX_HUB_IMAGE_DIR contains spaces (${IMAGE_DIR}); ` +
+    `injected paths will be split by TUI parsers like claude-code. Pick a space-free path.`,
+  );
+}
+export const MAX_IMAGE_BYTES = parsePositiveInt(
+  process.env.TMUX_HUB_MAX_IMAGE_BYTES,
+  DEFAULT_MAX_IMAGE_BYTES,
+  "TMUX_HUB_MAX_IMAGE_BYTES",
 );

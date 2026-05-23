@@ -41,4 +41,14 @@ describe("IMAGE_DIR / MAX_IMAGE_BYTES env resolution", () => {
     const c = readConsts({ TMUX_HUB_MAX_IMAGE_BYTES: String(50 * 1024 * 1024) });
     expect(c.MAX_IMAGE_BYTES).toBe(50 * 1024 * 1024);
   });
+
+  test("MAX_IMAGE_BYTES falls back on non-numeric env", () => {
+    const c = readConsts({ TMUX_HUB_MAX_IMAGE_BYTES: "20MB" });
+    expect(c.MAX_IMAGE_BYTES).toBe(20 * 1024 * 1024);
+  });
+
+  test("MAX_IMAGE_BYTES falls back on negative env", () => {
+    const c = readConsts({ TMUX_HUB_MAX_IMAGE_BYTES: "-1" });
+    expect(c.MAX_IMAGE_BYTES).toBe(20 * 1024 * 1024);
+  });
 });
