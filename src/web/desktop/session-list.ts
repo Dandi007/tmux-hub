@@ -158,7 +158,7 @@ export function renderSessionList(parent: HTMLElement): SessionListHandle {
   };
 
   const sse = subscribeEvents(apply);
-  const cancelRecover = onForegroundAfterIdle(3000, () => sse.reconnect());
+  const cancelRecover = onForegroundAfterIdle(3000, () => sse.reconnectIfNeeded());
   return {
     el,
     onSelect: (fn) => { selectFn = fn; },

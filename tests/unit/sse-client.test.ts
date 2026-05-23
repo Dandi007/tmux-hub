@@ -3,15 +3,22 @@ import { subscribeEvents } from "../../src/web/sse-client";
 
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 2;
+  readonly CONNECTING = 0;
+  readonly OPEN = 1;
+  readonly CLOSED = 2;
   url: string;
   closed = false;
+  readyState = 1; // OPEN
   onmessage: ((e: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
   constructor(url: string) {
     this.url = url;
     FakeEventSource.instances.push(this);
   }
-  close(): void { this.closed = true; }
+  close(): void { this.closed = true; this.readyState = 2; }
 }
 
 function freshFake(): typeof EventSource {
@@ -87,6 +94,42 @@ describe("sse-client", () => {
     FakeEventSource.instances[1]!.onerror?.();
     await new Promise((r) => setTimeout(r, 1500));
     expect(FakeEventSource.instances.length).toBe(2);
+  });
+
+  test("isConnected() returns true when ES is open", () => {
+    const ES = freshFake();
+    const handle = subscribeEvents(() => {}, { EventSourceCtor: ES });
+    expect(handle.isConnected()).toBe(true);
+    handle.stop();
+    expect(handle.isConnected()).toBe(false);
+  });
+
+  test("reconnectIfNeeded() skips reconnect when ES is still open", () => {
+    const ES = freshFake();
+    const handle = subscribeEvents(() => {}, { EventSourceCtor: ES });
+    expect(FakeEventSource.instances.length).toBe(1);
+
+    handle.reconnectIfNeeded();
+
+    expect(FakeEventSource.instances.length).toBe(1);
+    expect(FakeEventSource.instances[0]!.closed).toBe(false);
+    handle.stop();
+  });
+
+  test("reconnectIfNeeded() reconnects when ES is closed", () => {
+    const ES = freshFake();
+    const handle = subscribeEvents(() => {}, { EventSourceCtor: ES });
+    const first = FakeEventSource.instances[0]!;
+
+    // Simulate the ES being closed (e.g. network drop)
+    first.close();
+    expect(handle.isConnected()).toBe(false);
+
+    handle.reconnectIfNeeded();
+
+    expect(FakeEventSource.instances.length).toBe(2);
+    expect(FakeEventSource.instances[1]!.closed).toBe(false);
+    handle.stop();
   });
 
   test("onmessage parses JSON ServerEvent payloads", () => {
