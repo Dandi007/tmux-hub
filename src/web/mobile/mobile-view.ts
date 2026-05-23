@@ -82,7 +82,8 @@ export function renderMobile(root: HTMLElement): void {
   const openSession = (name: string, opts?: { force?: boolean }): void => {
     // force=true wins over force=false so a concurrent recovery doesn't
     // get downgraded by a same-target user pick that's still in-queue.
-    const force = (opts?.force ?? false) || (pendingTarget?.force ?? false);
+    const prevForce = pendingTarget?.name === name ? pendingTarget.force : false;
+    const force = (opts?.force ?? false) || prevForce;
     pendingTarget = { name, force };
     if (!runningTransition) {
       runningTransition = runTransitions().finally(() => {
@@ -123,7 +124,17 @@ export function renderMobile(root: HTMLElement): void {
   let pendingQuickLaunchTimer: ReturnType<typeof setTimeout> | null = null;
 
   const sse = subscribeEvents((e: ServerEvent) => {
-    if (e.event === "snapshot") sessions = e.payload;
+    if (e.event === "snapshot") {
+      sessions = e.payload;
+      // Reconcile any pending quick-launch that arrived in the snapshot
+      // (e.g. SSE reconnect after foreground recovery missed the session_created event).
+      if (pendingQuickLaunchName !== null && sessions.some((s) => s.name === pendingQuickLaunchName)) {
+        const resolvedName = pendingQuickLaunchName;
+        pendingQuickLaunchName = null;
+        if (pendingQuickLaunchTimer) { clearTimeout(pendingQuickLaunchTimer); pendingQuickLaunchTimer = null; }
+        openSession(resolvedName);
+      }
+    }
     else if (e.event === "session_created") {
       sessions = [...sessions, e.payload];
       if (pendingQuickLaunchName === e.payload.name) {
