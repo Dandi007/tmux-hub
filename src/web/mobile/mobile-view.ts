@@ -197,17 +197,16 @@ export function renderMobile(root: HTMLElement): void {
   const inputForm = renderInputBox(drawer, send);
   root.appendChild(drawer);
 
-  const toolbar = document.createElement("div");
-  toolbar.className = "mobile-toolbar";
-  root.appendChild(toolbar);
+  // Action buttons go in header alongside session picker.
+  const actionRow = picker.actionRow;
 
   const toggleBtn = document.createElement("button");
   toggleBtn.type = "button";
-  toggleBtn.className = "mobile-toolbar__toggle";
+  toggleBtn.className = "session-picker__action";
   toggleBtn.setAttribute("aria-expanded", "false");
   toggleBtn.setAttribute("aria-label", "切换多行输入");
   toggleBtn.textContent = "✎";
-  toolbar.appendChild(toggleBtn);
+  actionRow.appendChild(toggleBtn);
 
   let drawerOpen = false;
   const setDrawer = (open: boolean) => {
@@ -224,7 +223,7 @@ export function renderMobile(root: HTMLElement): void {
   inputForm.addEventListener("submit", () => { setDrawer(false); });
 
   renderQuickLaunchButton({
-    parent: toolbar,
+    parent: actionRow,
     onStarted: (name) => {
       if (sessions.some((s) => s.name === name)) {
         openSession(name);
@@ -243,11 +242,16 @@ export function renderMobile(root: HTMLElement): void {
   });
 
   renderImageAttachButton({
-    parent: toolbar,
+    parent: actionRow,
     getSession: () => openedName,
     getTextarea: () => drawer.querySelector<HTMLTextAreaElement>(".mobile-input__textarea"),
     openDrawer: () => setDrawer(true),
   });
+
+  // Bottom toolbar: keys grid only.
+  const toolbar = document.createElement("div");
+  toolbar.className = "mobile-toolbar";
+  root.appendChild(toolbar);
 
   renderToolbarKeys(toolbar, send);
 

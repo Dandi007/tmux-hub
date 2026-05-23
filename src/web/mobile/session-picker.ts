@@ -11,6 +11,7 @@ function relativeTime(ts: number): string {
 
 export type SessionPickerHandle = {
   root: HTMLElement;
+  actionRow: HTMLElement;
   refresh: (sessions: SessionInfo[], activeName: string | null) => void;
   setActive: (name: string) => void;
   getValue: () => string | null;
@@ -133,6 +134,7 @@ export function renderSessionPicker(
 
   return {
     root,
+    actionRow: triggerRow,
     refresh,
     setActive,
     getValue: () => activeName,
