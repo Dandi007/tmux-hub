@@ -101,7 +101,7 @@ export function renderDesktop(root: HTMLElement): void {
       attachBtn.textContent = "...";
       try {
         const path = await uploadImageForSession(name, file);
-        if (currentSession !== name) {
+        if (activeName !== name) {
           showToast(`已切到其他 session，图片 ${path} 未注入`, "error");
         } else {
           term?.send({ kind: "keys", literal: " " + path + " " });
@@ -126,12 +126,12 @@ export function renderDesktop(root: HTMLElement): void {
     e.preventDefault();
     e.stopPropagation();
     const file = imageItem.getAsFile();
-    if (!file || !currentSession) return;
-    const sessionAtPaste = currentSession;
+    if (!file || !activeName) return;
+    const sessionAtPaste = activeName;
     void (async () => {
       try {
         const path = await uploadImageForSession(sessionAtPaste, file);
-        if (currentSession !== sessionAtPaste) {
+        if (activeName !== sessionAtPaste) {
           showToast(`已切到其他 session，图片 ${path} 未注入`, "error");
         } else {
           term?.send({ kind: "keys", literal: " " + path + " " });
