@@ -4,6 +4,7 @@ import { attachTerminal, type TerminalHandle } from "../terminal";
 import { confirmModal } from "../ui/confirm-modal";
 import { showToast } from "../ui/toast";
 import { hubFetch } from "../hub-fetch";
+import { onForegroundAfterIdle } from "../visibility-recovery";
 
 function button(label: string, extraClass = ""): HTMLButtonElement {
   const b = document.createElement("button");
@@ -25,6 +26,7 @@ export function renderDesktop(root: HTMLElement): void {
 
   const list = renderSessionList(left);
   let term: TerminalHandle | null = null;
+  let activeName: string | null = null;
 
   const open = async (name: string) => {
     if (term) { term.close(); term = null; }
@@ -46,6 +48,7 @@ export function renderDesktop(root: HTMLElement): void {
 
     try {
       term = await attachTerminal({ sessionName: name, parent: host });
+      activeName = name;
     } catch (e) {
       showToast(`attach 失败: ${(e as Error).message}`, "error");
       return;
@@ -79,6 +82,10 @@ export function renderDesktop(root: HTMLElement): void {
 
   list.onSelect((name) => { void open(name); });
   renderTemplateDrawer(left, (name) => { void open(name); });
+
+  onForegroundAfterIdle(3000, () => {
+    if (activeName !== null) void open(activeName);
+  });
 
   // Expose imperative hooks for PWA manifest shortcuts. Bootstrap reads
   // ?action=new-session / ?focus=session-list and calls into these.
