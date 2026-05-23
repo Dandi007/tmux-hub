@@ -225,9 +225,13 @@ button.is-danger:hover { filter: brightness(1.15); }
   position: sticky;
   top: 0;
   z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 .mobile-shell__session-select {
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   background: var(--color-bg);
   color: var(--color-text);
   border: 1px solid var(--color-surface-hi);
