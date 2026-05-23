@@ -4,8 +4,6 @@ export const IMAGE_MIME_WHITELIST_CLIENT = [
   "image/png", "image/jpeg", "image/gif", "image/webp", "image/heic",
 ] as const;
 
-export const MAX_IMAGE_BYTES_CLIENT = 20 * 1024 * 1024;
-
 export const IMAGE_ACCEPT_ATTR =
   "image/png,image/jpeg,image/gif,image/webp,image/heic";
 
@@ -20,11 +18,9 @@ export async function uploadImageForSession(
   file: File,
   fetcher: Fetcher = hubFetch,
 ): Promise<string> {
-  if (file.size > MAX_IMAGE_BYTES_CLIENT) {
-    throw new Error(
-      `file too large: ${(file.size / 1024 / 1024).toFixed(1)}MB > ${MAX_IMAGE_BYTES_CLIENT / 1024 / 1024}MB cap`,
-    );
-  }
+  // Size is enforced server-side (TMUX_HUB_MAX_IMAGE_BYTES env). Client used to
+  // pre-check, but that hardcoded the limit and drifted from the deployer's
+  // config. Server's 413 surfaces via toast on failure.
   if (!isImageFile(file)) {
     throw new Error(`unsupported mime: ${file.type || "(unknown)"}`);
   }

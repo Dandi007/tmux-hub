@@ -1,7 +1,6 @@
 import { describe, test, expect, mock } from "bun:test";
 import {
   IMAGE_MIME_WHITELIST_CLIENT,
-  MAX_IMAGE_BYTES_CLIENT,
   isImageFile,
   uploadImageForSession,
 } from "../../src/web/upload/image-upload";
@@ -28,13 +27,6 @@ describe("isImageFile", () => {
 });
 
 describe("uploadImageForSession", () => {
-  test("rejects oversized file without calling fetcher", async () => {
-    const big = new File([new Uint8Array(MAX_IMAGE_BYTES_CLIENT + 1)], "big.png", { type: "image/png" });
-    const fetcher = mock(async () => new Response("{}"));
-    await expect(uploadImageForSession("s", big, fetcher)).rejects.toThrow(/too large/i);
-    expect(fetcher).not.toHaveBeenCalled();
-  });
-
   test("rejects bad mime without calling fetcher", async () => {
     const bad = new File([new Uint8Array(10)], "x.txt", { type: "text/plain" });
     const fetcher = mock(async () => new Response("{}"));
