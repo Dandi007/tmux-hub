@@ -8,11 +8,12 @@ import { SseHub } from "./sse";
 import { BroadcasterRegistry } from "./output-broadcaster";
 import { InputRouter, HubError } from "./input-router";
 import { pinViewport } from "./viewport-pinner";
-import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS } from "./config";
+import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS, IMAGE_DIR, MAX_IMAGE_BYTES } from "./config";
 import { loadOrCreateSecret, safeEqual } from "./secret";
 import { authGate } from "./auth";
 import { isGrammarOk } from "../shared/session-name";
 import { buildSessionControlRoutes } from "./session-control";
+import { buildImageUploadRoutes } from "./image-upload";
 import { TemplateRunner, TemplateError } from "./template-runner";
 
 const SECRET = loadOrCreateSecret();
@@ -71,6 +72,7 @@ app.post("/templates/:id/run", async (c) => {
 });
 app.get("/events", () => sse.attach({ event: "snapshot", payload: registry.snapshot() }));
 app.route("/", buildSessionControlRoutes({ broadcasters }));
+app.route("/", buildImageUploadRoutes({ imageDir: IMAGE_DIR, maxBytes: MAX_IMAGE_BYTES }));
 app.get("/system/auth-check", async (c) => {
   const devBind = process.env.TMUX_HUB_DEV_BIND_SECRET === "1";
   const ident = c.var.identity;
@@ -123,6 +125,7 @@ if (SERVE_STATIC) {
   });
 }
 console.error(`[tmux-hub] static dir ${WEB_DIST} ${SERVE_STATIC ? "(serving)" : "(not built)"}`);
+console.error(`[tmux-hub] image dir: ${IMAGE_DIR}`);
 
 type WsData = {
   sessionName: string;
