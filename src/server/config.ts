@@ -48,3 +48,9 @@ export const WINDOW_ROWS = Number(process.env.TMUX_HUB_ROWS ?? 50);
 export const REGISTRY_INTERVAL_MS = Number(process.env.TMUX_HUB_REGISTRY_INTERVAL_MS ?? 2000);
 export const RING_BUFFER_BYTES = Number(process.env.TMUX_HUB_RING_BUFFER_BYTES ?? 1024 * 1024);
 export const CAPTURE_PANE_LINES = Number(process.env.TMUX_HUB_CAPTURE_LINES ?? 2000);
+export const IMAGE_DIR = expandHome(
+  process.env.TMUX_HUB_IMAGE_DIR ?? "~/Pictures/tmux-hub",
+);
+export const MAX_IMAGE_BYTES = Number(
+  process.env.TMUX_HUB_MAX_IMAGE_BYTES ?? 20 * 1024 * 1024,
+);
