@@ -5,3 +5,13 @@ templates:
     name: "新建 zsh"
     cwd_choices: ["~"]
     cmd: "zsh"
+
+  # Mobile quick-launch contract. id MUST match MOBILE_QUICK_LAUNCH_TEMPLATE_ID
+  # exported from src/shared/protocol.ts. When you copy this file to
+  # ~/.config/tmux-hub/templates.yaml, change cwd_choices to your knowledge-base
+  # absolute path and cmd to `cc -f` (or `zsh -ic 'cc -f; exec zsh'` if you want
+  # to keep the shell alive after Claude Code exits).
+  - id: kb-cc
+    name: "知识库 cc"
+    cwd_choices: ["~"]
+    cmd: "sh"
