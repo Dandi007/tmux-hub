@@ -91,4 +91,36 @@ test.describe("mobile view", () => {
 
     ctx.tmuxE2E(["kill-session", "-t", newName!]);
   });
+
+  test("empty textarea submit sends a bare Enter to the pane", async ({ page, ctx }) => {
+    const name = uniqSession("shell");
+    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
+
+    await page.goto("/");
+    await bindSecret(page);
+    await page.reload();
+
+    await expect(page.locator(`.mobile-shell__session-select option[value="${name}"]`))
+      .toHaveCount(1, { timeout: 10_000 });
+    await page.locator(".mobile-shell__session-select").selectOption({ label: name });
+    await page.waitForTimeout(1500);
+
+    // Open the drawer so the form is visible
+    await page.locator(".mobile-toolbar__toggle").click();
+
+    // textarea is empty; click submit
+    await page.locator(".mobile-input button[type=submit]").evaluate((btn: HTMLButtonElement) => btn.click());
+    await page.waitForTimeout(700);
+
+    // After Enter into sh prompt: a fresh prompt line appears.
+    // We assert that capture-pane contains 2+ shell prompts (the one we started
+    // with + the one after Enter). Match a literal `$` since macOS sh emits
+    // `sh-3.2$\n` (no trailing space) while bash emits `bash-5.x$ ` — counting
+    // `$` is the most portable signal.
+    const captured = ctx.tmuxE2E(["capture-pane", "-p", "-t", name]);
+    const promptOccurrences = (captured.match(/\$/g) ?? []).length;
+    expect(promptOccurrences).toBeGreaterThanOrEqual(2);
+
+    ctx.tmuxE2E(["kill-session", "-t", name]);
+  });
 });
