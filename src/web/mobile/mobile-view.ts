@@ -10,6 +10,7 @@ import { renderSessionPicker } from "./session-picker";
 import { enableWakeLock } from "./wake-lock";
 import { showToast } from "../ui/toast";
 import { onForegroundAfterIdle } from "../visibility-recovery";
+import { createConnectionStatus } from "../ui/connection-status";
 import { renameSession } from "../shared/rename-controller";
 
 export function renderMobile(root: HTMLElement): void {
@@ -25,6 +26,10 @@ export function renderMobile(root: HTMLElement): void {
   const termHost = document.createElement("div");
   termHost.className = "mobile-shell__term-host";
   root.appendChild(termHost);
+
+  const connStatus = createConnectionStatus(true);
+  connStatus.onRetry(() => { term?.retry(); });
+  termHost.appendChild(connStatus.el);
 
   let term: TerminalHandle | null = null;
   let sessions: SessionInfo[] = [];
@@ -64,6 +69,9 @@ export function renderMobile(root: HTMLElement): void {
         continue;
       }
       term = next;
+      next.onStateChange((state, attempt) => {
+        connStatus.update(state, attempt);
+      });
     }
   };
 
@@ -185,9 +193,7 @@ export function renderMobile(root: HTMLElement): void {
 
   onForegroundAfterIdle(3000, () => {
     sse.reconnectIfNeeded();
-    if (openedName !== null && term && !term.isConnected) {
-      openSession(openedName, { force: true });
-    }
+    term?.probeNow();
   });
 
   const send = (msg: ClientWsMessage) => { term?.send(msg); };
