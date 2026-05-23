@@ -13,6 +13,12 @@ async function getSecret(): Promise<string | null> {
   return body.secret;
 }
 
+export async function refreshSecret(): Promise<string | null> {
+  cached = null;
+  if (typeof sessionStorage !== "undefined") sessionStorage.removeItem("hub.secret");
+  return getSecret();
+}
+
 export async function hubFetch(input: string, init: RequestInit = {}): Promise<Response> {
   const secret = await getSecret();
   const headers = new Headers(init.headers ?? {});
