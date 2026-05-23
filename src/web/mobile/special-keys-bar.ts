@@ -8,49 +8,45 @@ const FUNC_KEYS: ReadonlyArray<readonly [string, string]> = [
   ["^Z", "C-z"],
 ];
 
-const ARROW_KEYS: ReadonlyArray<readonly [label: string, name: string, cls: string]> = [
-  ["↑", "Up", "arrow-up"],
-  ["←", "Left", "arrow-left"],
-  ["↓", "Down", "arrow-down"],
-  ["→", "Right", "arrow-right"],
-];
-
 function makeKey(
   label: string,
   name: string,
   send: (m: ClientWsMessage) => void,
-  extraClass?: string,
 ): HTMLButtonElement {
   const b = document.createElement("button");
   b.type = "button";
   b.textContent = label;
-  if (extraClass) b.className = extraClass;
   b.addEventListener("click", () => send({ kind: "key", name }));
   return b;
 }
 
-export function renderFunctionKeys(
-  parent: HTMLElement,
-  send: (m: ClientWsMessage) => void,
-): HTMLElement {
-  const bar = document.createElement("div");
-  bar.className = "special-keys";
-  for (const [label, name] of FUNC_KEYS) {
-    bar.appendChild(makeKey(label, name, send));
-  }
-  parent.appendChild(bar);
-  return bar;
-}
-
-export function renderArrowKeys(
+export function renderToolbarKeys(
   parent: HTMLElement,
   send: (m: ClientWsMessage) => void,
 ): HTMLElement {
   const grid = document.createElement("div");
-  grid.className = "arrow-keys";
-  for (const [label, name, cls] of ARROW_KEYS) {
-    grid.appendChild(makeKey(label, name, send, `arrow-keys__btn ${cls}`));
+  grid.className = "special-keys toolbar-keys";
+
+  for (const [label, name] of FUNC_KEYS) {
+    grid.appendChild(makeKey(label, name, send));
   }
+
+  const up = makeKey("↑", "Up", send);
+  up.className = "tk-up";
+  grid.appendChild(up);
+
+  const left = makeKey("←", "Left", send);
+  left.className = "tk-left";
+  grid.appendChild(left);
+
+  const down = makeKey("↓", "Down", send);
+  down.className = "tk-down";
+  grid.appendChild(down);
+
+  const right = makeKey("→", "Right", send);
+  right.className = "tk-right";
+  grid.appendChild(right);
+
   parent.appendChild(grid);
   return grid;
 }

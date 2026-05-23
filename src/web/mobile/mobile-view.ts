@@ -3,7 +3,7 @@ import { subscribeEvents } from "../sse-client";
 import type { SessionInfo, ServerEvent, ClientWsMessage } from "@shared/protocol";
 import { isGrammarOk } from "@shared/session-name";
 import { renderInputBox } from "./input-box";
-import { renderFunctionKeys, renderArrowKeys } from "./special-keys-bar";
+import { renderToolbarKeys } from "./special-keys-bar";
 import { renderQuickLaunchButton } from "./quick-launch";
 import { renderImageAttachButton } from "./image-attach";
 import { renderSessionPicker } from "./session-picker";
@@ -201,17 +201,13 @@ export function renderMobile(root: HTMLElement): void {
   toolbar.className = "mobile-toolbar";
   root.appendChild(toolbar);
 
-  const left = document.createElement("div");
-  left.className = "mobile-toolbar__left";
-  toolbar.appendChild(left);
-
   const toggleBtn = document.createElement("button");
   toggleBtn.type = "button";
   toggleBtn.className = "mobile-toolbar__toggle";
   toggleBtn.setAttribute("aria-expanded", "false");
   toggleBtn.setAttribute("aria-label", "切换多行输入");
   toggleBtn.textContent = "✎";
-  left.appendChild(toggleBtn);
+  toolbar.appendChild(toggleBtn);
 
   let drawerOpen = false;
   const setDrawer = (open: boolean) => {
@@ -228,7 +224,7 @@ export function renderMobile(root: HTMLElement): void {
   inputForm.addEventListener("submit", () => { setDrawer(false); });
 
   renderQuickLaunchButton({
-    parent: left,
+    parent: toolbar,
     onStarted: (name) => {
       if (sessions.some((s) => s.name === name)) {
         openSession(name);
@@ -247,15 +243,13 @@ export function renderMobile(root: HTMLElement): void {
   });
 
   renderImageAttachButton({
-    parent: left,
+    parent: toolbar,
     getSession: () => openedName,
     getTextarea: () => drawer.querySelector<HTMLTextAreaElement>(".mobile-input__textarea"),
     openDrawer: () => setDrawer(true),
   });
 
-  renderFunctionKeys(left, send);
-
-  renderArrowKeys(toolbar, send);
+  renderToolbarKeys(toolbar, send);
 
   window.__tmuxHub = {
     ...(window.__tmuxHub ?? {}),

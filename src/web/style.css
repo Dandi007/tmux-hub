@@ -329,30 +329,16 @@ button.is-danger:hover { filter: brightness(1.15); }
   max-height: 50dvh;
   border-top-color: var(--color-surface-hi);
 }
-/* Toolbar: left section (scrollable func keys) + right arrow cluster.
-   Arrow grid is 3×2 with uniform button sizes; left section vertically
-   centers against the first grid row so func keys sit level with ↑. */
+/* Toolbar: action buttons + scrollable keys grid (func keys + arrows).
+   All keys live in one scrollable container so they scroll as a unit. */
 .mobile-toolbar {
-  display: flex;
-  align-items: flex-start;
-  background: var(--color-surface);
-  border-top: 1px solid var(--color-surface-hi);
-  padding-bottom: var(--safe-bottom);
-}
-.mobile-toolbar__left {
-  flex: 1 1 auto;
-  min-width: 0;
   display: flex;
   align-items: center;
   gap: var(--space-1);
   padding: 0 var(--space-2);
-  min-height: var(--tap-min);
-}
-.mobile-toolbar__left > .special-keys {
-  flex: 1 1 auto;
-  border-top: none;
-  padding: var(--space-2) 0;
-  background: transparent;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-surface-hi);
+  padding-bottom: var(--safe-bottom);
 }
 .mobile-toolbar__toggle {
   flex: 0 0 auto;
@@ -388,33 +374,27 @@ button.is-danger:hover { filter: brightness(1.15); }
   background: rgba(255, 255, 255, 0.08);
 }
 
-/* Arrow keys: 3×2 grid with same-size buttons. ↑ in top-center,
-   ← ↓ → in bottom row. ↑ and ↓ vertically aligned. */
-.arrow-keys {
-  flex: 0 0 auto;
-  display: grid;
-  grid-template-columns: repeat(3, var(--tap-min));
+/* Combined keys grid: func keys + arrows in one scrollable unit.
+   7 columns (5 func + ↑ col + → col), 2 rows. ↓ sits under ↑. */
+.toolbar-keys {
+  display: grid !important;
+  grid-template-columns: repeat(7, var(--tap-min));
   grid-template-rows: var(--tap-min) var(--tap-min);
   gap: 2px;
-  padding: 0 var(--space-2) 0 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  flex: 1 1 auto;
+  border-top: none;
+  padding: var(--space-1) 0;
+  background: transparent;
 }
-.arrow-keys__btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: unset;
-  min-height: unset;
-  padding: 0;
-  font-family: var(--font-mono);
-  font-size: 16px;
-  background: var(--color-surface-hi);
-  border-radius: 6px;
-}
-.arrow-keys__btn:active { background: var(--color-accent-mute); }
-.arrow-up    { grid-column: 2; grid-row: 1; }
-.arrow-left  { grid-column: 1; grid-row: 2; }
-.arrow-down  { grid-column: 2; grid-row: 2; }
-.arrow-right { grid-column: 3; grid-row: 2; }
+.toolbar-keys::-webkit-scrollbar { display: none; }
+.toolbar-keys > button { grid-row: 1; }
+.tk-up    { grid-row: 1; grid-column: 6; }
+.tk-left  { grid-row: 2; grid-column: 5; }
+.tk-down  { grid-row: 2; grid-column: 6; }
+.tk-right { grid-row: 2; grid-column: 7; }
 .mobile-input {
   display: flex;
   flex-direction: column;
@@ -455,7 +435,7 @@ button.is-danger:hover { filter: brightness(1.15); }
   .mobile-shell__header { padding-top: var(--space-1); }
   .mobile-input { padding: var(--space-1); }
   .special-keys { padding-block: var(--space-1); }
-  .arrow-keys { grid-template-rows: calc(var(--tap-min) - 4px) calc(var(--tap-min) - 4px); }
+  .toolbar-keys { grid-template-rows: calc(var(--tap-min) - 4px) calc(var(--tap-min) - 4px); }
 }
 
 /* Session picker: rename button beside trigger */
