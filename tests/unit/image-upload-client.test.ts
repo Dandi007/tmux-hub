@@ -8,7 +8,7 @@ import {
 describe("IMAGE_MIME_WHITELIST_CLIENT", () => {
   test("matches server-side whitelist", () => {
     expect(new Set(IMAGE_MIME_WHITELIST_CLIENT)).toEqual(
-      new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/heic"]),
+      new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/heic", "image/heif"]),
     );
   });
 });

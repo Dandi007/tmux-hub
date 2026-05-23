@@ -10,6 +10,7 @@ export const IMAGE_MIME_WHITELIST = [
   "image/gif",
   "image/webp",
   "image/heic",
+  "image/heif",
 ] as const;
 
 export type ImageMime = (typeof IMAGE_MIME_WHITELIST)[number];
@@ -20,6 +21,7 @@ const MIME_TO_EXT: Record<ImageMime, string> = {
   "image/gif": "gif",
   "image/webp": "webp",
   "image/heic": "heic",
+  "image/heif": "heif",
 };
 
 export function extFromMime(mime: string): string | null {

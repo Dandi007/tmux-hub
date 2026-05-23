@@ -7,9 +7,9 @@ import {
 } from "../../src/server/image-upload";
 
 describe("IMAGE_MIME_WHITELIST", () => {
-  test("contains the 5 expected types", () => {
+  test("contains the 6 expected types", () => {
     expect(new Set(IMAGE_MIME_WHITELIST)).toEqual(
-      new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/heic"]),
+      new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/heic", "image/heif"]),
     );
   });
 });
@@ -21,6 +21,7 @@ describe("extFromMime", () => {
     expect(extFromMime("image/gif")).toBe("gif");
     expect(extFromMime("image/webp")).toBe("webp");
     expect(extFromMime("image/heic")).toBe("heic");
+    expect(extFromMime("image/heif")).toBe("heif");
   });
   test("unknown mime → null", () => {
     expect(extFromMime("application/pdf")).toBeNull();

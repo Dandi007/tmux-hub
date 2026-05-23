@@ -1,11 +1,11 @@
 import { hubFetch } from "../hub-fetch";
 
 export const IMAGE_MIME_WHITELIST_CLIENT = [
-  "image/png", "image/jpeg", "image/gif", "image/webp", "image/heic",
+  "image/png", "image/jpeg", "image/gif", "image/webp", "image/heic", "image/heif",
 ] as const;
 
 export const IMAGE_ACCEPT_ATTR =
-  "image/png,image/jpeg,image/gif,image/webp,image/heic";
+  "image/png,image/jpeg,image/gif,image/webp,image/heic,image/heif";
 
 export function isImageFile(f: File | Blob): boolean {
   return (IMAGE_MIME_WHITELIST_CLIENT as readonly string[]).includes(f.type);
