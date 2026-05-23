@@ -101,7 +101,11 @@ export function renderDesktop(root: HTMLElement): void {
       attachBtn.textContent = "...";
       try {
         const path = await uploadImageForSession(name, file);
-        term?.send({ kind: "keys", literal: " " + path + " " });
+        if (currentSession !== name) {
+          showToast(`已切到其他 session，图片 ${path} 未注入`, "error");
+        } else {
+          term?.send({ kind: "keys", literal: " " + path + " " });
+        }
       } catch (e) {
         showToast(`上传失败：${(e as Error).message}`, "error");
       } finally {
