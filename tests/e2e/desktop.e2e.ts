@@ -75,4 +75,35 @@ test.describe("desktop view", () => {
 
     ctx.tmuxE2E(["kill-session", "-t", name]);
   });
+
+  test("desktop clipboard paste: image item intercepted + path injected", async ({ page, ctx }) => {
+    const name = uniqSession("shell");
+    ctx.tmuxE2E(["new-session", "-d", "-s", name, "-x", "120", "-y", "40", "sh"]);
+
+    await page.goto("/");
+    await bindSecret(page);
+    await page.reload();
+
+    await page.locator(`.session-list__item[data-session-name="${name}"]`).click();
+    await page.waitForTimeout(800);
+
+    // Synthesize a paste event with an image item on the main region.
+    const RED_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
+    await page.evaluate((b64: string) => {
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const file = new File([bytes], "clip.png", { type: "image/png" });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const ev = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
+      document.querySelector(".desktop-shell__main")!.dispatchEvent(ev);
+    }, RED_PNG_B64);
+
+    await page.waitForTimeout(800);
+    const captured = ctx.tmuxE2E(["capture-pane", "-p", "-t", name]);
+    expect(captured).toMatch(/[\/\w-]+\.png/);
+
+    ctx.tmuxE2E(["kill-session", "-t", name]);
+  });
 });

@@ -115,6 +115,33 @@ export function renderDesktop(root: HTMLElement): void {
     });
   };
 
+  // Image-paste interception. Listen on the main region so the event has time
+  // to bubble up from xterm's textarea helper. Only preventDefault when we
+  // actually find an image item; pure-text pastes pass through to xterm.
+  right.addEventListener("paste", (e) => {
+    const items = (e as ClipboardEvent).clipboardData?.items;
+    if (!items) return;
+    const imageItem = Array.from(items).find((it) => it.type.startsWith("image/"));
+    if (!imageItem) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const file = imageItem.getAsFile();
+    if (!file || !currentSession) return;
+    const sessionAtPaste = currentSession;
+    void (async () => {
+      try {
+        const path = await uploadImageForSession(sessionAtPaste, file);
+        if (currentSession !== sessionAtPaste) {
+          showToast(`已切到其他 session，图片 ${path} 未注入`, "error");
+        } else {
+          term?.send({ kind: "keys", literal: " " + path + " " });
+        }
+      } catch (err) {
+        showToast(`上传失败：${(err as Error).message}`, "error");
+      }
+    })();
+  });
+
   list.onSelect((name) => { void open(name); });
   renderTemplateDrawer(left, (name) => { void open(name); });
 
