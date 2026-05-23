@@ -40,6 +40,7 @@ export function createVisibilityRecovery(deps: VisibilityRecoveryDeps = {}): Vis
     const persisted = (e as PageTransitionEvent).persisted === true;
     if (!persisted) return;
     hiddenAt = null;
+    // bfcache restore: treat as unconditional re-entry — threshold does not apply.
     for (const sub of subs) sub.cb();
   };
 
@@ -74,7 +75,12 @@ export function createVisibilityRecovery(deps: VisibilityRecoveryDeps = {}): Vis
 // Lazy singleton: only bound to real document/window when first called in a browser context.
 let _instance: VisibilityRecovery | undefined;
 function _getInstance(): VisibilityRecovery {
-  if (!_instance) _instance = createVisibilityRecovery();
+  if (!_instance) {
+    if (typeof document === "undefined" || typeof window === "undefined") {
+      throw new Error("visibility-recovery: onForegroundAfterIdle must be called in a browser context");
+    }
+    _instance = createVisibilityRecovery();
+  }
   return _instance;
 }
 

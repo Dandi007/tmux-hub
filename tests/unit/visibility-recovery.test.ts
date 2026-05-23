@@ -161,4 +161,18 @@ describe("visibility-recovery", () => {
     expect(env.docListeners.get("visibilitychange")?.size ?? 0).toBe(0);
     expect(env.winListeners.get("pageshow")?.size ?? 0).toBe(0);
   });
+
+  test("idleMs exactly equals threshold → callback fires (boundary inclusive)", () => {
+    const env = makeFakeEnv();
+    let nowMs = 0;
+    const rec = createVisibilityRecovery({ doc: env.doc, win: env.win, now: () => nowMs });
+    const cb = mock(() => {});
+    rec.onForegroundAfterIdle(3000, cb);
+
+    env.fireVisibility("hidden");
+    nowMs = 3000;
+    env.fireVisibility("visible");
+
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
 });
