@@ -41,10 +41,6 @@ export function renderToolbarKeys(
     grid.appendChild(makeKey(label, name, send));
   }
 
-  const enter = makeKey("Enter", "Enter", send);
-  enter.className = "tk-enter";
-  grid.appendChild(enter);
-
   const left = makeKey("←", "Left", send);
   left.className = "tk-left";
   grid.appendChild(left);
@@ -60,6 +56,10 @@ export function renderToolbarKeys(
   const ctrlz = makeKey("^Z", "C-z", send);
   ctrlz.className = "tk-ctrlz";
   grid.appendChild(ctrlz);
+
+  const enter = makeKey("↵", "Enter", send);
+  enter.className = "tk-enter";
+  grid.appendChild(enter);
 
   parent.appendChild(grid);
   return grid;
