@@ -6,6 +6,7 @@ import { showToast } from "../ui/toast";
 import { hubFetch } from "../hub-fetch";
 import { onForegroundAfterIdle } from "../visibility-recovery";
 import { uploadImageForSession, IMAGE_ACCEPT_ATTR } from "../upload/image-upload";
+import { createConnectionStatus } from "../ui/connection-status";
 
 function button(label: string, extraClass = ""): HTMLButtonElement {
   const b = document.createElement("button");
@@ -24,6 +25,9 @@ export function renderDesktop(root: HTMLElement): void {
   const right = document.createElement("main");
   right.className = "desktop-shell__main";
   root.append(left, right);
+
+  const connStatus = createConnectionStatus(false);
+  connStatus.onRetry(() => { term?.retry(); });
 
   const list = renderSessionList(left);
   let term: TerminalHandle | null = null;
@@ -58,6 +62,10 @@ export function renderDesktop(root: HTMLElement): void {
     try {
       term = await attachTerminal({ sessionName: name, parent: host });
       activeName = name;
+      host.insertBefore(connStatus.el, host.firstChild);
+      term.onStateChange((state, attempt) => {
+        connStatus.update(state, attempt);
+      });
     } catch (e) {
       showToast(`attach 失败: ${(e as Error).message}`, "error");
       return;
@@ -146,7 +154,7 @@ export function renderDesktop(root: HTMLElement): void {
   renderTemplateDrawer(left, (name) => { void open(name); });
 
   onForegroundAfterIdle(3000, () => {
-    if (activeName !== null && term && !term.isConnected) void open(activeName);
+    term?.probeNow();
   });
 
   // Expose imperative hooks for PWA manifest shortcuts. Bootstrap reads
