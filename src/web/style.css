@@ -498,3 +498,38 @@ button.is-danger:hover { filter: brightness(1.15); }
   opacity: .5;
   cursor: progress;
 }
+
+/* --- Connection status overlay --- */
+.connection-status {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  padding: 6px 12px;
+  background: oklch(30% 0.08 250 / 0.92);
+  color: oklch(90% 0.02 250);
+  font-size: 0.8125rem;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.connection-status[hidden] { display: none; }
+.connection-status.is-dead {
+  background: oklch(30% 0.1 25 / 0.92);
+  color: oklch(90% 0.03 25);
+}
+.connection-status__label { flex: 1; min-width: 0; }
+.connection-status__retry {
+  appearance: none;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  padding: 2px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+.connection-status__retry:hover { background: oklch(100% 0 0 / 0.1); }
