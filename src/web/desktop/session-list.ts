@@ -2,20 +2,8 @@ import type { SessionInfo, ServerEvent } from "@shared/protocol";
 import { subscribeEvents } from "../sse-client";
 import { onForegroundAfterIdle } from "../visibility-recovery";
 import { isGrammarOk } from "@shared/session-name";
-import { hubFetch } from "../hub-fetch";
 import { showToast } from "../ui/toast";
-
-async function renameSession(from: string, to: string): Promise<void> {
-  const r = await hubFetch(`/sessions/${encodeURIComponent(from)}/rename`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ to }),
-  });
-  if (!r.ok) {
-    const text = await r.text().catch(() => r.statusText);
-    throw new Error(text || `HTTP ${r.status}`);
-  }
-}
+import { renameSession } from "../shared/rename-controller";
 
 export type SessionListHandle = {
   el: HTMLElement;
