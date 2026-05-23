@@ -67,7 +67,8 @@ export function renderDesktop(root: HTMLElement): void {
         method: "POST",
         headers: { "X-Hub-Confirm": "kill" },
       });
-      if (!r.ok) showToast(`kill 失败: ${await r.text()}`, "error");
+      if (r.ok) { activeName = null; }
+      else showToast(`kill 失败: ${await r.text()}`, "error");
     });
 
     refreshBtn.addEventListener("click", async () => {
