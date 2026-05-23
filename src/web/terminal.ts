@@ -4,13 +4,19 @@ import { CanvasAddon } from "xterm-addon-canvas";
 import { attachMomentumScroll } from "./momentum-scroll";
 import "xterm/css/xterm.css";
 import type { ClientWsMessage } from "@shared/protocol";
-import { hubWsUrl } from "./hub-fetch";
+import { hubWsUrl, refreshSecret } from "./hub-fetch";
+
+export type TerminalState = "connected" | "reconnecting" | "dead";
 
 export type TerminalHandle = {
   el: HTMLElement;
   send: (msg: ClientWsMessage) => void;
   close: () => void;
+  probeNow: () => void;
+  retry: () => void;
   readonly isConnected: boolean;
+  readonly state: TerminalState;
+  onStateChange: (cb: (state: TerminalState, attempt?: number) => void) => void;
 };
 
 export type AttachOptions = {
@@ -22,6 +28,15 @@ export type AttachOptions = {
 };
 
 const BUILD_MARKER = "tui-cursor-gate-v10";
+
+const HEARTBEAT_INTERVAL_MS = 15_000;
+const HEARTBEAT_TIMEOUT_MS  = 5_000;
+const RECONNECT_MAX_RETRIES = 8;
+const RECONNECT_BASE_MS     = 500;
+const RECONNECT_MAX_MS      = 30_000;
+const RECONNECT_JITTER      = 0.3;
+const DEAD_PROBE_INTERVAL_MS = 60_000;
+const SEND_QUEUE_MAX_BYTES  = 65_536;
 
 export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandle> {
   console.log(`[tmux-hub] ${BUILD_MARKER} attaching to ${opts.sessionName}`);
@@ -115,17 +130,6 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     if (viewport) detachMomentum = attachMomentumScroll(el, viewport);
   }
 
-  // Pass client's actual fit() result to the server via WS query so the server
-  // pins tmux window-size to match BEFORE capturing the initial snapshot.
-  // Without this the server pins to hardcoded 200x50, captures a 200-wide
-  // snapshot, and xterm wraps it at client width (bug 2: prompt scroll-drift).
-  const initCols = term.cols > 0 ? term.cols : (opts.cols ?? 200);
-  const initRows = term.rows > 0 ? term.rows : (opts.rows ?? 50);
-  const wsBase = await hubWsUrl(`/ws/sessions/${encodeURIComponent(opts.sessionName)}`);
-  const sep = wsBase.includes("?") ? "&" : "?";
-  const wsUrl = `${wsBase}${sep}cols=${initCols}&rows=${initRows}`;
-  const ws = new WebSocket(wsUrl);
-
   // Once `close()` is called we MUST stop touching `term`. Any write into a
   // disposed xterm tunnels into `_renderService.onRequestRedraw` and throws
   // "Cannot read properties of undefined", which on mobile leaves the new
@@ -141,8 +145,6 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       console.warn("[tmux-hub] term.write failed:", e);
     }
   };
-  console.log(`[tmux-hub] ws init cols=${initCols} rows=${initRows}`);
-  ws.binaryType = "arraybuffer";
 
   // Predictive local-echo queue: each entry is a byte we've already drawn locally
   // for instant feedback. When the server's echo of that byte arrives, consume it
@@ -203,29 +205,6 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     if (out.length > 0) writeTerm(new Uint8Array(out));
   };
 
-  ws.onmessage = (m) => {
-    if (disposed) return;
-    if (typeof m.data === "string") {
-      try {
-        const parsed = JSON.parse(m.data);
-        if (parsed && typeof parsed === "object" && "error" in parsed) {
-          writeTerm(`\r\n[hub] ${(parsed as { error: string }).error}\r\n`);
-          return;
-        }
-      } catch { /* fall through and write raw */ }
-      consumeOrPassThrough(new TextEncoder().encode(m.data));
-    } else {
-      consumeOrPassThrough(new Uint8Array(m.data as ArrayBuffer));
-    }
-  };
-
-  ws.onclose = () => writeTerm("\r\n[hub] connection closed\r\n");
-  ws.onerror = () => writeTerm("\r\n[hub] connection error\r\n");
-
-  const send = (msg: ClientWsMessage) => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
-  };
-
   const predictLocalEcho = (data: string): void => {
     // Skip prediction whenever the server is in TUI rendering mode. Two
     // signals:
@@ -247,6 +226,212 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     writeTerm(data);
   };
 
+  // ── State machine ──────────────────────────────────────────────────
+  let currentState: TerminalState = "connected";
+  let stateListeners: Array<(state: TerminalState, attempt?: number) => void> = [];
+  let reconnectAttempt = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let deadProbeTimer: ReturnType<typeof setInterval> | null = null;
+
+  const setState = (next: TerminalState, attempt?: number): void => {
+    if (next === currentState && next !== "reconnecting") return;
+    currentState = next;
+    for (const cb of stateListeners) {
+      try { cb(next, attempt); } catch {}
+    }
+  };
+
+  // ── Heartbeat ──────────────────────────────────────────────────────
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  let pongTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const stopHeartbeat = (): void => {
+    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+    if (pongTimer) { clearTimeout(pongTimer); pongTimer = null; }
+  };
+
+  const sendPing = (): void => {
+    if (disposed || currentState !== "connected") return;
+    try { ws.send(JSON.stringify({ kind: "ping", ts: Date.now() })); } catch {}
+    if (pongTimer) clearTimeout(pongTimer);
+    pongTimer = setTimeout(() => {
+      pongTimer = null;
+      if (disposed || currentState !== "connected") return;
+      console.warn("[tmux-hub] heartbeat timeout — entering reconnect");
+      enterReconnecting();
+    }, HEARTBEAT_TIMEOUT_MS);
+  };
+
+  const startHeartbeat = (): void => {
+    stopHeartbeat();
+    heartbeatTimer = setInterval(() => {
+      if (disposed || currentState !== "connected") return;
+      sendPing();
+    }, HEARTBEAT_INTERVAL_MS);
+  };
+
+  const receivePong = (): void => {
+    if (pongTimer) { clearTimeout(pongTimer); pongTimer = null; }
+  };
+
+  // ── Send queue ─────────────────────────────────────────────────────
+  let sendQueue: string[] = [];
+  let sendQueueBytes = 0;
+
+  const queuedSend = (msg: ClientWsMessage): void => {
+    if (disposed) return;
+    if (currentState === "connected" && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(msg));
+      return;
+    }
+    if (currentState === "dead") return;
+    const json = JSON.stringify(msg);
+    const byteLen = json.length;
+    while (sendQueueBytes + byteLen > SEND_QUEUE_MAX_BYTES && sendQueue.length > 0) {
+      sendQueueBytes -= sendQueue.shift()!.length;
+    }
+    sendQueue.push(json);
+    sendQueueBytes += byteLen;
+  };
+
+  const flushSendQueue = (): void => {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    for (const json of sendQueue) {
+      try { ws.send(json); } catch { break; }
+    }
+    sendQueue = [];
+    sendQueueBytes = 0;
+  };
+
+  // ── WS wiring + reconnect logic ───────────────────────────────────
+  const wireWs = (socket: WebSocket): void => {
+    socket.binaryType = "arraybuffer";
+    socket.onmessage = (m) => {
+      if (disposed) return;
+      if (typeof m.data === "string") {
+        try {
+          const parsed = JSON.parse(m.data);
+          if (parsed && typeof parsed === "object") {
+            if ("kind" in parsed && (parsed as { kind: string }).kind === "pong") {
+              receivePong();
+              return;
+            }
+            if ("error" in parsed) {
+              writeTerm(`\r\n[hub] ${(parsed as { error: string }).error}\r\n`);
+              return;
+            }
+          }
+        } catch { /* fall through */ }
+        consumeOrPassThrough(new TextEncoder().encode(m.data));
+      } else {
+        consumeOrPassThrough(new Uint8Array(m.data as ArrayBuffer));
+      }
+    };
+    socket.onclose = () => {
+      if (disposed) return;
+      if (currentState === "connected") {
+        console.warn("[tmux-hub] ws closed unexpectedly — entering reconnect");
+        enterReconnecting();
+      }
+    };
+    socket.onerror = () => {};
+  };
+
+  const buildWsUrl = async (): Promise<string> => {
+    try { fit.fit(); } catch {}
+    const c = term.cols > 0 ? term.cols : (opts.cols ?? 200);
+    const r = term.rows > 0 ? term.rows : (opts.rows ?? 50);
+    const base = await hubWsUrl(`/ws/sessions/${encodeURIComponent(opts.sessionName)}`);
+    const sep = base.includes("?") ? "&" : "?";
+    return `${base}${sep}cols=${c}&rows=${r}`;
+  };
+
+  const enterReconnecting = (): void => {
+    if (disposed) return;
+    stopHeartbeat();
+    try { ws.onmessage = null; ws.onclose = null; ws.onerror = null; ws.close(); } catch {}
+    predictions.length = 0;
+    reconnectAttempt = 0;
+    setState("reconnecting", 0);
+    scheduleReconnectAttempt();
+  };
+
+  const scheduleReconnectAttempt = (): void => {
+    if (disposed) return;
+    const delay = Math.min(RECONNECT_BASE_MS * Math.pow(2, reconnectAttempt), RECONNECT_MAX_MS);
+    const jittered = delay * (1 + (Math.random() * 2 - 1) * RECONNECT_JITTER);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      void attemptReconnect();
+    }, jittered);
+  };
+
+  const attemptReconnect = async (): Promise<void> => {
+    if (disposed) return;
+    reconnectAttempt++;
+    setState("reconnecting", reconnectAttempt);
+
+    let url: string;
+    try {
+      await refreshSecret();
+      url = await buildWsUrl();
+    } catch {
+      setState("dead");
+      startDeadProbe();
+      return;
+    }
+
+    const socket = new WebSocket(url);
+    socket.binaryType = "arraybuffer";
+
+    const connectTimeout = setTimeout(() => {
+      try { socket.close(); } catch {}
+    }, HEARTBEAT_TIMEOUT_MS);
+
+    socket.onopen = () => {
+      clearTimeout(connectTimeout);
+      if (disposed) { try { socket.close(); } catch {} return; }
+      ws = socket;
+      wireWs(ws);
+      reconnectAttempt = 0;
+      predictions.length = 0;
+      setState("connected");
+      flushSendQueue();
+      startHeartbeat();
+      const c = term.cols;
+      const r = term.rows;
+      if (c > 0 && r > 0) queuedSend({ kind: "resize", cols: c, rows: r });
+    };
+
+    socket.onclose = () => {
+      clearTimeout(connectTimeout);
+      if (disposed) return;
+      if (reconnectAttempt >= RECONNECT_MAX_RETRIES) {
+        setState("dead");
+        startDeadProbe();
+      } else {
+        scheduleReconnectAttempt();
+      }
+    };
+    socket.onerror = () => {};
+  };
+
+  const startDeadProbe = (): void => {
+    stopDeadProbe();
+    deadProbeTimer = setInterval(() => {
+      if (disposed || currentState !== "dead") { stopDeadProbe(); return; }
+      stopDeadProbe();
+      reconnectAttempt = 0;
+      setState("reconnecting", 0);
+      scheduleReconnectAttempt();
+    }, DEAD_PROBE_INTERVAL_MS);
+  };
+
+  const stopDeadProbe = (): void => {
+    if (deadProbeTimer) { clearInterval(deadProbeTimer); deadProbeTimer = null; }
+  };
+
+  // ── Resize ─────────────────────────────────────────────────────────
   let resizeTimer: ReturnType<typeof setTimeout> | null = null;
   const publishResize = () => {
     if (resizeTimer) clearTimeout(resizeTimer);
@@ -254,9 +439,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       resizeTimer = null;
       const c = term.cols;
       const r = term.rows;
-      if (c > 0 && r > 0 && ws.readyState === WebSocket.OPEN) {
-        send({ kind: "resize", cols: c, rows: r });
-      }
+      if (c > 0 && r > 0) queuedSend({ kind: "resize", cols: c, rows: r });
     }, 150);
   };
 
@@ -266,12 +449,18 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   };
   window.addEventListener("resize", onResize);
 
+  // ── Initial WS connection ──────────────────────────────────────────
+  const initUrl = await buildWsUrl();
+  let ws = new WebSocket(initUrl);
+  wireWs(ws);
+
   ws.addEventListener("open", () => {
+    startHeartbeat();
     setTimeout(() => {
       const c = term.cols;
       const r = term.rows;
       if (c > 0 && r > 0 && ws.readyState === WebSocket.OPEN) {
-        send({ kind: "resize", cols: c, rows: r });
+        queuedSend({ kind: "resize", cols: c, rows: r });
       }
     }, 100);
   });
@@ -281,34 +470,50 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     // NO attachCustomKeyEventHandler / keyEventToTmuxToken (those would double-send).
     term.onData((data) => {
       predictLocalEcho(data);
-      send({ kind: "keys", literal: data });
+      queuedSend({ kind: "keys", literal: data });
     });
   }
 
   return {
     el,
-    send,
-    get isConnected() {
-      return !disposed && ws.readyState === WebSocket.OPEN;
+    send: queuedSend,
+    get isConnected() { return !disposed && currentState === "connected"; },
+    get state() { return currentState; },
+    onStateChange: (cb) => { stateListeners.push(cb); },
+    probeNow: () => {
+      if (disposed) return;
+      if (currentState === "reconnecting") return;
+      if (currentState === "dead") {
+        stopDeadProbe();
+        reconnectAttempt = 0;
+        setState("reconnecting", 0);
+        scheduleReconnectAttempt();
+        return;
+      }
+      sendPing();
+    },
+    retry: () => {
+      if (disposed || currentState !== "dead") return;
+      stopDeadProbe();
+      reconnectAttempt = 0;
+      setState("reconnecting", 0);
+      scheduleReconnectAttempt();
     },
     close: () => {
-      // Flip the guard BEFORE any teardown so straggler ws callbacks no
-      // longer reach the disposed xterm. Without this, ws.close() schedules
-      // an async onclose that fires after term.dispose(), calls term.write,
-      // and trips the renderService-undefined trap that aborts xterm's
-      // setup loop and breaks subsequent attaches.
       disposed = true;
+      stopHeartbeat();
+      stopDeadProbe();
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       window.removeEventListener("resize", onResize);
       if (resizeTimer) { clearTimeout(resizeTimer); resizeTimer = null; }
       try { detachMomentum?.(); } catch {}
-      // Detach handlers explicitly so the WS implementation cannot invoke
-      // them after the disposed gate either.
       ws.onmessage = null;
       ws.onclose = null;
       ws.onerror = null;
       try { ws.close(); } catch {}
       try { term.dispose(); } catch {}
       try { el.remove(); } catch {}
+      stateListeners = [];
     },
   };
 }
