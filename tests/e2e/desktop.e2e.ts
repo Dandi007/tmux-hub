@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { test, expect } from "./fixtures";
 import { bindSecret, uniqSession } from "./helpers";
 
@@ -49,6 +50,28 @@ test.describe("desktop view", () => {
     await page.getByRole("button", { name: "取消", exact: true }).click();
 
     expect(ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n")).toContain(name);
+
+    ctx.tmuxE2E(["kill-session", "-t", name]);
+  });
+
+  test("desktop image attach: header button → upload → path injected to pane", async ({ page, ctx }) => {
+    const name = uniqSession("shell");
+    ctx.tmuxE2E(["new-session", "-d", "-s", name, "-x", "120", "-y", "40", "sh"]);
+
+    await page.goto("/");
+    await bindSecret(page);
+    await page.reload();
+
+    await page.locator(`.session-list__item[data-session-name="${name}"]`).click();
+    await page.waitForTimeout(800);
+
+    const fixturePath = join(process.cwd(), "tests/e2e/fixtures/red.png");
+    await page.locator(".session-header__image-attach-input").setInputFiles(fixturePath);
+
+    // Give upload + send-keys round-trip time
+    await page.waitForTimeout(800);
+    const captured = ctx.tmuxE2E(["capture-pane", "-p", "-t", name]);
+    expect(captured).toMatch(/[\/\w-]+\.png/);
 
     ctx.tmuxE2E(["kill-session", "-t", name]);
   });
