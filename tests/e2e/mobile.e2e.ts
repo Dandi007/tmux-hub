@@ -108,11 +108,11 @@ test.describe("mobile view", () => {
     await page.locator(`.session-picker__item[data-session="${name}"]`).click();
     await page.waitForTimeout(1500);
 
-    // Open the drawer so the form is visible
-    await page.locator(".input-bar__field").click();
+    // Focus the inline textarea
+    await page.locator(".input-bar__textarea").click();
 
-    // textarea is empty; click submit
-    await page.locator(".mobile-input button[type=submit]").evaluate((btn: HTMLButtonElement) => btn.click());
+    // textarea is empty; click send (the + button becomes 发送 when editing)
+    await page.locator(".input-bar__send").click();
     await page.waitForTimeout(700);
 
     // After Enter into sh prompt: a fresh prompt line appears.
@@ -339,14 +339,14 @@ test.describe("mobile view", () => {
     await page.locator(`.session-picker__item[data-session="${name}"]`).click();
     await page.waitForTimeout(800);
 
-    const drawer = page.locator(".mobile-drawer");
-    await expect(drawer).not.toHaveClass(/is-open/);
+    const inputBar = page.locator(".mobile-input-bar");
+    await expect(inputBar).not.toHaveClass(/is-editing/);
 
-    await page.locator(".input-bar__field").click();
-    await expect(drawer).toHaveClass(/is-open/);
+    await page.locator(".input-bar__textarea").click();
+    await expect(inputBar).toHaveClass(/is-editing/);
 
-    await page.locator(".input-bar__field").click();
-    await expect(drawer).not.toHaveClass(/is-open/);
+    await page.locator(".input-bar__send").click();
+    await expect(inputBar).not.toHaveClass(/is-editing/);
 
     ctx.tmuxE2E(["kill-session", "-t", name]);
   });

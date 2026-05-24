@@ -2,7 +2,6 @@ import { attachTerminal, type TerminalHandle } from "../terminal";
 import { subscribeEvents } from "../sse-client";
 import type { SessionInfo, ServerEvent, ClientWsMessage } from "@shared/protocol";
 import { isGrammarOk } from "@shared/session-name";
-import { renderInputBox } from "./input-box";
 import { renderToolbarKeys } from "./special-keys-bar";
 import { renderQuickLaunchButton } from "./quick-launch";
 import { renderImageAttachButton } from "./image-attach";
@@ -227,11 +226,6 @@ export function renderMobile(root: HTMLElement): void {
 
   const send = (msg: ClientWsMessage) => { term?.send(msg); };
 
-  const drawer = document.createElement("div");
-  drawer.className = "mobile-drawer";
-  const inputForm = renderInputBox(drawer, send);
-  root.appendChild(drawer);
-
   // Quick-launch (+) goes in header alongside session picker.
   renderQuickLaunchButton({
     parent: picker.actionRow,
@@ -258,57 +252,82 @@ export function renderMobile(root: HTMLElement): void {
   renderToolbarKeys(keysPanel, send);
   root.appendChild(keysPanel);
 
-  // Bottom input bar: [📎] [text field] [+]
+  // Bottom input bar: [📎] [textarea (inline expand)] [+/发送]
   const inputBar = document.createElement("div");
   inputBar.className = "mobile-input-bar";
   root.appendChild(inputBar);
 
-  const expandBtn = document.createElement("button");
-  expandBtn.type = "button";
-  expandBtn.className = "input-bar__expand";
-  expandBtn.setAttribute("aria-expanded", "false");
-  expandBtn.setAttribute("aria-label", "展开键盘");
-  expandBtn.textContent = "+";
+  const ta = document.createElement("textarea");
+  ta.className = "input-bar__textarea";
+  ta.rows = 1;
+  ta.placeholder = "输入...";
 
-  type Panel = "none" | "text" | "keys";
-  let activePanel: Panel = "none";
-  const setPanel = (target: Panel, opts?: { force?: boolean }) => {
-    const next = (!opts?.force && activePanel === target) ? "none" : target;
-    if (next !== "text") {
-      const ta = drawer.querySelector<HTMLTextAreaElement>(".mobile-input__textarea");
-      ta?.blur();
+  const rightBtn = document.createElement("button");
+  rightBtn.type = "button";
+  rightBtn.className = "input-bar__expand";
+  rightBtn.setAttribute("aria-label", "展开键盘");
+  rightBtn.textContent = "+";
+
+  let editing = false;
+  let keysOpen = false;
+
+  const doSend = () => {
+    const text = ta.value;
+    if (text) send({ kind: "keys", literal: text });
+    send({ kind: "key", name: "Enter" });
+    ta.value = "";
+    setEditing(false);
+  };
+
+  const setEditing = (open: boolean) => {
+    editing = open;
+    inputBar.classList.toggle("is-editing", open);
+    if (open) {
+      if (keysOpen) setKeysPanel(false);
+      rightBtn.textContent = "发送";
+      rightBtn.className = "input-bar__send";
+      rightBtn.setAttribute("aria-label", "发送");
+      ta.focus();
+    } else {
+      ta.blur();
+      rightBtn.textContent = "+";
+      rightBtn.className = "input-bar__expand";
+      rightBtn.setAttribute("aria-label", "展开键盘");
     }
-    activePanel = next;
-    drawer.classList.toggle("is-open", activePanel === "text");
-    keysPanel.classList.toggle("is-open", activePanel === "keys");
-    expandBtn.classList.toggle("is-active", activePanel === "keys");
-    expandBtn.setAttribute("aria-expanded", String(activePanel === "keys"));
-    if (activePanel === "text") {
-      const ta = drawer.querySelector<HTMLTextAreaElement>(".mobile-input__textarea");
-      ta?.focus();
-    }
+  };
+
+  const setKeysPanel = (open: boolean) => {
+    keysOpen = open;
+    keysPanel.classList.toggle("is-open", open);
+    rightBtn.classList.toggle("is-active", open);
+    rightBtn.setAttribute("aria-expanded", String(open));
   };
 
   const attachBtn = renderImageAttachButton({
     parent: inputBar,
     getSession: () => openedName,
-    getTextarea: () => drawer.querySelector<HTMLTextAreaElement>(".mobile-input__textarea"),
-    openDrawer: () => setPanel("text", { force: true }),
+    getTextarea: () => ta,
+    openDrawer: () => setEditing(true),
   });
   attachBtn.className = "input-bar__attach";
 
-  const inputField = document.createElement("button");
-  inputField.type = "button";
-  inputField.className = "input-bar__field";
-  inputField.textContent = "输入...";
-  inputField.setAttribute("aria-label", "打开文字输入");
-  inputField.addEventListener("click", () => setPanel("text"));
-  inputBar.appendChild(inputField);
+  inputBar.appendChild(ta);
 
-  expandBtn.addEventListener("click", () => setPanel("keys"));
-  inputBar.appendChild(expandBtn);
+  rightBtn.addEventListener("click", () => {
+    if (editing) {
+      doSend();
+    } else {
+      setKeysPanel(!keysOpen);
+    }
+  });
+  inputBar.appendChild(rightBtn);
 
-  inputForm.addEventListener("submit", () => { setPanel("none"); });
+  ta.addEventListener("focus", () => { if (!editing) setEditing(true); });
+  ta.addEventListener("blur", () => {
+    setTimeout(() => {
+      if (!inputBar.contains(document.activeElement)) setEditing(false);
+    }, 150);
+  });
 
   window.__tmuxHub = {
     ...(window.__tmuxHub ?? {}),
