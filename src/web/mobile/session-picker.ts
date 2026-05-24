@@ -17,6 +17,7 @@ export type SessionPickerHandle = {
   getValue: () => string | null;
   focus: () => void;
   onRename: ((current: string) => void) | null;
+  onKill: ((current: string) => void) | null;
 };
 
 export function renderSessionPicker(
@@ -46,10 +47,16 @@ export function renderSessionPicker(
   renameBtn.setAttribute("aria-label", "重命名当前 session");
   renameBtn.textContent = "✎";
 
+  const killBtn = document.createElement("button");
+  killBtn.type = "button";
+  killBtn.className = "session-picker__kill";
+  killBtn.setAttribute("aria-label", "关闭当前 session");
+  killBtn.textContent = "✕";
+
   const triggerRow = document.createElement("div");
   triggerRow.className = "session-picker__trigger-row";
   trigger.append(nameSpan, chevron);
-  triggerRow.append(trigger, renameBtn);
+  triggerRow.append(trigger, renameBtn, killBtn);
   root.appendChild(triggerRow);
 
   const backdrop = document.createElement("div");
@@ -65,9 +72,14 @@ export function renderSessionPicker(
   let isOpen = false;
   let activeName: string | null = null;
   let onRenameCb: ((current: string) => void) | null = null;
+  let onKillCb: ((current: string) => void) | null = null;
 
   renameBtn.addEventListener("click", () => {
     if (activeName && onRenameCb) onRenameCb(activeName);
+  });
+
+  killBtn.addEventListener("click", () => {
+    if (activeName && onKillCb) onKillCb(activeName);
   });
 
   const setOpen = (open: boolean) => {
@@ -141,5 +153,7 @@ export function renderSessionPicker(
     focus: () => trigger.focus(),
     get onRename() { return onRenameCb; },
     set onRename(fn: ((current: string) => void) | null) { onRenameCb = fn; },
+    get onKill() { return onKillCb; },
+    set onKill(fn: ((current: string) => void) | null) { onKillCb = fn; },
   };
 }

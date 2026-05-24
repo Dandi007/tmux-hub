@@ -12,6 +12,8 @@ import { showToast } from "../ui/toast";
 import { onForegroundAfterIdle } from "../visibility-recovery";
 import { createConnectionStatus } from "../ui/connection-status";
 import { renameSession } from "../shared/rename-controller";
+import { killSession } from "../shared/kill-controller";
+import { confirmModal } from "../ui/confirm-modal";
 
 export function renderMobile(root: HTMLElement): void {
   root.replaceChildren();
@@ -154,6 +156,23 @@ export function renderMobile(root: HTMLElement): void {
 
   picker.onRename = (current: string) => {
     enterRenameMode(current);
+  };
+
+  picker.onKill = (current: string) => {
+    void confirmModal({
+      title: "关闭会话",
+      body: `确定要关闭会话「${current}」吗？该会话中的所有进程将被终止。`,
+      confirmLabel: "关闭",
+      danger: true,
+    }).then(async (confirmed) => {
+      if (!confirmed) return;
+      try {
+        await killSession(current);
+        showToast(`会话「${current}」已关闭`, "info");
+      } catch (e) {
+        showToast(`关闭失败：${(e as Error).message}`, "error");
+      }
+    });
   };
 
   let pendingQuickLaunchName: string | null = null;
