@@ -27,8 +27,6 @@
 html, body {
   margin: 0;
   padding: 0;
-  height: 100dvh;
-  width: 100vw;
   overflow: hidden;
   overscroll-behavior: none;
   position: fixed;
@@ -116,7 +114,7 @@ button.is-danger:hover { filter: brightness(1.15); }
 .desktop-shell {
   display: flex;
   flex-direction: column;
-  height: 100dvh;
+  height: 100%;
   overflow: hidden;
   padding-left: var(--safe-left);
   padding-right: var(--safe-right);
@@ -237,7 +235,7 @@ button.is-danger:hover { filter: brightness(1.15); }
 .mobile-shell {
   display: flex;
   flex-direction: column;
-  height: 100dvh;
+  height: 100%;
   padding-left: var(--safe-left);
   padding-right: var(--safe-right);
 }
@@ -463,6 +461,76 @@ button.is-danger:hover { filter: brightness(1.15); }
   .mobile-input { padding: var(--space-1); }
   .special-keys { padding-block: var(--space-1); }
   .toolbar-keys { grid-template-rows: calc(var(--tap-min) - 4px) calc(var(--tap-min) - 4px); }
+}
+
+/* Mobile input bar — compact bottom bar: [📎] [text field] [+] */
+.mobile-input-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  padding-bottom: calc(var(--space-1) + var(--safe-bottom));
+  background: var(--color-bg);
+}
+.input-bar__attach,
+.input-bar__expand {
+  flex: 0 0 auto;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-surface);
+  border: none;
+  border-radius: 50%;
+  font-size: 18px;
+  color: var(--color-text-mute);
+  transition: background var(--duration-fast) var(--ease-out-expo),
+              transform var(--duration-fast) var(--ease-out-expo);
+}
+.input-bar__attach:active,
+.input-bar__expand:active { background: var(--color-surface-hi); }
+.input-bar__expand.is-active {
+  background: var(--color-accent);
+  color: var(--color-bg);
+  transform: rotate(45deg);
+}
+.input-bar__field {
+  flex: 1;
+  height: var(--tap-min);
+  background: var(--color-surface);
+  border: none;
+  border-radius: calc(var(--tap-min) / 2);
+  padding: 0 var(--space-3);
+  color: var(--color-text-mute);
+  font: 14px var(--font-mono);
+  display: flex;
+  align-items: center;
+  cursor: text;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: background var(--duration-fast) var(--ease-out-expo);
+}
+.input-bar__field:active { background: var(--color-surface-hi); }
+
+/* Collapsible keys panel */
+.mobile-keys-panel {
+  max-height: 0;
+  overflow: hidden;
+  background: var(--color-bg);
+  display: flex;
+  justify-content: center;
+  transition: max-height var(--duration-fast) var(--ease-out-expo);
+}
+.mobile-keys-panel.is-open { max-height: 120px; }
+.mobile-keys-panel .toolbar-keys {
+  margin-left: 0;
+  width: 100%;
+  grid-template-columns: repeat(4, 1fr) 2fr;
+  padding: var(--space-1) var(--space-2);
 }
 
 /* Session picker: rename button beside trigger */

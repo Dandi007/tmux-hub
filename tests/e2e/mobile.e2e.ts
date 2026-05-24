@@ -109,7 +109,7 @@ test.describe("mobile view", () => {
     await page.waitForTimeout(1500);
 
     // Open the drawer so the form is visible
-    await page.locator(".mobile-toolbar__toggle").click();
+    await page.locator(".input-bar__field").click();
 
     // textarea is empty; click submit
     await page.locator(".mobile-input button[type=submit]").evaluate((btn: HTMLButtonElement) => btn.click());
@@ -342,10 +342,10 @@ test.describe("mobile view", () => {
     const drawer = page.locator(".mobile-drawer");
     await expect(drawer).not.toHaveClass(/is-open/);
 
-    await page.locator(".mobile-toolbar__toggle").click();
+    await page.locator(".input-bar__field").click();
     await expect(drawer).toHaveClass(/is-open/);
 
-    await page.locator(".mobile-toolbar__toggle").click();
+    await page.locator(".input-bar__field").click();
     await expect(drawer).not.toHaveClass(/is-open/);
 
     ctx.tmuxE2E(["kill-session", "-t", name]);
