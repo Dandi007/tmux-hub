@@ -98,6 +98,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     if (disposed) return;
     try {
       term.loadAddon(new CanvasAddon());
+      fit.fit();
     } catch (e) {
       console.warn("[tmux-hub] CanvasAddon failed to load, falling back to DOM:", e);
     }
