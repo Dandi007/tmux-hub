@@ -252,41 +252,58 @@ export function renderMobile(root: HTMLElement): void {
     },
   });
 
-  // Bottom toolbar: input toggle + image attach + keys grid.
-  const toolbar = document.createElement("div");
-  toolbar.className = "mobile-toolbar";
-  root.appendChild(toolbar);
+  // Keys panel (collapsible, opens when + is tapped)
+  const keysPanel = document.createElement("div");
+  keysPanel.className = "mobile-keys-panel";
+  renderToolbarKeys(keysPanel, send);
+  root.appendChild(keysPanel);
 
-  const toggleBtn = document.createElement("button");
-  toggleBtn.type = "button";
-  toggleBtn.className = "mobile-toolbar__toggle";
-  toggleBtn.setAttribute("aria-expanded", "false");
-  toggleBtn.setAttribute("aria-label", "切换多行输入");
-  toggleBtn.textContent = "✎";
-  toolbar.appendChild(toggleBtn);
+  // Bottom input bar: [📎] [text field] [+]
+  const inputBar = document.createElement("div");
+  inputBar.className = "mobile-input-bar";
+  root.appendChild(inputBar);
 
-  let drawerOpen = false;
-  const setDrawer = (open: boolean) => {
-    drawerOpen = open;
-    drawer.classList.toggle("is-open", open);
-    toggleBtn.classList.toggle("is-active", open);
-    toggleBtn.setAttribute("aria-expanded", String(open));
-    if (open) {
+  const expandBtn = document.createElement("button");
+  expandBtn.type = "button";
+  expandBtn.className = "input-bar__expand";
+  expandBtn.setAttribute("aria-expanded", "false");
+  expandBtn.setAttribute("aria-label", "展开键盘");
+  expandBtn.textContent = "+";
+
+  type Panel = "none" | "text" | "keys";
+  let activePanel: Panel = "none";
+  const setPanel = (target: Panel) => {
+    activePanel = activePanel === target ? "none" : target;
+    drawer.classList.toggle("is-open", activePanel === "text");
+    keysPanel.classList.toggle("is-open", activePanel === "keys");
+    expandBtn.classList.toggle("is-active", activePanel === "keys");
+    expandBtn.setAttribute("aria-expanded", String(activePanel === "keys"));
+    if (activePanel === "text") {
       const ta = drawer.querySelector<HTMLTextAreaElement>(".mobile-input__textarea");
       ta?.focus();
     }
   };
-  toggleBtn.addEventListener("click", () => setDrawer(!drawerOpen));
-  inputForm.addEventListener("submit", () => { setDrawer(false); });
 
-  renderImageAttachButton({
-    parent: toolbar,
+  const attachBtn = renderImageAttachButton({
+    parent: inputBar,
     getSession: () => openedName,
     getTextarea: () => drawer.querySelector<HTMLTextAreaElement>(".mobile-input__textarea"),
-    openDrawer: () => setDrawer(true),
+    openDrawer: () => setPanel("text"),
   });
+  attachBtn.className = "input-bar__attach";
 
-  renderToolbarKeys(toolbar, send);
+  const inputField = document.createElement("div");
+  inputField.className = "input-bar__field";
+  inputField.textContent = "输入...";
+  inputField.setAttribute("role", "button");
+  inputField.setAttribute("aria-label", "打开文字输入");
+  inputField.addEventListener("click", () => setPanel("text"));
+  inputBar.appendChild(inputField);
+
+  expandBtn.addEventListener("click", () => setPanel("keys"));
+  inputBar.appendChild(expandBtn);
+
+  inputForm.addEventListener("submit", () => { setPanel("none"); });
 
   window.__tmuxHub = {
     ...(window.__tmuxHub ?? {}),

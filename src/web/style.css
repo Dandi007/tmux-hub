@@ -465,6 +465,76 @@ button.is-danger:hover { filter: brightness(1.15); }
   .toolbar-keys { grid-template-rows: calc(var(--tap-min) - 4px) calc(var(--tap-min) - 4px); }
 }
 
+/* Mobile input bar — compact bottom bar: [📎] [text field] [+] */
+.mobile-input-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  padding-bottom: calc(var(--space-1) + var(--safe-bottom));
+  background: var(--color-bg);
+}
+.input-bar__attach,
+.input-bar__expand {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-surface);
+  border: none;
+  border-radius: 50%;
+  font-size: 18px;
+  color: var(--color-text-mute);
+  transition: background var(--duration-fast) var(--ease-out-expo),
+              transform var(--duration-fast) var(--ease-out-expo);
+}
+.input-bar__attach:active,
+.input-bar__expand:active { background: var(--color-surface-hi); }
+.input-bar__expand.is-active {
+  background: var(--color-accent);
+  color: var(--color-bg);
+  transform: rotate(45deg);
+}
+.input-bar__field {
+  flex: 1;
+  height: 36px;
+  background: var(--color-surface);
+  border: none;
+  border-radius: 18px;
+  padding: 0 var(--space-3);
+  color: var(--color-text-mute);
+  font: 14px var(--font-mono);
+  display: flex;
+  align-items: center;
+  cursor: text;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: background var(--duration-fast) var(--ease-out-expo);
+}
+.input-bar__field:active { background: var(--color-surface-hi); }
+
+/* Collapsible keys panel */
+.mobile-keys-panel {
+  max-height: 0;
+  overflow: hidden;
+  background: var(--color-bg);
+  display: flex;
+  justify-content: center;
+  transition: max-height var(--duration-fast) var(--ease-out-expo);
+}
+.mobile-keys-panel.is-open { max-height: 120px; }
+.mobile-keys-panel .toolbar-keys {
+  margin-left: 0;
+  width: 100%;
+  grid-template-columns: repeat(4, 1fr) 2fr;
+  padding: var(--space-1) var(--space-2);
+}
+
 /* Session picker: rename button beside trigger */
 .session-picker__rename {
   flex: 0 0 auto;
