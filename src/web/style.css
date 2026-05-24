@@ -337,13 +337,13 @@ button.is-danger:hover { filter: brightness(1.15); }
 .session-picker__item.is-external { opacity: 0.5; }
 .session-picker__item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-picker__item-meta { flex: 0 0 auto; color: var(--color-text-mute); font-size: 12px; }
-.mobile-shell__term-host { flex: 1; min-height: 0; padding: var(--space-1); overflow: hidden; }
+.mobile-shell__term-host { flex: 1; min-height: 0; padding: 0; overflow: hidden; }
 /* Collapsible composer drawer. Default closed: max-height collapses to 0,
    transition keeps the open/close motion smooth without layout thrash. */
 .mobile-drawer {
   max-height: 0;
   overflow: hidden;
-  background: var(--color-surface);
+  background: var(--color-bg);
   border-top: 1px solid transparent;
   transition: max-height var(--duration-fast) var(--ease-out-expo),
               border-color var(--duration-fast) var(--ease-out-expo);
@@ -378,8 +378,8 @@ button.is-danger:hover { filter: brightness(1.15); }
   align-items: center;
   gap: var(--space-1);
   padding: 0 var(--space-2);
-  background: var(--color-surface);
-  border-top: 1px solid var(--color-surface-hi);
+  background: var(--color-bg);
+  border-top: none;
   padding-bottom: var(--safe-bottom);
 }
 .mobile-toolbar__toggle {
