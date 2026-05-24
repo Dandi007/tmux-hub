@@ -352,25 +352,26 @@ button.is-danger:hover { filter: brightness(1.15); }
   max-height: 50dvh;
   border-top-color: var(--color-surface-hi);
 }
-/* Header quick-launch button: matches rename button style. */
-.mobile-toolbar__quick-launch {
+/* Header action buttons: shared ghost-button base */
+.header-action {
   flex: 0 0 auto;
   min-width: var(--tap-min);
   min-height: var(--tap-min);
   padding: 0 .5rem;
   font-size: 1rem;
   background: transparent;
-  border: 1px solid currentColor;
-  border-radius: .25rem;
+  border: none;
+  border-radius: 6px;
   color: var(--color-text-mute);
   cursor: pointer;
-  margin-left: 0;
+  transition: background var(--duration-fast) var(--ease-out-expo),
+              color var(--duration-fast) var(--ease-out-expo);
 }
-.mobile-toolbar__quick-launch:active { color: var(--color-accent); }
-.mobile-toolbar__quick-launch:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
+.header-action:hover { background: var(--color-surface-hi); color: var(--color-text); }
+.header-action:active { background: var(--color-surface-active); }
+.header-action.is-danger:hover { background: oklch(30% 0.08 25); color: var(--color-danger); }
+.header-action:disabled { opacity: 0.35; cursor: not-allowed; }
+.header-action:disabled:hover { background: transparent; color: var(--color-text-mute); }
 
 /* Bottom toolbar: toggle + image-attach + keys grid. */
 .mobile-toolbar {
@@ -553,35 +554,7 @@ button.is-danger:hover { filter: brightness(1.15); }
   padding: var(--space-1) var(--space-2);
 }
 
-/* Session picker: rename button beside trigger */
-.session-picker__rename {
-  flex: 0 0 auto;
-  min-width: var(--tap-min);
-  min-height: var(--tap-min);
-  padding: 0 .5rem;
-  font-size: 1rem;
-  background: transparent;
-  border: 1px solid currentColor;
-  border-radius: .25rem;
-  color: var(--color-text-mute);
-  cursor: pointer;
-}
-.session-picker__rename:active { color: var(--color-accent); }
-
-/* Session picker: kill button beside rename */
-.session-picker__kill {
-  flex: 0 0 auto;
-  min-width: var(--tap-min);
-  min-height: var(--tap-min);
-  padding: 0 .5rem;
-  font-size: 1rem;
-  background: transparent;
-  border: 1px solid var(--color-danger);
-  border-radius: .25rem;
-  color: var(--color-danger);
-  cursor: pointer;
-}
-.session-picker__kill:active { filter: brightness(1.3); }
+/* Session picker action buttons — inherit .header-action base */
 
 /* --- Mobile: rename mode in header --- */
 .mobile-shell__rename-input {

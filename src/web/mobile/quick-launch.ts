@@ -67,7 +67,7 @@ export type QuickLaunchButtonOpts = {
 export function renderQuickLaunchButton(opts: QuickLaunchButtonOpts): HTMLButtonElement {
   const btn = document.createElement("button");
   btn.type = "button";
-  btn.className = "mobile-toolbar__quick-launch";
+  btn.className = "header-action";
   btn.textContent = "+";
   btn.setAttribute("aria-label", "新建知识库 Claude Code 会话");
   btn.disabled = true;

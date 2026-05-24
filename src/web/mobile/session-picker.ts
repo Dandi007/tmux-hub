@@ -35,13 +35,13 @@ export function renderSessionPicker(
 
   const renameBtn = document.createElement("button");
   renameBtn.type = "button";
-  renameBtn.className = "session-picker__rename";
+  renameBtn.className = "header-action";
   renameBtn.setAttribute("aria-label", "重命名当前 session");
   renameBtn.textContent = "✎";
 
   const killBtn = document.createElement("button");
   killBtn.type = "button";
-  killBtn.className = "session-picker__kill";
+  killBtn.className = "header-action is-danger";
   killBtn.setAttribute("aria-label", "关闭当前 session");
   killBtn.textContent = "✕";
 
