@@ -15,6 +15,9 @@ import { isGrammarOk } from "../shared/session-name";
 import { buildSessionControlRoutes } from "./session-control";
 import { buildImageUploadRoutes } from "./image-upload";
 import { TemplateRunner, TemplateError } from "./template-runner";
+import { createLogger, LOG_FILE } from "./logger";
+
+const logger = createLogger("main");
 
 const SECRET = loadOrCreateSecret();
 const registry = new SessionRegistry();
@@ -27,22 +30,17 @@ const input = new InputRouter();
 registry.subscribe(async (event) => {
   sse.emit(event);
   if (event.event === "session_created") {
-    // Always-on recording: start the broadcaster as soon as the session is
-    // visible to tmux, so output that happens before any WS attach is logged.
     try { await broadcasters.get(event.payload.name); }
-    catch (e) { console.error(`[tmux-hub] prime broadcaster failed for ${event.payload.name}:`, e); }
+    catch (e) { logger.error({ session: event.payload.name, err: e }, "prime broadcaster failed"); }
   } else if (event.event === "session_removed") {
-    // Session is truly gone from tmux — delete the log file too.
     await broadcasters.stop(event.payload.name, { deleteLog: true });
   }
 });
 
-// On startup, prime broadcasters for sessions that already exist. The first
-// registry.snapshot() is empty until polling fires; wait a tick.
 setTimeout(() => {
   for (const s of registry.snapshot()) {
     void broadcasters.get(s.name).catch((e) => {
-      console.error(`[tmux-hub] initial prime failed for ${s.name}:`, e);
+      logger.error({ session: s.name, err: e }, "initial prime failed");
     });
   }
 }, 100);
@@ -89,12 +87,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB_DIST = join(HERE, "../../dist/web");
 const SERVE_STATIC = existsSync(WEB_DIST);
 
-// PWA: explicit headers per resource type. SW must be served with
-// `Service-Worker-Allowed: /` so it can claim the entire origin even when
-// emitted under a subpath, and `Cache-Control: no-cache` so a stale SW does
-// not trap the PWA on an old shell. The manifest needs the
-// `application/manifest+json` content-type to be picked up by Lighthouse and
-// Edge's install heuristics; `no-store` keeps the install metadata fresh.
 function staticHeaders(pathname: string): HeadersInit | undefined {
   if (pathname === "/sw.js") {
     return {
@@ -128,13 +120,12 @@ if (SERVE_STATIC) {
     return new Response(Bun.file(join(WEB_DIST, "index.html")));
   });
 }
-console.error(`[tmux-hub] static dir ${WEB_DIST} ${SERVE_STATIC ? "(serving)" : "(not built)"}`);
-console.error(`[tmux-hub] image dir: ${IMAGE_DIR}`);
 
 type WsData = {
   sessionName: string;
   cols: number;
   rows: number;
+  connId: string;
   unsubs: Array<() => void>;
 };
 
@@ -143,7 +134,14 @@ function clampInt(v: number, lo: number, hi: number, fallback: number): number {
   return Math.max(lo, Math.min(hi, Math.floor(v)));
 }
 
-console.error(`[tmux-hub] listening on http://${HUB_HOST}:${HUB_PORT}`);
+logger.info({
+  host: HUB_HOST,
+  port: HUB_PORT,
+  staticDir: WEB_DIST,
+  staticServing: SERVE_STATIC,
+  imageDir: IMAGE_DIR,
+  logFile: LOG_FILE,
+}, "server starting");
 
 Bun.serve({
   hostname: HUB_HOST,
@@ -154,34 +152,44 @@ Bun.serve({
     const wsMatch = url.pathname.match(/^\/ws\/sessions\/([^/]+)$/);
     if (wsMatch) {
       const sessionName = decodeURIComponent(wsMatch[1]!);
-      if (!isGrammarOk(sessionName)) return new Response("bad session name", { status: 400 });
+      if (!isGrammarOk(sessionName)) {
+        logger.warn({ session: sessionName }, "ws upgrade rejected: bad session name");
+        return new Response("bad session name", { status: 400 });
+      }
       const token = url.searchParams.get("token");
-      if (!token || !safeEqual(token, SECRET)) return new Response("unauthorized", { status: 401 });
+      if (!token || !safeEqual(token, SECRET)) {
+        logger.warn({ session: sessionName }, "ws upgrade rejected: auth failed");
+        return new Response("unauthorized", { status: 401 });
+      }
       if (!registry.snapshot().find((s) => s.name === sessionName)) {
+        logger.warn({ session: sessionName }, "ws upgrade rejected: session not found");
         return new Response("session not found", { status: 410 });
       }
       const cols = clampInt(Number(url.searchParams.get("cols")), 20, 500, WINDOW_COLS);
       const rows = clampInt(Number(url.searchParams.get("rows")), 5, 200, WINDOW_ROWS);
-      const data: WsData = { sessionName, cols, rows, unsubs: [] };
+      const connId = crypto.randomUUID().slice(0, 8);
+      const data: WsData = { sessionName, cols, rows, connId, unsubs: [] };
       if (server.upgrade(req, { data })) return undefined;
+      logger.error({ session: sessionName, connId }, "ws upgrade failed at server.upgrade()");
       return new Response("upgrade failed", { status: 426 });
     }
     return app.fetch(req);
   },
   websocket: {
     async open(ws: ServerWebSocket<WsData>) {
-      const { sessionName, cols, rows } = ws.data;
-      console.error(`[tmux-hub] ws open: session=${sessionName} cols=${cols} rows=${rows}`);
-      // Pin tmux window to client's actual fit() size BEFORE capturing snapshot.
-      // Previously hardcoded to WINDOW_COLS/ROWS (200x50), which made xterm wrap
-      // wide lines and accumulate scroll-offset (bug 2 root cause).
+      const { sessionName, cols, rows, connId } = ws.data;
+      logger.info({ session: sessionName, cols, rows, connId }, "ws open");
       try { await pinViewport(sessionName, cols, rows); }
-      catch (e) { try { ws.send(`[hub] viewport pin failed: ${(e as Error).message}\n`); } catch {} }
+      catch (e) {
+        logger.warn({ session: sessionName, connId, err: e }, "viewport pin failed");
+        try { ws.send(`[hub] viewport pin failed: ${(e as Error).message}\n`); } catch {}
+      }
 
       let b: Awaited<ReturnType<typeof broadcasters.get>>;
       try {
         b = await broadcasters.get(sessionName);
       } catch (e) {
+        logger.error({ session: sessionName, connId, err: e }, "broadcaster get failed; closing ws");
         try { ws.send(`[hub] broadcaster failed: ${(e as Error).message}\n`); } catch {}
         try { ws.close(1011, "broadcaster failed"); } catch {}
         return;
@@ -193,34 +201,27 @@ Bun.serve({
           sse.emit({ event: "replay_truncated", payload: { name: sessionName } });
         }
       });
-      // Replay buffered history (capped at 5 MB tail) then attach for live.
-      // Captures output from before this client connected — including time
-      // windows when no client was attached at all.
       const unsubData = b.attachWithReplay((chunk) => { try { ws.send(chunk); } catch {} });
       ws.data.unsubs.push(unsubEvents, unsubData);
     },
     async close(ws: ServerWebSocket<WsData>) {
-      console.error(`[tmux-hub] ws close: session=${ws.data.sessionName}`);
+      const { sessionName, connId } = ws.data;
+      logger.info({ session: sessionName, connId }, "ws close");
       const { unsubs } = ws.data;
       for (const fn of unsubs) try { fn(); } catch {}
       ws.data.unsubs.length = 0;
-      // Do NOT stop the broadcaster when the last client disconnects. We
-      // intentionally keep recording so history captured while no one is
-      // attached is replayable on next attach. The broadcaster is only
-      // stopped when the underlying tmux session is removed (see registry
-      // session_removed handler).
     },
     message(ws: ServerWebSocket<WsData>, raw) {
-      const { sessionName } = ws.data;
+      const { sessionName, connId } = ws.data;
       let parsed: unknown;
       try {
         const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
         parsed = JSON.parse(text);
       } catch {
+        logger.debug({ session: sessionName, connId }, "ws message: invalid json");
         try { ws.send(JSON.stringify({ error: "invalid json" })); } catch {}
         return;
       }
-      // Heartbeat: echo pong immediately, do not route to tmux.
       if (typeof parsed === "object" && parsed !== null && (parsed as { kind?: string }).kind === "ping") {
         const ts = (parsed as { ts?: number }).ts ?? 0;
         try { ws.send(JSON.stringify({ kind: "pong", ts })); } catch {}
@@ -228,10 +229,13 @@ Bun.serve({
       }
       input.send(sessionName, parsed as Parameters<typeof input.send>[1]).catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : String(e);
-        try { ws.send(JSON.stringify({ error: msg })); } catch {}
         if (e instanceof HubError && e.code === 410) {
+          logger.warn({ session: sessionName, connId }, "input send: session gone");
           try { ws.close(4410, "session gone"); } catch {}
+        } else {
+          logger.error({ session: sessionName, connId, err: e }, "input send failed");
         }
+        try { ws.send(JSON.stringify({ error: msg })); } catch {}
       });
     },
   },

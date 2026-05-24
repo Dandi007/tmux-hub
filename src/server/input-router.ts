@@ -1,6 +1,9 @@
 import { tmux as defaultTmux } from "./tmux-cmd";
 import type { ClientWsMessage } from "../shared/protocol";
 import { assertGrammar } from "../shared/session-name";
+import { createLogger } from "./logger";
+
+const logger = createLogger("input");
 
 export type TmuxRun = (args: string[]) => Promise<{ stdout: string; stderr: string; code: number }>;
 
@@ -45,17 +48,27 @@ export class InputRouter {
   private async doSend(session: string, msg: ClientWsMessage): Promise<void> {
     if (msg.kind === "keys") {
       const r = await this.run(["send-keys", "-t", `${session}:0.0`, "-l", msg.literal]);
-      if (r.code !== 0) throw classifyTmuxError(session, r.stderr);
+      if (r.code !== 0) {
+        logger.error({ session, stderr: r.stderr }, "send-keys (literal) failed");
+        throw classifyTmuxError(session, r.stderr);
+      }
     } else if (msg.kind === "key") {
       if (!ALLOWED_KEYS.has(msg.name)) {
+        logger.warn({ session, key: msg.name }, "unknown key rejected");
         throw new HubError(`unknown key: ${msg.name}`, 400);
       }
       const r = await this.run(["send-keys", "-t", `${session}:0.0`, msg.name]);
-      if (r.code !== 0) throw classifyTmuxError(session, r.stderr);
+      if (r.code !== 0) {
+        logger.error({ session, key: msg.name, stderr: r.stderr }, "send-keys (named) failed");
+        throw classifyTmuxError(session, r.stderr);
+      }
     } else if (msg.kind === "resize") {
       const cols = Math.max(20, Math.min(500, Math.floor(msg.cols)));
       const rows = Math.max(5, Math.min(200, Math.floor(msg.rows)));
-      await this.run(["resize-window", "-t", `${session}:0`, "-x", String(cols), "-y", String(rows)]);
+      const r = await this.run(["resize-window", "-t", `${session}:0`, "-x", String(cols), "-y", String(rows)]);
+      if (r.code !== 0) {
+        logger.warn({ session, cols, rows, stderr: r.stderr }, "resize-window failed");
+      }
     }
   }
 }

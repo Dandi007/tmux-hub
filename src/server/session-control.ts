@@ -3,6 +3,9 @@ import { tmux as defaultTmux } from "./tmux-cmd";
 import { CAPTURE_PANE_LINES } from "./config";
 import { isGrammarOk } from "../shared/session-name";
 import type { BroadcasterRegistry } from "./output-broadcaster";
+import { createLogger } from "./logger";
+
+const logger = createLogger("session-control");
 
 export type TmuxRun = (args: string[]) => Promise<{ stdout: string; stderr: string; code: number }>;
 
@@ -27,8 +30,12 @@ export function buildSessionControlRoutes(deps: SessionControlDeps): Hono {
       return c.json({ error: "missing X-Hub-Confirm: kill header" }, 428);
     }
     const result = await run(["kill-session", "-t", name]);
-    if (result.code !== 0) return c.json({ error: result.stderr }, 410);
+    if (result.code !== 0) {
+      logger.warn({ session: name, stderr: result.stderr }, "kill-session failed");
+      return c.json({ error: result.stderr }, 410);
+    }
     await deps.broadcasters.stop(name);
+    logger.info({ session: name }, "session killed");
     return c.json({ ok: true });
   });
 
@@ -40,7 +47,11 @@ export function buildSessionControlRoutes(deps: SessionControlDeps): Hono {
     const to = body.to;
     if (!to || !isGrammarOk(to)) return c.json({ error: "target name grammar" }, 400);
     const result = await run(["rename-session", "-t", name, to]);
-    if (result.code !== 0) return c.json({ error: result.stderr }, 400);
+    if (result.code !== 0) {
+      logger.warn({ session: name, to, stderr: result.stderr }, "rename-session failed");
+      return c.json({ error: result.stderr }, 400);
+    }
+    logger.info({ session: name, to }, "session renamed");
     return c.json({ ok: true, name: to });
   });
 
@@ -59,8 +70,13 @@ export function buildSessionControlRoutes(deps: SessionControlDeps): Hono {
   });
 
   r.post("/system/start-tmux-server", async (c) => {
+    logger.info("starting tmux server");
     const result = await run(["start-server"]);
-    if (result.code !== 0) return c.json({ error: result.stderr }, 500);
+    if (result.code !== 0) {
+      logger.error({ stderr: result.stderr }, "start-server failed");
+      return c.json({ error: result.stderr }, 500);
+    }
+    logger.info("tmux server started");
     return c.json({ ok: true });
   });
 

@@ -2,6 +2,9 @@ import { tmux as defaultTmux } from "./tmux-cmd";
 import { expandHome, type Template } from "./config";
 import { existsSync } from "node:fs";
 import { isGrammarOk } from "../shared/session-name";
+import { createLogger } from "./logger";
+
+const logger = createLogger("template");
 
 export type TmuxRun = (args: string[]) => Promise<{ stdout: string; stderr: string; code: number }>;
 
@@ -32,7 +35,11 @@ export class TemplateRunner {
     if (has.code === 0) throw new TemplateError(`session already exists: ${name}`, 409);
 
     const r = await this.tmuxRun(["new-session", "-d", "-s", name, "-c", expanded, t.cmd]);
-    if (r.code !== 0) throw new TemplateError(`new-session failed: ${r.stderr}`, 500);
+    if (r.code !== 0) {
+      logger.error({ template: templateId, session: name, stderr: r.stderr }, "new-session failed");
+      throw new TemplateError(`new-session failed: ${r.stderr}`, 500);
+    }
+    logger.info({ template: templateId, session: name, cwd: expanded }, "template session created");
     return name;
   }
 }

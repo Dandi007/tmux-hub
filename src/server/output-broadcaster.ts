@@ -8,6 +8,9 @@ import { RING_BUFFER_BYTES } from "./config";
 import { mkdirSync, openSync, readSync, closeSync, existsSync, unlinkSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+import { createLogger } from "./logger";
+
+const logger = createLogger("broadcaster");
 
 const LOG_DIR = process.env.TMUX_HUB_LOG_DIR
   ? resolve(process.env.TMUX_HUB_LOG_DIR)
@@ -54,6 +57,7 @@ export class SessionBroadcaster {
     const shellCmd = `cat >> ${shellQuote(this.logPath)}`;
     const r = await this.run(["pipe-pane", "-t", `${this.session}:0.0`, shellCmd]);
     if (r.code !== 0) {
+      logger.error({ session: this.session, code: r.code, stderr: r.stderr }, "pipe-pane failed");
       throw new Error(`pipe-pane failed (${r.code}): ${r.stderr}`);
     }
     if (!existsSync(this.logPath)) {
@@ -63,6 +67,7 @@ export class SessionBroadcaster {
     this.fd = openSync(this.logPath, "r");
     this.offset = 0;
     this.pollTimer = setInterval(() => { this.poll(); }, 5);
+    logger.info({ session: this.session, logPath: this.logPath }, "broadcaster started");
   }
 
   async sendInitialSnapshot(send: Subscriber): Promise<void> {
@@ -107,6 +112,7 @@ export class SessionBroadcaster {
         send(buf);
       }
     } catch (e) {
+      logger.error({ session: this.session, err: e }, "replay read failed");
       for (const l of this.eventListeners) l({ kind: "error", message: `replay: ${String(e)}` });
     } finally {
       this.subscribers.delete(tap);
@@ -131,6 +137,7 @@ export class SessionBroadcaster {
   async stop(opts: { deleteLog?: boolean } = {}): Promise<void> {
     if (this.stopped) return;
     this.stopped = true;
+    logger.info({ session: this.session, deleteLog: !!opts.deleteLog }, "broadcaster stopping");
     if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
     if (this.fd !== null) { try { closeSync(this.fd); } catch { /* ignore */ } this.fd = null; }
     await this.run(["pipe-pane", "-o", "-t", `${this.session}:0.0`]).catch(() => undefined);
@@ -170,6 +177,7 @@ export class SessionBroadcaster {
         if (n < this.pollChunk.length) break;
       }
     } catch (e) {
+      logger.error({ session: this.session, err: e }, "poll read error");
       for (const l of this.eventListeners) l({ kind: "error", message: String(e) });
     }
   }
