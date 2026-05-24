@@ -80,22 +80,14 @@ spec 必须包含：
 
 ### 2.3  MR 结构
 
-```markdown
-## Summary
-- 功能要点（bullet list，3 条以内）
+仓库提供了 PR template（[`.github/pull_request_template.md`](.github/pull_request_template.md)），创建 PR 时 GitHub 会自动填充。所有 MR 必须按此模板填写，不得删除任何章节：
 
-## Spec
-- [链接到 docs/superpowers/specs/YYYY-MM-DD-xxx-design.md](docs/superpowers/specs/...)
-
-## Changed Files
-| 文件 | 说明 |
+| 章节 | 要求 |
 |------|------|
-| `src/web/mobile/foo.ts` | 新增 xxx |
-
-## Test Plan
-- [ ] E2E: 场景描述
-- [ ] Unit: 函数名或行为
-```
+| **Summary** | 1-3 条 bullet，说明改了什么、为什么 |
+| **Spec** | 链接到 `docs/superpowers/specs/` 下的设计文档（必须有） |
+| **Changed Files** | 表格列出所有改动文件 + 一句话说明 |
+| **Test Plan** | 勾选适用的 checklist 项，标注新增的 E2E / unit / integration 测试 |
 
 ---
 
