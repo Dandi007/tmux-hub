@@ -1,7 +1,6 @@
 import { renderSessionList } from "./session-list";
 import { renderTemplateDrawer } from "./template-drawer";
 import { renderSessionPicker } from "../mobile/session-picker";
-import { renderInputBox } from "../mobile/input-box";
 import { renderImageAttachButton } from "../mobile/image-attach";
 import { attachTerminal, type TerminalHandle } from "../terminal";
 import { subscribeEvents } from "../sse-client";
@@ -239,43 +238,39 @@ export function renderDesktop(root: HTMLElement): void {
 
   const send = (msg: ClientWsMessage) => { term?.send(msg); };
 
-  const drawer = document.createElement("div");
-  drawer.className = "mobile-drawer";
-  const inputForm = renderInputBox(drawer, send);
-  root.appendChild(drawer);
+  // Bottom input bar: [📎] [textarea] — iMessage style, always editable
+  const inputBar = document.createElement("div");
+  inputBar.className = "mobile-input-bar desktop-input-bar";
+  root.appendChild(inputBar);
 
-  const toolbar = document.createElement("div");
-  toolbar.className = "desktop-toolbar";
-  root.appendChild(toolbar);
+  const ta = document.createElement("textarea");
+  ta.className = "input-bar__textarea";
+  ta.rows = 1;
+  ta.placeholder = "输入...";
 
-  const toggleBtn = document.createElement("button");
-  toggleBtn.type = "button";
-  toggleBtn.className = "mobile-toolbar__toggle";
-  toggleBtn.setAttribute("aria-expanded", "false");
-  toggleBtn.setAttribute("aria-label", "切换多行输入");
-  toggleBtn.textContent = "✎";
-  toolbar.appendChild(toggleBtn);
-
-  let drawerOpen = false;
-  const setDrawer = (open: boolean) => {
-    drawerOpen = open;
-    drawer.classList.toggle("is-open", open);
-    toggleBtn.classList.toggle("is-active", open);
-    toggleBtn.setAttribute("aria-expanded", String(open));
-    if (open) {
-      const ta = drawer.querySelector<HTMLTextAreaElement>(".mobile-input__textarea");
-      ta?.focus();
-    }
+  const doSend = () => {
+    const text = ta.value;
+    if (text) send({ kind: "keys", literal: text });
+    send({ kind: "key", name: "Enter" });
+    ta.value = "";
   };
-  toggleBtn.addEventListener("click", () => setDrawer(!drawerOpen));
-  inputForm.addEventListener("submit", () => { setDrawer(false); });
 
-  renderImageAttachButton({
-    parent: toolbar,
-    getSession: () => openedName,
-    getTextarea: () => drawer.querySelector<HTMLTextAreaElement>(".mobile-input__textarea"),
-    openDrawer: () => setDrawer(true),
+  ta.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      doSend();
+    }
   });
+
+  const attachBtn = renderImageAttachButton({
+    parent: inputBar,
+    getSession: () => openedName,
+    getTextarea: () => ta,
+    openDrawer: () => ta.focus(),
+  });
+  attachBtn.className = "input-bar__attach";
+
+  inputBar.appendChild(ta);
 
   root.addEventListener("paste", (e) => {
     const items = (e as ClipboardEvent).clipboardData?.items;
