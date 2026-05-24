@@ -475,10 +475,10 @@ button.is-danger:hover { filter: brightness(1.15); }
 .input-bar__attach,
 .input-bar__expand {
   flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
-  min-width: 36px;
-  min-height: 36px;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
   padding: 0;
   display: flex;
   align-items: center;
@@ -500,10 +500,10 @@ button.is-danger:hover { filter: brightness(1.15); }
 }
 .input-bar__field {
   flex: 1;
-  height: 36px;
+  height: var(--tap-min);
   background: var(--color-surface);
   border: none;
-  border-radius: 18px;
+  border-radius: calc(var(--tap-min) / 2);
   padding: 0 var(--space-3);
   color: var(--color-text-mute);
   font: 14px var(--font-mono);

@@ -272,8 +272,13 @@ export function renderMobile(root: HTMLElement): void {
 
   type Panel = "none" | "text" | "keys";
   let activePanel: Panel = "none";
-  const setPanel = (target: Panel) => {
-    activePanel = activePanel === target ? "none" : target;
+  const setPanel = (target: Panel, opts?: { force?: boolean }) => {
+    const next = (!opts?.force && activePanel === target) ? "none" : target;
+    if (next !== "text") {
+      const ta = drawer.querySelector<HTMLTextAreaElement>(".mobile-input__textarea");
+      ta?.blur();
+    }
+    activePanel = next;
     drawer.classList.toggle("is-open", activePanel === "text");
     keysPanel.classList.toggle("is-open", activePanel === "keys");
     expandBtn.classList.toggle("is-active", activePanel === "keys");
@@ -288,14 +293,14 @@ export function renderMobile(root: HTMLElement): void {
     parent: inputBar,
     getSession: () => openedName,
     getTextarea: () => drawer.querySelector<HTMLTextAreaElement>(".mobile-input__textarea"),
-    openDrawer: () => setPanel("text"),
+    openDrawer: () => setPanel("text", { force: true }),
   });
   attachBtn.className = "input-bar__attach";
 
-  const inputField = document.createElement("div");
+  const inputField = document.createElement("button");
+  inputField.type = "button";
   inputField.className = "input-bar__field";
   inputField.textContent = "输入...";
-  inputField.setAttribute("role", "button");
   inputField.setAttribute("aria-label", "打开文字输入");
   inputField.addEventListener("click", () => setPanel("text"));
   inputBar.appendChild(inputField);
