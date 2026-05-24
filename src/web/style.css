@@ -338,7 +338,6 @@ button.is-danger:hover { filter: brightness(1.15); }
 .session-picker__item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-picker__item-meta { flex: 0 0 auto; color: var(--color-text-mute); font-size: 12px; }
 .mobile-shell__term-host { flex: 1; min-height: 0; padding: 0; overflow: hidden; }
-.mobile-shell { padding-bottom: 44px; }
 /* Collapsible composer drawer. Default closed: max-height collapses to 0,
    transition keeps the open/close motion smooth without layout thrash. */
 .mobile-drawer {
@@ -470,18 +469,11 @@ button.is-danger:hover { filter: brightness(1.15); }
    Uses position:fixed to break out of the 100dvh flex container and
    reach into the safe-area zone behind the home indicator. */
 .mobile-input-bar {
-  position: fixed;
-  bottom: calc(-1 * var(--safe-bottom));
-  left: 0;
-  right: 0;
-  z-index: 5;
   display: flex;
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-2);
-  padding-bottom: calc(var(--safe-bottom) * 0.15);
-  padding-left: calc(var(--space-2) + var(--safe-left));
-  padding-right: calc(var(--space-2) + var(--safe-right));
+  padding-bottom: calc(var(--space-1) + var(--safe-bottom));
   background: var(--color-bg);
 }
 .input-bar__attach,
