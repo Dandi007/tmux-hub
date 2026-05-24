@@ -482,7 +482,7 @@ button.is-danger:hover { filter: brightness(1.15); }
   padding-bottom: calc(var(--space-1) + var(--safe-bottom) * 0.3);
   padding-left: calc(var(--space-2) + var(--safe-left));
   padding-right: calc(var(--space-2) + var(--safe-right));
-  background: oklch(40% 0.2 25); /* DEBUG: red — remove after position confirmed */
+  background: var(--color-bg);
 }
 .input-bar__attach,
 .input-bar__expand {
