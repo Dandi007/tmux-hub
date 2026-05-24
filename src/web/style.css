@@ -44,7 +44,6 @@ html, body {
 #app {
   position: absolute;
   inset: 0;
-  overflow: hidden;
   overscroll-behavior: none;
 }
 body {
