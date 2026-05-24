@@ -1,7 +1,7 @@
-// src/server/tmux-cmd.ts
-// Subprocess wrapper for tmux. Talks to the user's default tmux server in production.
-// In tests, callers must pass -L <socket> to redirect to an isolated server (enforced by
-// tests/helpers/lint-no-default-socket.ts).
+import { createLogger } from "./logger";
+
+const logger = createLogger("tmux-cmd");
+
 export type TmuxResult = {
   stdout: string;
   stderr: string;
@@ -20,6 +20,7 @@ export async function tmux(args: string[]): Promise<TmuxResult> {
     new Response(proc.stderr).text(),
   ]);
   const code = await proc.exited;
+  logger.trace({ args: finalArgs, code }, "tmux exec");
   return { stdout: stdout.trimEnd(), stderr: stderr.trimEnd(), code };
 }
 

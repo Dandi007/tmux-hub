@@ -2,6 +2,9 @@ import { tmux } from "./tmux-cmd";
 import type { SessionInfo, ServerEvent } from "../shared/protocol";
 import { REGISTRY_INTERVAL_MS } from "./config";
 import { isGrammarOk } from "../shared/session-name";
+import { createLogger } from "./logger";
+
+const logger = createLogger("registry");
 
 const FORMAT = "#{session_name}|#{session_activity}|#{session_attached}|#{session_windows}";
 
@@ -87,16 +90,25 @@ export class SessionRegistry {
     if (next === null) {
       if (this.serverReachable) {
         this.serverReachable = false;
+        logger.error("tmux server unreachable");
         this.emit({ event: "server_down" });
       }
       return;
     }
     if (!this.serverReachable) {
       this.serverReachable = true;
+      logger.info("tmux server recovered");
       this.emit({ event: "server_up" });
     }
     const events = diffSessions(this.state, next);
     this.state = next;
-    for (const e of events) this.emit(e);
+    for (const e of events) {
+      if (e.event === "session_created") {
+        logger.info({ session: e.payload.name }, "session created");
+      } else if (e.event === "session_removed") {
+        logger.info({ session: (e.payload as { name: string }).name }, "session removed");
+      }
+      this.emit(e);
+    }
   }
 }

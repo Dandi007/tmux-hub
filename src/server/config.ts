@@ -3,6 +3,9 @@ import { z } from "zod";
 import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+import { createLogger } from "./logger";
+
+const logger = createLogger("config");
 
 export const TemplateSchema = z.object({
   id: z.string().min(1).max(16).regex(/^[a-z0-9][a-z0-9-]*$/),
@@ -27,12 +30,12 @@ export function loadTemplates(): Template[] {
   const path = process.env.TMUX_HUB_TEMPLATES_PATH ??
     resolve(homedir(), ".config/tmux-hub/templates.yaml");
   if (!existsSync(path)) {
-    console.warn(`[tmux-hub] templates file not found at ${path}; using empty list`);
+    logger.warn({ path }, "templates file not found; using empty list");
     return [];
   }
   const yaml = readFileSync(path, "utf8");
   const templates = parseTemplatesYaml(yaml);
-  console.error(`[tmux-hub] effective templates: ${templates.map((t) => t.id).join(", ") || "(none)"}`);
+  logger.info({ templates: templates.map((t) => t.id) }, "templates loaded");
   return templates;
 }
 
@@ -54,9 +57,7 @@ function parsePositiveInt(raw: string | undefined, fallback: number, envName: st
   if (raw === undefined) return fallback;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) {
-    console.error(
-      `[tmux-hub] ${envName}=${raw} is not a positive finite number; falling back to ${fallback}`,
-    );
+    logger.warn({ envName, raw, fallback }, "invalid env var; using fallback");
     return fallback;
   }
   return parsed;
@@ -66,10 +67,7 @@ export const IMAGE_DIR = expandHome(
   process.env.TMUX_HUB_IMAGE_DIR ?? "~/Pictures/tmux-hub",
 );
 if (IMAGE_DIR.includes(" ")) {
-  console.error(
-    `[tmux-hub] WARNING: TMUX_HUB_IMAGE_DIR contains spaces (${IMAGE_DIR}); ` +
-    `injected paths will be split by TUI parsers like claude-code. Pick a space-free path.`,
-  );
+  logger.warn({ imageDir: IMAGE_DIR }, "IMAGE_DIR contains spaces; injected paths will be split by TUI parsers");
 }
 export const MAX_IMAGE_BYTES = parsePositiveInt(
   process.env.TMUX_HUB_MAX_IMAGE_BYTES,

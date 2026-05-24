@@ -1,6 +1,9 @@
 import type { MiddlewareHandler } from "hono";
 import { loadOrCreateSecret, safeEqual } from "./secret";
 import { verifyCfAccessJwt } from "./cf-access";
+import { createLogger } from "./logger";
+
+const logger = createLogger("auth");
 
 const SECRET = loadOrCreateSecret();
 
@@ -48,7 +51,10 @@ export const authGate: MiddlewareHandler = async (c, next) => {
     return next();
   }
 
-  if (!authed) return c.json({ error: "unauthorized" }, 401);
+  if (!authed) {
+    logger.warn({ method: c.req.method, path }, "auth rejected: unauthorized write");
+    return c.json({ error: "unauthorized" }, 401);
+  }
   c.set("identity", cfOk?.email ?? "local-secret");
   return next();
 };

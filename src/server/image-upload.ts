@@ -3,6 +3,9 @@ import { bodyLimit } from "hono/body-limit";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { isGrammarOk } from "../shared/session-name";
+import { createLogger } from "./logger";
+
+const logger = createLogger("image-upload");
 
 export const IMAGE_MIME_WHITELIST = [
   "image/png",
@@ -95,8 +98,10 @@ export function buildImageUploadRoutes(deps: ImageUploadDeps): Hono {
         await Bun.write(absPath, file);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
+        logger.error({ session: name, path: absPath, err: e }, "image write failed");
         return c.json({ error: `write failed: ${msg}` }, 500);
       }
+      logger.info({ session: name, path: absPath, size: file.size, mime: file.type }, "image uploaded");
       return c.json({ ok: true, path: absPath });
     },
   );
