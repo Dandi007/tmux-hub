@@ -63,14 +63,12 @@ body {
    contain its scroll so iOS rubber-band cannot bubble up to body. */
 .xterm-viewport {
   overscroll-behavior: contain;
-  /* iOS Safari touch scroll: hand off to the compositor and constrain the
-     gesture to vertical so horizontal swipes don't fight xterm.
-     `will-change: transform` promotes the layer; `-webkit-overflow-
-     scrolling: touch` enables momentum scroll on older iOS. */
   touch-action: pan-y;
   will-change: transform;
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
 }
+.xterm-viewport::-webkit-scrollbar { display: none; }
 /* Promote the xterm screen + renderer canvases to their own compositor
    layer so scrolling no longer triggers cell-by-cell repaints on the
    main thread (visible as jank on iOS Safari). */
