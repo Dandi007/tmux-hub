@@ -16,6 +16,7 @@ import { createConnectionStatus } from "../ui/connection-status";
 import { renameSession } from "../shared/rename-controller";
 import { killSession } from "../shared/kill-controller";
 import { renderQuickLaunchButton } from "../mobile/quick-launch";
+import { saveLastSession, loadLastSession } from "../shared/last-session";
 
 export function renderDesktop(root: HTMLElement): void {
   root.replaceChildren();
@@ -74,6 +75,7 @@ export function renderDesktop(root: HTMLElement): void {
       const next = await attachTerminal({ sessionName: name, parent: termHost });
       if (openedName !== name) { next.close(); return; }
       term = next;
+      saveLastSession(name);
       termHost.insertBefore(connStatus.el, termHost.firstChild);
       next.onStateChange((state, attempt) => {
         connStatus.update(state, attempt);
@@ -179,13 +181,21 @@ export function renderDesktop(root: HTMLElement): void {
     });
   };
 
+  let hasRestoredSession = false;
+
   const refreshPicker = () => {
     picker.refresh(sessions, openedName);
 
     if (!openedName || !sessions.find((s) => s.name === openedName)) {
       const sorted = sessions.slice().sort((a, b) => b.activity - a.activity);
-      const first = sorted.find((s) => isGrammarOk(s.name));
-      if (first) void openSession(first.name);
+      let target: SessionInfo | undefined;
+      if (!hasRestoredSession) {
+        hasRestoredSession = true;
+        const last = loadLastSession();
+        if (last) target = sorted.find((s) => s.name === last && isGrammarOk(s.name));
+      }
+      if (!target) target = sorted.find((s) => isGrammarOk(s.name));
+      if (target) void openSession(target.name);
     }
   };
 
