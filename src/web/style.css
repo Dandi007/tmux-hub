@@ -28,7 +28,7 @@ html { background: var(--color-bg); }
 html, body {
   margin: 0;
   padding: 0;
-  overflow: hidden;
+  overflow: visible;
   overscroll-behavior: none;
   position: fixed;
   inset: 0;
