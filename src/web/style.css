@@ -24,11 +24,10 @@
 }
 
 * { box-sizing: border-box; }
-html { background: var(--color-bg); }
 html, body {
   margin: 0;
   padding: 0;
-  overflow: visible;
+  overflow: hidden;
   overscroll-behavior: none;
   position: fixed;
   inset: 0;
@@ -44,6 +43,7 @@ html, body {
 #app {
   position: absolute;
   inset: 0;
+  overflow: hidden;
   overscroll-behavior: none;
 }
 body {
@@ -463,16 +463,14 @@ button.is-danger:hover { filter: brightness(1.15); }
   .toolbar-keys { grid-template-rows: calc(var(--tap-min) - 4px) calc(var(--tap-min) - 4px); }
 }
 
-/* Mobile input bar — compact bottom bar: [📎] [text field] [+]
-   transform pushes the bar into the safe-area zone on iOS, where
-   the flex container boundary cannot reach. */
+/* Mobile input bar — compact bottom bar: [📎] [text field] [+] */
 .mobile-input-bar {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-1) var(--space-2) var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  padding-bottom: calc(var(--space-1) + var(--safe-bottom));
   background: var(--color-bg);
-  transform: translateY(calc(var(--safe-bottom) * 0.55));
 }
 .input-bar__attach,
 .input-bar__expand {
