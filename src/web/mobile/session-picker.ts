@@ -43,7 +43,7 @@ export function renderSessionPicker(
   killBtn.type = "button";
   killBtn.className = "header-action is-danger";
   killBtn.setAttribute("aria-label", "关闭当前 session");
-  killBtn.textContent = "✕";
+  killBtn.textContent = "⏻";
 
   const triggerRow = document.createElement("div");
   triggerRow.className = "session-picker__trigger-row";

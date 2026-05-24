@@ -360,16 +360,17 @@ button.is-danger:hover { filter: brightness(1.15); }
   padding: 0 .5rem;
   font-size: 1rem;
   background: transparent;
-  border: none;
+  border: 1px solid var(--color-surface-hi);
   border-radius: 6px;
   color: var(--color-text-mute);
   cursor: pointer;
   transition: background var(--duration-fast) var(--ease-out-expo),
-              color var(--duration-fast) var(--ease-out-expo);
+              color var(--duration-fast) var(--ease-out-expo),
+              border-color var(--duration-fast) var(--ease-out-expo);
 }
-.header-action:hover { background: var(--color-surface-hi); color: var(--color-text); }
+.header-action:hover { background: var(--color-surface-hi); color: var(--color-text); border-color: transparent; }
 .header-action:active { background: var(--color-surface-active); }
-.header-action.is-danger:hover { background: oklch(30% 0.08 25); color: var(--color-danger); }
+.header-action.is-danger:hover { background: oklch(30% 0.08 25); color: var(--color-danger); border-color: transparent; }
 .header-action:disabled { opacity: 0.35; cursor: not-allowed; }
 .header-action:disabled:hover { background: transparent; color: var(--color-text-mute); }
 
