@@ -31,27 +31,34 @@
 
 ### 架构总览
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│  Browser (Desktop / Mobile / PWA)                            │
-│  ┌─────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────┐  │
-│  │ xterm.js│  │ SSE 事件 │  │ session  │  │ 图片上传     │  │
-│  │ 终端渲染│  │ 实时同步 │  │ 管理 UI  │  │ (file/paste) │  │
-│  └────┬────┘  └─────┬────┘  └─────┬────┘  └──────┬───────┘  │
-│       │WS           │GET /events  │POST           │POST      │
-├───────┼─────────────┼─────────────┼───────────────┼──────────┤
-│  Bun Server (Hono)  │             │               │          │
-│  ┌────┴────┐  ┌─────┴────┐  ┌────┴─────┐  ┌─────┴───────┐  │
-│  │Broadcast│  │ Registry │  │ Session  │  │ Image       │  │
-│  │Registry │  │ (2s poll)│  │ Control  │  │ Upload      │  │
-│  └────┬────┘  └─────┬────┘  └────┬─────┘  └─────────────┘  │
-│       │pipe-pane    │list-sessions│send-keys/kill/rename     │
-├───────┼─────────────┼─────────────┼──────────────────────────┤
-│  tmux server        │             │                          │
-│  ┌──────────────────┴─────────────┴────────────────────────┐ │
-│  │  session-A    session-B    session-C    ...              │ │
-│  └─────────────────────────────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+  subgraph Browser["Browser (Desktop / Mobile / PWA)"]
+    XTERM["xterm.js 终端渲染"]
+    SSE_CLIENT["SSE 事件实时同步"]
+    SESSION_UI["Session 管理 UI"]
+    IMG_UI["图片上传 (file/paste)"]
+  end
+
+  subgraph Server["Bun Server (Hono)"]
+    BROADCASTER["Broadcast Registry"]
+    REGISTRY["Session Registry\n(2s poll)"]
+    CONTROL["Session Control"]
+    IMG_UPLOAD["Image Upload"]
+  end
+
+  subgraph TMUX["tmux server"]
+    SESSIONS["session-A &nbsp; session-B &nbsp; session-C &nbsp; ..."]
+  end
+
+  XTERM -- "WebSocket" --> BROADCASTER
+  SSE_CLIENT -- "GET /events (SSE)" --> REGISTRY
+  SESSION_UI -- "POST" --> CONTROL
+  IMG_UI -- "POST" --> IMG_UPLOAD
+
+  BROADCASTER -- "pipe-pane" --> SESSIONS
+  REGISTRY -- "list-sessions" --> SESSIONS
+  CONTROL -- "send-keys / kill / rename" --> SESSIONS
 ```
 
 ### 关键机制
