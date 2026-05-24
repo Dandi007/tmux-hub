@@ -502,8 +502,8 @@ button.is-danger:hover { filter: brightness(1.15); }
 }
 .input-bar__textarea {
   flex: 1;
-  min-height: var(--tap-min);
-  max-height: 120px;
+  height: 5rem;
+  max-height: 5rem;
   background: var(--color-surface);
   border: none;
   border-radius: calc(var(--tap-min) / 2);
