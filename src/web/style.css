@@ -27,8 +27,6 @@
 html, body {
   margin: 0;
   padding: 0;
-  height: 100dvh;
-  width: 100vw;
   overflow: hidden;
   overscroll-behavior: none;
   position: fixed;
@@ -116,7 +114,7 @@ button.is-danger:hover { filter: brightness(1.15); }
 .desktop-shell {
   display: flex;
   flex-direction: column;
-  height: 100dvh;
+  height: 100%;
   overflow: hidden;
   padding-left: var(--safe-left);
   padding-right: var(--safe-right);
@@ -237,7 +235,7 @@ button.is-danger:hover { filter: brightness(1.15); }
 .mobile-shell {
   display: flex;
   flex-direction: column;
-  height: 100dvh;
+  height: 100%;
   padding-left: var(--safe-left);
   padding-right: var(--safe-right);
 }
