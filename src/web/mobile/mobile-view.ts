@@ -271,11 +271,18 @@ export function renderMobile(root: HTMLElement): void {
   let editing = false;
   let keysOpen = false;
 
+  const autoResize = () => {
+    ta.style.height = "auto";
+    ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
+  };
+  ta.addEventListener("input", autoResize);
+
   const doSend = () => {
     const text = ta.value;
     if (text) send({ kind: "keys", literal: text });
     send({ kind: "key", name: "Enter" });
     ta.value = "";
+    ta.style.height = "";
     setEditing(false);
   };
 

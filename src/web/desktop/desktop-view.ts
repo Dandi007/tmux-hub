@@ -248,11 +248,18 @@ export function renderDesktop(root: HTMLElement): void {
   ta.rows = 1;
   ta.placeholder = "输入...";
 
+  const autoResize = () => {
+    ta.style.height = "auto";
+    ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
+  };
+  ta.addEventListener("input", autoResize);
+
   const doSend = () => {
     const text = ta.value;
     if (text) send({ kind: "keys", literal: text });
     send({ kind: "key", name: "Enter" });
     ta.value = "";
+    ta.style.height = "";
   };
 
   ta.addEventListener("keydown", (e) => {
