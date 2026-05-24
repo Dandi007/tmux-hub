@@ -1,5 +1,11 @@
 import { test, expect } from "./fixtures";
 import { bindSecret, uniqSession } from "./helpers";
+import type { Page } from "@playwright/test";
+
+async function openSidebar(page: Page): Promise<void> {
+  await page.locator(".desktop-shell__sidebar-toggle").click();
+  await page.waitForTimeout(300);
+}
 
 test.describe("key conformance (desktop xterm.onData path)", () => {
   test("plain text + Enter via desktop xterm flows to pane", async ({ page, ctx }) => {
@@ -10,9 +16,10 @@ test.describe("key conformance (desktop xterm.onData path)", () => {
     await bindSecret(page);
     await page.reload();
 
+    await openSidebar(page);
     await page.locator(".session-list__item", { hasText: name }).click();
-    await expect(page.locator(".session-host")).toBeVisible({ timeout: 10_000 });
-    await page.locator(".session-host").click();
+    await expect(page.locator(".desktop-shell__term-host")).toBeVisible({ timeout: 10_000 });
+    await page.locator(".desktop-shell__term-host").click();
     // Wait for xterm + WS to fully initialize and consume initial replay
     await page.waitForTimeout(1500);
 
@@ -35,9 +42,10 @@ test.describe("key conformance (desktop xterm.onData path)", () => {
     await bindSecret(page);
     await page.reload();
 
+    await openSidebar(page);
     await page.locator(".session-list__item", { hasText: name }).click();
-    await expect(page.locator(".session-host")).toBeVisible({ timeout: 10_000 });
-    await page.locator(".session-host").click();
+    await expect(page.locator(".desktop-shell__term-host")).toBeVisible({ timeout: 10_000 });
+    await page.locator(".desktop-shell__term-host").click();
     await page.waitForTimeout(1500);
 
     await page.keyboard.type("echo BAD");
@@ -66,9 +74,10 @@ test.describe("key conformance (desktop xterm.onData path)", () => {
     await bindSecret(page);
     await page.reload();
 
+    await openSidebar(page);
     await page.locator(".session-list__item", { hasText: name }).click();
-    await expect(page.locator(".session-host")).toBeVisible({ timeout: 10_000 });
-    await page.locator(".session-host").click();
+    await expect(page.locator(".desktop-shell__term-host")).toBeVisible({ timeout: 10_000 });
+    await page.locator(".desktop-shell__term-host").click();
     await page.waitForTimeout(1500);
 
     // Avoid putting any test-marker substring in the COMMAND text itself, so

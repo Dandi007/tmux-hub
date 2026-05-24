@@ -231,7 +231,7 @@ export function renderDesktop(root: HTMLElement): void {
     openDrawer: () => setDrawer(true),
   });
 
-  termHost.addEventListener("paste", (e) => {
+  root.addEventListener("paste", (e) => {
     const items = (e as ClipboardEvent).clipboardData?.items;
     if (!items) return;
     const imageItem = Array.from(items).find((it) => it.type.startsWith("image/"));
@@ -262,7 +262,12 @@ export function renderDesktop(root: HTMLElement): void {
 
   window.__tmuxHub = {
     ...(window.__tmuxHub ?? {}),
-    focusSessionList: () => { picker.focus(); },
+    focusSessionList: () => {
+      setSidebar(true);
+      const firstItem = sidebar.querySelector<HTMLElement>(".session-list__item");
+      firstItem?.scrollIntoView({ block: "start", behavior: "smooth" });
+      firstItem?.focus();
+    },
     openSession: (name: string) => { void openSession(name); },
   };
 }
