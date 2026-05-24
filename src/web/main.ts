@@ -16,7 +16,7 @@ import {
 const root = document.getElementById("app");
 if (!root) throw new Error("#app missing");
 
-const isMobile = () => matchMedia("(max-width: 720px)").matches;
+const isMobile = () => matchMedia("(max-width: 720px)").matches || matchMedia("(pointer: coarse)").matches;
 
 async function bootstrap() {
   if (isMobile()) {
