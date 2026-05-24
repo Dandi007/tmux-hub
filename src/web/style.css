@@ -126,8 +126,7 @@ button.is-danger:hover { filter: brightness(1.15); }
 .desktop-shell__header {
   display: flex;
   align-items: center;
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-surface-hi);
+  background: var(--color-bg);
   position: sticky;
   top: 0;
   z-index: 10;
@@ -170,7 +169,7 @@ button.is-danger:hover { filter: brightness(1.15); }
   transition: transform var(--duration-fast) var(--ease-out-expo);
 }
 .desktop-shell__sidebar.is-open { transform: translateX(0); }
-.desktop-shell__term-host { flex: 1; min-height: 0; padding: var(--space-1); overflow: hidden; }
+.desktop-shell__term-host { flex: 1; min-height: 0; overflow: hidden; }
 .session-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-1); }
 .session-list__item {
   padding: var(--space-2) var(--space-3);
@@ -254,7 +253,7 @@ button.is-danger:hover { filter: brightness(1.15); }
 }
 
 /* Custom session picker — replaces native <select>. */
-.session-picker { position: relative; }
+.session-picker { position: relative; flex: 1; min-width: 0; }
 .session-picker__trigger-row {
   display: flex;
   align-items: center;
@@ -546,8 +545,7 @@ button.is-danger:hover { filter: brightness(1.15); }
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-2);
-  background: var(--color-surface);
-  border-top: 1px solid var(--color-surface-hi);
+  background: var(--color-bg);
 }
 
 /* --- Connection status overlay --- */
