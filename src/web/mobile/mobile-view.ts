@@ -14,6 +14,7 @@ import { createConnectionStatus } from "../ui/connection-status";
 import { renameSession } from "../shared/rename-controller";
 import { killSession } from "../shared/kill-controller";
 import { confirmModal } from "../ui/confirm-modal";
+import { saveLastSession, loadLastSession } from "../shared/last-session";
 
 export function renderMobile(root: HTMLElement): void {
   root.replaceChildren();
@@ -78,6 +79,7 @@ export function renderMobile(root: HTMLElement): void {
   };
 
   const openSession = (name: string, opts?: { force?: boolean }): void => {
+    saveLastSession(name);
     const prevForce = pendingTarget?.name === name ? pendingTarget.force : false;
     const force = (opts?.force ?? false) || prevForce;
     pendingTarget = { name, force };
@@ -92,14 +94,22 @@ export function renderMobile(root: HTMLElement): void {
     void openSession(name);
   });
 
+  let hasRestoredSession = false;
+
   const refreshPicker = () => {
     const sorted = sessions.slice().sort((a, b) => b.activity - a.activity);
     picker.refresh(sessions, openedName);
 
     if (!openedName || !sorted.find((s) => s.name === openedName)) {
-      const first = sorted.find((s) => isGrammarOk(s.name));
-      if (first) {
-        void openSession(first.name);
+      let target: SessionInfo | undefined;
+      if (!hasRestoredSession && sorted.length > 0) {
+        hasRestoredSession = true;
+        const last = loadLastSession();
+        if (last) target = sorted.find((s) => s.name === last && isGrammarOk(s.name));
+      }
+      if (!target) target = sorted.find((s) => isGrammarOk(s.name));
+      if (target) {
+        void openSession(target.name);
       }
     }
   };
