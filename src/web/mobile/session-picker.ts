@@ -1,13 +1,5 @@
 import type { SessionInfo } from "@shared/protocol";
-import { isGrammarOk } from "@shared/session-name";
-
-function relativeTime(ts: number): string {
-  const delta = Math.floor((Date.now() - ts * 1000) / 1000);
-  if (delta < 60) return "刚刚";
-  if (delta < 3600) return `${Math.floor(delta / 60)}m`;
-  if (delta < 86400) return `${Math.floor(delta / 3600)}h`;
-  return `${Math.floor(delta / 86400)}d`;
-}
+import { isGrammarOk, formatSessionMeta } from "@shared/session-name";
 
 export type SessionPickerHandle = {
   root: HTMLElement;
@@ -116,7 +108,7 @@ export function renderSessionPicker(
 
         const m = document.createElement("span");
         m.className = "session-picker__item-meta";
-        m.textContent = relativeTime(s.activity);
+        m.textContent = formatSessionMeta(s);
 
         item.append(n, m);
 

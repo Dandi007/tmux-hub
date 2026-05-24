@@ -1,6 +1,18 @@
 import { join } from "node:path";
 import { test, expect } from "./fixtures";
 import { bindSecret, uniqSession } from "./helpers";
+import type { Page } from "@playwright/test";
+
+async function openSidebar(page: Page): Promise<void> {
+  await page.locator(".desktop-shell__sidebar-toggle").click();
+  await page.waitForTimeout(300);
+}
+
+async function selectSessionViaSidebar(page: Page, name: string): Promise<void> {
+  await openSidebar(page);
+  await page.locator(`.session-list__item[data-session-name="${name}"]`).click();
+  // sidebar auto-closes on select
+}
 
 test.describe("desktop view", () => {
   test("dashboard renders session list and attaches terminal", async ({ page, ctx }) => {
@@ -11,11 +23,12 @@ test.describe("desktop view", () => {
     await bindSecret(page);
     await page.reload();
 
+    await openSidebar(page);
     await expect(page.locator(`.session-list__item[data-session-name="${name}"]`))
       .toBeVisible({ timeout: 10_000 });
     await page.locator(`.session-list__item[data-session-name="${name}"]`).click();
-    await expect(page.locator(".session-header strong")).toHaveText(name, { timeout: 5_000 });
-    await expect(page.locator(".session-host")).toBeVisible();
+    await expect(page.locator(".session-picker__name")).toHaveText(name, { timeout: 5_000 });
+    await expect(page.locator(".desktop-shell__term-host")).toBeVisible();
 
     ctx.tmuxE2E(["kill-session", "-t", name]);
   });
@@ -28,8 +41,8 @@ test.describe("desktop view", () => {
     await bindSecret(page);
     await page.reload();
 
-    await page.locator(".session-list__item", { hasText: name }).click();
-    await page.getByRole("button", { name: "kill", exact: true }).click();
+    await selectSessionViaSidebar(page, name);
+    await page.locator(".session-picker__kill").click();
 
     await page.getByRole("button", { name: "取消", exact: true }).click();
 
@@ -38,7 +51,7 @@ test.describe("desktop view", () => {
     ctx.tmuxE2E(["kill-session", "-t", name]);
   });
 
-  test("desktop image attach: header button → upload → path injected to pane", async ({ page, ctx }) => {
+  test("desktop image attach: toolbar button → upload → path injected to pane", async ({ page, ctx }) => {
     const name = uniqSession("shell");
     ctx.tmuxE2E(["new-session", "-d", "-s", name, "-x", "120", "-y", "40", "sh"]);
 
@@ -46,11 +59,11 @@ test.describe("desktop view", () => {
     await bindSecret(page);
     await page.reload();
 
-    await page.locator(`.session-list__item[data-session-name="${name}"]`).click();
+    await selectSessionViaSidebar(page, name);
     await page.waitForTimeout(800);
 
     const fixturePath = join(process.cwd(), "tests/e2e/fixtures/red.png");
-    await page.locator(".session-header__image-attach-input").setInputFiles(fixturePath);
+    await page.locator("input.mobile-toolbar__image-attach-input").setInputFiles(fixturePath);
 
     // Give upload + send-keys round-trip time
     await page.waitForTimeout(800);
@@ -70,13 +83,12 @@ test.describe("desktop view", () => {
     await bindSecret(page);
     await page.reload();
 
-    await expect(page.locator(`.session-list__item[data-session-name="${kill}"]`))
-      .toBeVisible({ timeout: 10_000 });
-    await page.locator(`.session-list__item[data-session-name="${kill}"]`).click();
-    await page.getByRole("button", { name: "kill", exact: true }).click();
+    await selectSessionViaSidebar(page, kill);
+    await page.locator(".session-picker__kill").click();
     await expect(page.locator(".modal-dialog")).toBeVisible();
     await page.locator(".modal-dialog__actions button.is-danger").click();
 
+    await openSidebar(page);
     await expect(page.locator(`.session-list__item[data-session-name="${kill}"]`))
       .toHaveCount(0, { timeout: 10_000 });
     const sessions = ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n");
@@ -95,6 +107,7 @@ test.describe("desktop view", () => {
     await bindSecret(page);
     await page.reload();
 
+    await openSidebar(page);
     await expect(page.locator(`.session-list__item[data-session-name="${name}"]`))
       .toBeVisible({ timeout: 10_000 });
     await page.locator(`.session-list__item[data-session-name="${name}"] .session-list__rename`).click();
@@ -118,6 +131,7 @@ test.describe("desktop view", () => {
     await bindSecret(page);
     await page.reload();
 
+    await openSidebar(page);
     await expect(page.locator(`.session-list__item[data-session-name="${name}"]`))
       .toBeVisible({ timeout: 10_000 });
     await page.locator(`.session-list__item[data-session-name="${name}"] .session-list__rename`).click();
@@ -144,13 +158,11 @@ test.describe("desktop view", () => {
     await bindSecret(page);
     await page.reload();
 
-    await expect(page.locator(`.session-list__item[data-session-name="${a}"]`))
-      .toBeVisible({ timeout: 10_000 });
-    await page.locator(`.session-list__item[data-session-name="${a}"]`).click();
-    await expect(page.locator(".session-header strong")).toHaveText(a, { timeout: 5_000 });
+    await selectSessionViaSidebar(page, a);
+    await expect(page.locator(".session-picker__name")).toHaveText(a, { timeout: 5_000 });
 
-    await page.locator(`.session-list__item[data-session-name="${b}"]`).click();
-    await expect(page.locator(".session-header strong")).toHaveText(b, { timeout: 5_000 });
+    await selectSessionViaSidebar(page, b);
+    await expect(page.locator(".session-picker__name")).toHaveText(b, { timeout: 5_000 });
 
     ctx.tmuxE2E(["kill-session", "-t", a]);
     ctx.tmuxE2E(["kill-session", "-t", b]);
@@ -161,6 +173,7 @@ test.describe("desktop view", () => {
     await bindSecret(page);
     await page.reload();
 
+    await openSidebar(page);
     const drawer = page.locator(".template-drawer");
     await expect(drawer).toBeVisible({ timeout: 10_000 });
     const shellBtn = drawer.locator(".template-drawer__btn").first();
@@ -176,32 +189,11 @@ test.describe("desktop view", () => {
     const newName = names.find((n) => n.startsWith("shell-"));
     expect(newName).toBeTruthy();
 
+    await openSidebar(page);
     await expect(page.locator(`.session-list__item[data-session-name="${newName!}"]`))
       .toBeVisible({ timeout: 10_000 });
 
     ctx.tmuxE2E(["kill-session", "-t", newName!]);
-  });
-
-  test("detach button detaches clients from session", async ({ page, ctx }) => {
-    const name = uniqSession("shell");
-    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
-
-    await page.goto("/");
-    await bindSecret(page);
-    await page.reload();
-
-    await expect(page.locator(`.session-list__item[data-session-name="${name}"]`))
-      .toBeVisible({ timeout: 10_000 });
-    await page.locator(`.session-list__item[data-session-name="${name}"]`).click();
-    await page.waitForTimeout(800);
-
-    await page.getByRole("button", { name: "detach", exact: true }).click();
-    await page.waitForTimeout(500);
-
-    const sessions = ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n");
-    expect(sessions).toContain(name);
-
-    ctx.tmuxE2E(["kill-session", "-t", name]);
   });
 
   test("session created externally appears in sidebar via SSE", async ({ page, ctx }) => {
@@ -213,6 +205,7 @@ test.describe("desktop view", () => {
     const name = uniqSession("late");
     ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
 
+    await openSidebar(page);
     await expect(page.locator(`.session-list__item[data-session-name="${name}"]`))
       .toBeVisible({ timeout: 10_000 });
 
@@ -227,6 +220,7 @@ test.describe("desktop view", () => {
     await bindSecret(page);
     await page.reload();
 
+    await openSidebar(page);
     await expect(page.locator(`.session-list__item[data-session-name="${name}"]`))
       .toBeVisible({ timeout: 10_000 });
 
@@ -244,10 +238,10 @@ test.describe("desktop view", () => {
     await bindSecret(page);
     await page.reload();
 
-    await page.locator(`.session-list__item[data-session-name="${name}"]`).click();
+    await selectSessionViaSidebar(page, name);
     await page.waitForTimeout(800);
 
-    // Synthesize a paste event with an image item on the main region.
+    // Synthesize a paste event with an image item on the root desktop-shell element.
     const RED_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
     await page.evaluate((b64: string) => {
       const bin = atob(b64);
@@ -257,7 +251,7 @@ test.describe("desktop view", () => {
       const dt = new DataTransfer();
       dt.items.add(file);
       const ev = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
-      document.querySelector(".desktop-shell__main")!.dispatchEvent(ev);
+      document.querySelector(".desktop-shell")!.dispatchEvent(ev);
     }, RED_PNG_B64);
 
     await page.waitForTimeout(800);

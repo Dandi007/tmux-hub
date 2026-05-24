@@ -1,132 +1,237 @@
 import { renderSessionList } from "./session-list";
 import { renderTemplateDrawer } from "./template-drawer";
+import { renderSessionPicker } from "../mobile/session-picker";
+import { renderInputBox } from "../mobile/input-box";
+import { renderImageAttachButton } from "../mobile/image-attach";
 import { attachTerminal, type TerminalHandle } from "../terminal";
+import { subscribeEvents } from "../sse-client";
+import type { SessionInfo, ServerEvent, ClientWsMessage } from "@shared/protocol";
+import { isGrammarOk } from "@shared/session-name";
 import { confirmModal } from "../ui/confirm-modal";
 import { showToast } from "../ui/toast";
 import { hubFetch } from "../hub-fetch";
 import { onForegroundAfterIdle } from "../visibility-recovery";
-import { uploadImageForSession, IMAGE_ACCEPT_ATTR } from "../upload/image-upload";
+import { uploadImageForSession } from "../upload/image-upload";
 import { createConnectionStatus } from "../ui/connection-status";
-
-function button(label: string, extraClass = ""): HTMLButtonElement {
-  const b = document.createElement("button");
-  b.type = "button";
-  b.textContent = label;
-  if (extraClass) b.className = extraClass;
-  return b;
-}
+import { renameSession } from "../shared/rename-controller";
+import { killSession } from "../shared/kill-controller";
 
 export function renderDesktop(root: HTMLElement): void {
   root.replaceChildren();
   root.className = "desktop-shell";
 
-  const left = document.createElement("aside");
-  left.className = "desktop-shell__sidebar";
-  const right = document.createElement("main");
-  right.className = "desktop-shell__main";
-  root.append(left, right);
+  const header = document.createElement("header");
+  header.className = "desktop-shell__header";
+  root.appendChild(header);
+
+  const sidebarToggle = document.createElement("button");
+  sidebarToggle.type = "button";
+  sidebarToggle.className = "desktop-shell__sidebar-toggle";
+  sidebarToggle.textContent = "☰";
+  sidebarToggle.setAttribute("aria-label", "切换侧边栏");
+  header.appendChild(sidebarToggle);
+
+  const sidebarBackdrop = document.createElement("div");
+  sidebarBackdrop.className = "desktop-shell__sidebar-backdrop";
+  const sidebar = document.createElement("aside");
+  sidebar.className = "desktop-shell__sidebar";
+  root.append(sidebarBackdrop, sidebar);
+
+  let sidebarOpen = false;
+  const setSidebar = (open: boolean) => {
+    sidebarOpen = open;
+    sidebar.classList.toggle("is-open", open);
+    sidebarBackdrop.classList.toggle("is-visible", open);
+    sidebarToggle.classList.toggle("is-active", open);
+  };
+  sidebarToggle.addEventListener("click", () => setSidebar(!sidebarOpen));
+  sidebarBackdrop.addEventListener("click", () => setSidebar(false));
+
+  const termHost = document.createElement("div");
+  termHost.className = "desktop-shell__term-host";
+  root.appendChild(termHost);
 
   const connStatus = createConnectionStatus(false);
   connStatus.onRetry(() => { term?.retry(); });
+  termHost.appendChild(connStatus.el);
 
-  const list = renderSessionList(left);
   let term: TerminalHandle | null = null;
-  let activeName: string | null = null;
+  let sessions: SessionInfo[] = [];
+  let openedName: string | null = null;
 
-  const open = async (name: string) => {
-    activeName = null;
-    if (term) { term.close(); term = null; }
+  const openSession = async (name: string): Promise<void> => {
+    if (name === openedName && term) return;
+    if (!isGrammarOk(name)) return;
+
+    if (term) { try { term.close(); } catch {} term = null; }
+    termHost.replaceChildren();
+    openedName = name;
+    picker.setActive(name);
     list.setActive(name);
-    right.replaceChildren();
-
-    const header = document.createElement("header");
-    header.className = "session-header";
-    const nameEl = document.createElement("strong");
-    nameEl.textContent = name;
-    const killBtn = button("kill", "is-danger");
-    const refreshBtn = button("refresh");
-    const detachBtn = button("detach");
-    const attachBtn = button("📎", "session-header__image-attach");
-    attachBtn.setAttribute("aria-label", "上传图片");
-    const attachInput = document.createElement("input");
-    attachInput.type = "file";
-    attachInput.accept = IMAGE_ACCEPT_ATTR;
-    attachInput.className = "session-header__image-attach-input";
-    attachInput.style.display = "none";
-    header.append(nameEl, attachBtn, attachInput, killBtn, refreshBtn, detachBtn);
-
-    const host = document.createElement("div");
-    host.className = "session-host";
-    right.append(header, host);
 
     try {
-      term = await attachTerminal({ sessionName: name, parent: host });
-      activeName = name;
-      host.insertBefore(connStatus.el, host.firstChild);
-      term.onStateChange((state, attempt) => {
+      const next = await attachTerminal({ sessionName: name, parent: termHost });
+      if (openedName !== name) { next.close(); return; }
+      term = next;
+      termHost.insertBefore(connStatus.el, termHost.firstChild);
+      next.onStateChange((state, attempt) => {
         connStatus.update(state, attempt);
       });
     } catch (e) {
       showToast(`attach 失败: ${(e as Error).message}`, "error");
-      return;
+      openedName = null;
     }
+  };
 
-    killBtn.addEventListener("click", async () => {
-      const ok = await confirmModal({
-        title: `kill ${name}?`,
-        body: "这会直接终止该 session 内运行的 agent 进程。确认继续？",
-        confirmLabel: "kill",
-        danger: true,
-      });
-      if (!ok) return;
-      const r = await hubFetch(`/sessions/${encodeURIComponent(name)}/kill`, {
-        method: "POST",
-        headers: { "X-Hub-Confirm": "kill" },
-      });
-      if (r.ok) { activeName = null; }
-      else showToast(`kill 失败: ${await r.text()}`, "error");
-    });
+  const picker = renderSessionPicker(header, (name) => {
+    void openSession(name);
+  });
 
-    refreshBtn.addEventListener("click", async () => {
-      const r = await hubFetch(`/sessions/${encodeURIComponent(name)}/refresh`, { method: "POST" });
-      if (!r.ok) showToast(`refresh 失败: ${await r.text()}`, "error");
-    });
+  const enterRenameMode = (current: string): void => {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "mobile-shell__rename-input";
+    input.value = current;
+    input.spellcheck = false;
+    input.autocapitalize = "off";
+    input.autocomplete = "off";
 
-    detachBtn.addEventListener("click", async () => {
-      const r = await hubFetch(`/sessions/${encodeURIComponent(name)}/detach`, { method: "POST" });
-      if (!r.ok) showToast(`detach 失败: ${await r.text()}`, "error");
-    });
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "mobile-shell__rename-save";
+    saveBtn.textContent = "保存";
 
-    attachBtn.addEventListener("click", () => {
-      attachInput.value = "";
-      attachInput.click();
-    });
-    attachInput.addEventListener("change", async () => {
-      const file = attachInput.files?.[0];
-      if (!file) return;
-      attachBtn.disabled = true;
-      const original = attachBtn.textContent;
-      attachBtn.textContent = "...";
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "mobile-shell__rename-cancel";
+    cancelBtn.textContent = "取消";
+
+    header.replaceChildren(sidebarToggle, input, saveBtn, cancelBtn);
+
+    const exitRenameMode = (): void => {
+      header.replaceChildren(sidebarToggle, picker.root);
+    };
+
+    const commit = async (): Promise<void> => {
+      const next = input.value.trim();
+      if (next === "" || next === current) { exitRenameMode(); return; }
+      if (!isGrammarOk(next)) {
+        showToast(`新名字不合法：${next}（只允许 [a-zA-Z0-9_-]，1-64 字符）`, "error");
+        return;
+      }
       try {
-        const path = await uploadImageForSession(name, file);
-        if (activeName !== name) {
-          showToast(`已切到其他 session，图片 ${path} 未注入`, "error");
-        } else {
-          term?.send({ kind: "keys", literal: " " + path + " " });
-        }
+        await renameSession(current, next);
+        exitRenameMode();
       } catch (e) {
-        showToast(`上传失败：${(e as Error).message}`, "error");
-      } finally {
-        attachBtn.disabled = false;
-        attachBtn.textContent = original;
+        showToast(`重命名失败：${(e as Error).message}`, "error");
+      }
+    };
+
+    saveBtn.addEventListener("click", () => { void commit(); });
+    cancelBtn.addEventListener("click", exitRenameMode);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); void commit(); }
+      else if (e.key === "Escape") { e.preventDefault(); exitRenameMode(); }
+    });
+
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+  };
+
+  picker.onRename = (current: string) => { enterRenameMode(current); };
+
+  picker.onKill = (current: string) => {
+    void confirmModal({
+      title: "关闭会话",
+      body: `确定要关闭会话「${current}」吗？该会话中的所有进程将被终止。`,
+      confirmLabel: "关闭",
+      danger: true,
+    }).then(async (confirmed) => {
+      if (!confirmed) return;
+      try {
+        await killSession(current);
+        showToast(`会话「${current}」已关闭`, "info");
+      } catch (e) {
+        showToast(`关闭失败：${(e as Error).message}`, "error");
       }
     });
   };
 
-  // Image-paste interception. Listen on the main region so the event has time
-  // to bubble up from xterm's textarea helper. Only preventDefault when we
-  // actually find an image item; pure-text pastes pass through to xterm.
-  right.addEventListener("paste", (e) => {
+  const refreshPicker = () => {
+    picker.refresh(sessions, openedName);
+
+    if (!openedName || !sessions.find((s) => s.name === openedName)) {
+      const sorted = sessions.slice().sort((a, b) => b.activity - a.activity);
+      const first = sorted.find((s) => isGrammarOk(s.name));
+      if (first) void openSession(first.name);
+    }
+  };
+
+  const sse = subscribeEvents((e: ServerEvent) => {
+    if (e.event === "snapshot") sessions = e.payload;
+    else if (e.event === "session_created") sessions = [...sessions, e.payload];
+    else if (e.event === "session_removed") {
+      sessions = sessions.filter((s) => s.name !== e.payload.name);
+      if (openedName === e.payload.name) {
+        openedName = null;
+        if (term) { term.close(); term = null; }
+      }
+    } else if (e.event === "session_activity") {
+      sessions = sessions.map((s) => s.name === e.payload.name ? e.payload : s);
+    } else return;
+    refreshPicker();
+  });
+
+  const list = renderSessionList(sidebar);
+  list.onSelect((name) => {
+    void openSession(name);
+    setSidebar(false);
+  });
+  renderTemplateDrawer(sidebar, (name) => {
+    void openSession(name);
+    setSidebar(false);
+  });
+
+  const send = (msg: ClientWsMessage) => { term?.send(msg); };
+
+  const drawer = document.createElement("div");
+  drawer.className = "mobile-drawer";
+  const inputForm = renderInputBox(drawer, send);
+  root.appendChild(drawer);
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "desktop-toolbar";
+  root.appendChild(toolbar);
+
+  const toggleBtn = document.createElement("button");
+  toggleBtn.type = "button";
+  toggleBtn.className = "mobile-toolbar__toggle";
+  toggleBtn.setAttribute("aria-expanded", "false");
+  toggleBtn.setAttribute("aria-label", "切换多行输入");
+  toggleBtn.textContent = "✎";
+  toolbar.appendChild(toggleBtn);
+
+  let drawerOpen = false;
+  const setDrawer = (open: boolean) => {
+    drawerOpen = open;
+    drawer.classList.toggle("is-open", open);
+    toggleBtn.classList.toggle("is-active", open);
+    toggleBtn.setAttribute("aria-expanded", String(open));
+    if (open) {
+      const ta = drawer.querySelector<HTMLTextAreaElement>(".mobile-input__textarea");
+      ta?.focus();
+    }
+  };
+  toggleBtn.addEventListener("click", () => setDrawer(!drawerOpen));
+  inputForm.addEventListener("submit", () => { setDrawer(false); });
+
+  renderImageAttachButton({
+    parent: toolbar,
+    getSession: () => openedName,
+    getTextarea: () => drawer.querySelector<HTMLTextAreaElement>(".mobile-input__textarea"),
+    openDrawer: () => setDrawer(true),
+  });
+
+  root.addEventListener("paste", (e) => {
     const items = (e as ClipboardEvent).clipboardData?.items;
     if (!items) return;
     const imageItem = Array.from(items).find((it) => it.type.startsWith("image/"));
@@ -134,12 +239,12 @@ export function renderDesktop(root: HTMLElement): void {
     e.preventDefault();
     e.stopPropagation();
     const file = imageItem.getAsFile();
-    if (!file || !activeName) return;
-    const sessionAtPaste = activeName;
+    if (!file || !openedName) return;
+    const sessionAtPaste = openedName;
     void (async () => {
       try {
         const path = await uploadImageForSession(sessionAtPaste, file);
-        if (activeName !== sessionAtPaste) {
+        if (openedName !== sessionAtPaste) {
           showToast(`已切到其他 session，图片 ${path} 未注入`, "error");
         } else {
           term?.send({ kind: "keys", literal: " " + path + " " });
@@ -150,22 +255,19 @@ export function renderDesktop(root: HTMLElement): void {
     })();
   });
 
-  list.onSelect((name) => { void open(name); });
-  renderTemplateDrawer(left, (name) => { void open(name); });
-
   onForegroundAfterIdle(3000, () => {
+    sse.reconnectIfNeeded();
     term?.probeNow();
   });
 
-  // Expose imperative hooks for PWA manifest shortcuts. Bootstrap reads
-  // ?action=new-session / ?focus=session-list and calls into these.
   window.__tmuxHub = {
     ...(window.__tmuxHub ?? {}),
     focusSessionList: () => {
-      const firstItem = left.querySelector<HTMLElement>(".session-list__item");
+      setSidebar(true);
+      const firstItem = sidebar.querySelector<HTMLElement>(".session-list__item");
       firstItem?.scrollIntoView({ block: "start", behavior: "smooth" });
       firstItem?.focus();
     },
-    openSession: (name: string) => { void open(name); },
+    openSession: (name: string) => { void openSession(name); },
   };
 }

@@ -1,7 +1,7 @@
 import type { SessionInfo, ServerEvent } from "@shared/protocol";
 import { subscribeEvents } from "../sse-client";
 import { onForegroundAfterIdle } from "../visibility-recovery";
-import { isGrammarOk } from "@shared/session-name";
+import { isGrammarOk, formatSessionMeta } from "@shared/session-name";
 import { showToast } from "../ui/toast";
 import { renameSession } from "../shared/rename-controller";
 
@@ -46,7 +46,7 @@ export function renderSessionList(parent: HTMLElement): SessionListHandle {
 
     const meta = document.createElement("div");
     meta.className = "session-list__meta";
-    meta.textContent = `${s.windows}w · ${s.attached}c`;
+    meta.textContent = formatSessionMeta(s);
 
     li.append(name, meta);
 
