@@ -189,7 +189,7 @@ export function renderDesktop(root: HTMLElement): void {
     if (!openedName || !sessions.find((s) => s.name === openedName)) {
       const sorted = sessions.slice().sort((a, b) => b.activity - a.activity);
       let target: SessionInfo | undefined;
-      if (!hasRestoredSession) {
+      if (!hasRestoredSession && sorted.length > 0) {
         hasRestoredSession = true;
         const last = loadLastSession();
         if (last) target = sorted.find((s) => s.name === last && isGrammarOk(s.name));

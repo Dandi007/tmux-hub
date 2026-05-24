@@ -102,7 +102,7 @@ export function renderMobile(root: HTMLElement): void {
 
     if (!openedName || !sorted.find((s) => s.name === openedName)) {
       let target: SessionInfo | undefined;
-      if (!hasRestoredSession) {
+      if (!hasRestoredSession && sorted.length > 0) {
         hasRestoredSession = true;
         const last = loadLastSession();
         if (last) target = sorted.find((s) => s.name === last && isGrammarOk(s.name));
