@@ -465,12 +465,17 @@ button.is-danger:hover { filter: brightness(1.15); }
 
 /* Mobile input bar — compact bottom bar: [📎] [text field] [+] */
 .mobile-input-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
   display: flex;
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-2);
   padding-bottom: calc(var(--space-1) + env(safe-area-inset-bottom, 0px));
-  background: oklch(40% 0.2 25); /* DEBUG RED — confirms CSS loaded */
+  background: oklch(45% 0.2 150); /* DEBUG GREEN — position:fixed test */
 }
 .input-bar__attach,
 .input-bar__expand {
