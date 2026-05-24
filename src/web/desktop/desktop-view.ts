@@ -15,6 +15,7 @@ import { uploadImageForSession } from "../upload/image-upload";
 import { createConnectionStatus } from "../ui/connection-status";
 import { renameSession } from "../shared/rename-controller";
 import { killSession } from "../shared/kill-controller";
+import { renderQuickLaunchButton } from "../mobile/quick-launch";
 
 export function renderDesktop(root: HTMLElement): void {
   root.replaceChildren();
@@ -85,6 +86,28 @@ export function renderDesktop(root: HTMLElement): void {
 
   const picker = renderSessionPicker(header, (name) => {
     void openSession(name);
+  });
+
+  let pendingQuickLaunchName: string | null = null;
+  let pendingQuickLaunchTimer: ReturnType<typeof setTimeout> | null = null;
+
+  renderQuickLaunchButton({
+    parent: picker.actionRow,
+    onStarted: (name) => {
+      if (sessions.some((s) => s.name === name)) {
+        void openSession(name);
+        return;
+      }
+      pendingQuickLaunchName = name;
+      if (pendingQuickLaunchTimer) clearTimeout(pendingQuickLaunchTimer);
+      pendingQuickLaunchTimer = setTimeout(() => {
+        if (pendingQuickLaunchName === name) {
+          pendingQuickLaunchName = null;
+          pendingQuickLaunchTimer = null;
+          showToast(`新建会话 ${name} 等待超时，请手动从列表选择`, "error");
+        }
+      }, 5000);
+    },
   });
 
   const enterRenameMode = (current: string): void => {
@@ -167,9 +190,22 @@ export function renderDesktop(root: HTMLElement): void {
   };
 
   const sse = subscribeEvents((e: ServerEvent) => {
-    if (e.event === "snapshot") sessions = e.payload;
-    else if (e.event === "session_created") sessions = [...sessions, e.payload];
-    else if (e.event === "session_removed") {
+    if (e.event === "snapshot") {
+      sessions = e.payload;
+      if (pendingQuickLaunchName && sessions.some((s) => s.name === pendingQuickLaunchName)) {
+        const resolved = pendingQuickLaunchName;
+        pendingQuickLaunchName = null;
+        if (pendingQuickLaunchTimer) { clearTimeout(pendingQuickLaunchTimer); pendingQuickLaunchTimer = null; }
+        void openSession(resolved);
+      }
+    } else if (e.event === "session_created") {
+      sessions = [...sessions, e.payload];
+      if (pendingQuickLaunchName === e.payload.name) {
+        pendingQuickLaunchName = null;
+        if (pendingQuickLaunchTimer) { clearTimeout(pendingQuickLaunchTimer); pendingQuickLaunchTimer = null; }
+        void openSession(e.payload.name);
+      }
+    } else if (e.event === "session_removed") {
       sessions = sessions.filter((s) => s.name !== e.payload.name);
       if (openedName === e.payload.name) {
         openedName = null;
