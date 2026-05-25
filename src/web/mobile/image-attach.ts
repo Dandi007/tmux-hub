@@ -1,4 +1,4 @@
-import { uploadImageForSession, IMAGE_ACCEPT_ATTR } from "../upload/image-upload";
+import { uploadFileForSession, FILE_ACCEPT_ATTR } from "../upload/image-upload";
 import { showToast } from "../ui/toast";
 
 export type ImageAttachDeps = {
@@ -12,12 +12,12 @@ export function renderImageAttachButton(deps: ImageAttachDeps): HTMLButtonElemen
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "mobile-toolbar__image-attach";
-  btn.setAttribute("aria-label", "上传图片");
+  btn.setAttribute("aria-label", "上传文件");
   btn.textContent = "📎";
 
   const fileInput = document.createElement("input");
   fileInput.type = "file";
-  fileInput.accept = IMAGE_ACCEPT_ATTR;
+  fileInput.accept = FILE_ACCEPT_ATTR;
   fileInput.className = "mobile-toolbar__image-attach-input";
   fileInput.style.display = "none";
 
@@ -28,7 +28,7 @@ export function renderImageAttachButton(deps: ImageAttachDeps): HTMLButtonElemen
     const originalText = btn.textContent;
     btn.textContent = "...";
     try {
-      const path = await uploadImageForSession(session, file);
+      const path = await uploadFileForSession(session, file);
       deps.openDrawer();
       const ta = deps.getTextarea();
       if (ta) {
