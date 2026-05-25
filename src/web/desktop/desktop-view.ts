@@ -13,6 +13,7 @@ import { onForegroundAfterIdle } from "../visibility-recovery";
 import { uploadImageForSession } from "../upload/image-upload";
 import { createConnectionStatus } from "../ui/connection-status";
 import { renameSession } from "../shared/rename-controller";
+import { imeGuard } from "../shared/ime-guard";
 import { killSession } from "../shared/kill-controller";
 import { renderQuickLaunchButton } from "../mobile/quick-launch";
 import { saveLastSession, loadLastSession } from "../shared/last-session";
@@ -151,10 +152,11 @@ export function renderDesktop(root: HTMLElement): void {
       }
     };
 
+    const ime = imeGuard(input);
     saveBtn.addEventListener("click", () => { void commit(); });
     cancelBtn.addEventListener("click", exitRenameMode);
     input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); void commit(); }
+      if (e.key === "Enter" && !ime.isComposing()) { e.preventDefault(); void commit(); }
       else if (e.key === "Escape") { e.preventDefault(); exitRenameMode(); }
     });
 
@@ -255,8 +257,9 @@ export function renderDesktop(root: HTMLElement): void {
     ta.value = "";
   };
 
+  const taIme = imeGuard(ta);
   ta.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+    if (e.key === "Enter" && !e.shiftKey && !taIme.isComposing()) {
       e.preventDefault();
       doSend();
     }

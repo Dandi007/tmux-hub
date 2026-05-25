@@ -4,6 +4,7 @@ import { onForegroundAfterIdle } from "../visibility-recovery";
 import { isGrammarOk, formatSessionMeta } from "@shared/session-name";
 import { showToast } from "../ui/toast";
 import { renameSession } from "../shared/rename-controller";
+import { imeGuard } from "../shared/ime-guard";
 
 export type SessionListHandle = {
   el: HTMLElement;
@@ -97,9 +98,10 @@ export function renderSessionList(parent: HTMLElement): SessionListHandle {
           }
         };
 
+        const ime = imeGuard(input);
         input.addEventListener("keydown", (e) => {
           e.stopPropagation();
-          if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); void commit(); }
+          if (e.key === "Enter" && !ime.isComposing()) { e.preventDefault(); void commit(); }
           else if (e.key === "Escape") { e.preventDefault(); committed = true; cleanup(); }
         });
         input.addEventListener("blur", () => { void commit(); });

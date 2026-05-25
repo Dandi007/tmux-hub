@@ -12,6 +12,7 @@ import { onForegroundAfterIdle } from "../visibility-recovery";
 import { createConnectionStatus } from "../ui/connection-status";
 import { renameSession } from "../shared/rename-controller";
 import { killSession } from "../shared/kill-controller";
+import { imeGuard } from "../shared/ime-guard";
 import { confirmModal } from "../ui/confirm-modal";
 import { saveLastSession, loadLastSession } from "../shared/last-session";
 
@@ -153,10 +154,11 @@ export function renderMobile(root: HTMLElement): void {
       }
     };
 
+    const ime = imeGuard(input);
     saveBtn.addEventListener("click", () => { void commit(); });
     cancelBtn.addEventListener("click", exitRenameMode);
     input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); void commit(); }
+      if (e.key === "Enter" && !ime.isComposing()) { e.preventDefault(); void commit(); }
       else if (e.key === "Escape") { e.preventDefault(); exitRenameMode(); }
     });
 
