@@ -156,7 +156,7 @@ export function renderMobile(root: HTMLElement): void {
     saveBtn.addEventListener("click", () => { void commit(); });
     cancelBtn.addEventListener("click", exitRenameMode);
     input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") { e.preventDefault(); void commit(); }
+      if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); void commit(); }
       else if (e.key === "Escape") { e.preventDefault(); exitRenameMode(); }
     });
 
