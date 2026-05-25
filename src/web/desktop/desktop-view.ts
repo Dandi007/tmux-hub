@@ -7,7 +7,7 @@ import { isGrammarOk } from "@shared/session-name";
 import { confirmModal } from "../ui/confirm-modal";
 import { showToast } from "../ui/toast";
 import { onForegroundAfterIdle } from "../visibility-recovery";
-import { uploadImageForSession } from "../upload/image-upload";
+import { uploadFileForSession } from "../upload/image-upload";
 import { createConnectionStatus } from "../ui/connection-status";
 import { imeGuard } from "../shared/ime-guard";
 import { killSession } from "../shared/kill-controller";
@@ -143,22 +143,22 @@ export function renderDesktop(root: HTMLElement): void {
   attachBtn.className = "input-bar__attach";
   inputBar.appendChild(ta);
 
-  // Paste image in textarea → upload → insert path into textarea
+  // Paste file in textarea → upload → insert path into textarea
   ta.addEventListener("paste", (e) => {
     const items = e.clipboardData?.items;
     if (!items) return;
-    const imageItem = Array.from(items).find((it) => it.type.startsWith("image/"));
-    if (!imageItem) return;
+    const fileItem = Array.from(items).find((it) => it.kind === "file");
+    if (!fileItem) return;
     e.preventDefault();
     e.stopPropagation();
-    const file = imageItem.getAsFile();
+    const file = fileItem.getAsFile();
     if (!file || !openedName) return;
     const sessionAtPaste = openedName;
     void (async () => {
       try {
-        const path = await uploadImageForSession(sessionAtPaste, file);
+        const path = await uploadFileForSession(sessionAtPaste, file);
         if (openedName !== sessionAtPaste) {
-          showToast(`已切到其他 session，图片 ${path} 未注入`, "error");
+          showToast(`已切到其他 session，文件 ${path} 未注入`, "error");
           return;
         }
         const start = ta.selectionStart;
@@ -172,22 +172,22 @@ export function renderDesktop(root: HTMLElement): void {
     })();
   });
 
-  // Paste image elsewhere (e.g. terminal focused) → upload → send path to terminal
+  // Paste file elsewhere (e.g. terminal focused) → upload → send path to terminal
   root.addEventListener("paste", (e) => {
     const items = (e as ClipboardEvent).clipboardData?.items;
     if (!items) return;
-    const imageItem = Array.from(items).find((it) => it.type.startsWith("image/"));
-    if (!imageItem) return;
+    const fileItem = Array.from(items).find((it) => it.kind === "file");
+    if (!fileItem) return;
     e.preventDefault();
     e.stopPropagation();
-    const file = imageItem.getAsFile();
+    const file = fileItem.getAsFile();
     if (!file || !openedName) return;
     const sessionAtPaste = openedName;
     void (async () => {
       try {
-        const path = await uploadImageForSession(sessionAtPaste, file);
+        const path = await uploadFileForSession(sessionAtPaste, file);
         if (openedName !== sessionAtPaste) {
-          showToast(`已切到其他 session，图片 ${path} 未注入`, "error");
+          showToast(`已切到其他 session，文件 ${path} 未注入`, "error");
         } else {
           pool.send({ kind: "keys", literal: " " + path + " " });
         }

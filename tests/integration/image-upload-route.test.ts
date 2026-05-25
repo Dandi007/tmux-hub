@@ -73,14 +73,28 @@ describe("POST /sessions/:name/upload-image", () => {
     expect(p1).not.toBe(p2);
   });
 
-  test("rejects bad mime with 400", async () => {
+  test("accepts non-image file types (e.g. text/plain)", async () => {
     const app = makeApp();
-    const badFile = new File([Buffer.from("hello")], "x.txt", { type: "text/plain" });
-    const fd = multipart(badFile);
+    const txtFile = new File([Buffer.from("hello")], "x.txt", { type: "text/plain" });
+    const fd = multipart(txtFile);
     const r = await app.fetch(new Request(`http://localhost/sessions/${SESSION}/upload-image`, {
       method: "POST", body: fd,
     }));
-    expect(r.status).toBe(400);
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { ok: boolean; path: string };
+    expect(body.ok).toBe(true);
+    expect(body.path.endsWith(".txt")).toBe(true);
+  });
+
+  test("accepts PDF uploads", async () => {
+    const app = makeApp();
+    const pdfFile = new File([Buffer.from("%PDF-1.4 fake")], "doc.pdf", { type: "application/pdf" });
+    const r = await app.fetch(new Request(`http://localhost/sessions/${SESSION}/upload-image`, {
+      method: "POST", body: multipart(pdfFile),
+    }));
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { ok: boolean; path: string };
+    expect(body.path.endsWith(".pdf")).toBe(true);
   });
 
   test("rejects oversize body with 413", async () => {
@@ -119,7 +133,6 @@ describe("POST /sessions/:name/upload-image", () => {
   });
 
   test("bodyLimit rejects oversize Content-Length before parseBody (413)", async () => {
-    // Build a multipart body whose Content-Length will exceed the 1MB cap.
     const big = new Uint8Array(2 * 1024 * 1024);
     const bigFile = new File([big], "big.png", { type: "image/png" });
     const app = makeApp();

@@ -7,28 +7,34 @@ import { createLogger } from "./logger";
 
 const logger = createLogger("image-upload");
 
-export const IMAGE_MIME_WHITELIST = [
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "image/webp",
-  "image/heic",
-  "image/heif",
-] as const;
-
-export type ImageMime = (typeof IMAGE_MIME_WHITELIST)[number];
-
-const MIME_TO_EXT: Record<ImageMime, string> = {
-  "image/png": "png",
+const MIME_EXT_OVERRIDES: Record<string, string> = {
   "image/jpeg": "jpeg",
-  "image/gif": "gif",
-  "image/webp": "webp",
-  "image/heic": "heic",
-  "image/heif": "heif",
+  "text/plain": "txt",
+  "text/html": "html",
+  "application/javascript": "js",
+  "application/gzip": "gz",
+  "application/x-tar": "tar",
+  "application/x-bzip2": "bz2",
+  "application/x-7z-compressed": "7z",
+  "application/x-rar-compressed": "rar",
 };
 
 export function extFromMime(mime: string): string | null {
-  return (MIME_TO_EXT as Record<string, string>)[mime] ?? null;
+  if (!mime) return null;
+  const override = MIME_EXT_OVERRIDES[mime];
+  if (override) return override;
+  const slash = mime.indexOf("/");
+  if (slash < 0) return null;
+  const sub = mime.slice(slash + 1).split(";")[0]!.trim().toLowerCase();
+  if (sub && /^[a-z0-9]{1,10}$/.test(sub)) return sub;
+  return null;
+}
+
+export function extFromFileName(name: string): string | null {
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0) return null;
+  const ext = name.slice(dot + 1).toLowerCase();
+  return /^[a-z0-9]{1,10}$/.test(ext) ? ext : null;
 }
 
 export function imagePathFor(
@@ -86,10 +92,7 @@ export function buildImageUploadRoutes(deps: ImageUploadDeps): Hono {
       if (file.size > deps.maxBytes) {
         return c.json({ error: "file too large" }, 413);
       }
-      const ext = extFromMime(file.type);
-      if (ext === null) {
-        return c.json({ error: `unsupported content-type: ${file.type}` }, 400);
-      }
+      const ext = extFromFileName(file.name) ?? extFromMime(file.type) ?? "bin";
       const date = todayLocalDate();
       const uuid = crypto.randomUUID();
       const absPath = imagePathFor(deps.imageDir, date, uuid, ext);

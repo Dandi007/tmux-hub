@@ -1,21 +1,13 @@
 import { describe, test, expect } from "bun:test";
 import {
-  IMAGE_MIME_WHITELIST,
   extFromMime,
+  extFromFileName,
   imagePathFor,
   todayLocalDate,
 } from "../../src/server/image-upload";
 
-describe("IMAGE_MIME_WHITELIST", () => {
-  test("contains the 6 expected types", () => {
-    expect(new Set(IMAGE_MIME_WHITELIST)).toEqual(
-      new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/heic", "image/heif"]),
-    );
-  });
-});
-
 describe("extFromMime", () => {
-  test("known mime → matching ext", () => {
+  test("known image mimes → matching ext", () => {
     expect(extFromMime("image/png")).toBe("png");
     expect(extFromMime("image/jpeg")).toBe("jpeg");
     expect(extFromMime("image/gif")).toBe("gif");
@@ -23,10 +15,28 @@ describe("extFromMime", () => {
     expect(extFromMime("image/heic")).toBe("heic");
     expect(extFromMime("image/heif")).toBe("heif");
   });
-  test("unknown mime → null", () => {
-    expect(extFromMime("application/pdf")).toBeNull();
-    expect(extFromMime("text/plain")).toBeNull();
+  test("non-image mimes → derived ext", () => {
+    expect(extFromMime("application/pdf")).toBe("pdf");
+    expect(extFromMime("text/plain")).toBe("txt");
+    expect(extFromMime("application/zip")).toBe("zip");
+    expect(extFromMime("application/json")).toBe("json");
+    expect(extFromMime("application/gzip")).toBe("gz");
+  });
+  test("empty or invalid → null", () => {
     expect(extFromMime("")).toBeNull();
+    expect(extFromMime("noslash")).toBeNull();
+  });
+});
+
+describe("extFromFileName", () => {
+  test("extracts extension from filename", () => {
+    expect(extFromFileName("report.pdf")).toBe("pdf");
+    expect(extFromFileName("photo.PNG")).toBe("png");
+    expect(extFromFileName("archive.tar.gz")).toBe("gz");
+  });
+  test("returns null for no extension", () => {
+    expect(extFromFileName("Makefile")).toBeNull();
+    expect(extFromFileName(".hidden")).toBeNull();
   });
 });
 
