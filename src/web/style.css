@@ -167,7 +167,180 @@ button.is-danger:hover { filter: brightness(1.15); }
   transition: transform var(--duration-fast) var(--ease-out-expo);
 }
 .desktop-shell__sidebar.is-open { transform: translateX(0); }
-.desktop-shell__term-host { flex: 1; min-height: 0; overflow: hidden; }
+.desktop-shell__term-host { flex: 1; min-height: 0; overflow: hidden; position: relative; }
+
+/* Terminal pool slots — stacked absolute, only active is visible */
+.term-slot {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+}
+.term-slot.is-active {
+  visibility: visible;
+  z-index: 1;
+}
+
+/* ── Tab bar ─────────────────────────────────────────────── */
+.tab-bar {
+  display: flex;
+  align-items: stretch;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-surface-hi);
+  min-height: 34px;
+  user-select: none;
+  flex: 0 0 auto;
+}
+.tab-bar__tabs {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tab-bar__tabs::-webkit-scrollbar { display: none; }
+
+.tab-bar__tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  min-width: 0;
+  max-width: 220px;
+  cursor: pointer;
+  border-right: 1px solid var(--color-surface-hi);
+  background: var(--color-surface);
+  transition: background var(--duration-fast) var(--ease-out-expo);
+}
+.tab-bar__tab:hover { background: var(--color-surface-hi); }
+.tab-bar__tab.is-active {
+  background: var(--color-bg);
+  box-shadow: inset 0 -2px 0 var(--color-accent);
+}
+.tab-bar__tab.is-active .tab-bar__name {
+  color: var(--color-text);
+  font-weight: 500;
+}
+.tab-bar__tab.is-external {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.tab-bar__close {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  min-width: unset;
+  min-height: unset;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--color-text-mute);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity var(--duration-fast), background var(--duration-fast);
+}
+.tab-bar__tab:hover .tab-bar__close,
+.tab-bar__tab.is-active .tab-bar__close {
+  opacity: 0.7;
+}
+.tab-bar__close:hover {
+  opacity: 1;
+  background: oklch(40% 0.08 25 / 0.5);
+  color: var(--color-text);
+}
+.tab-bar__close:disabled { opacity: 0; cursor: default; }
+
+.tab-bar__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 12px/1 var(--font-mono);
+  color: var(--color-text-mute);
+}
+
+.tab-bar__shortcut {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--color-text-mute);
+  opacity: 0.5;
+}
+
+.tab-bar__rename-input {
+  flex: 1;
+  min-width: 0;
+  font: 12px var(--font-mono);
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-accent);
+  border-radius: 3px;
+  padding: 1px 4px;
+  outline: none;
+}
+
+.tab-bar__new {
+  flex: 0 0 auto;
+  width: 34px;
+  min-width: unset;
+  min-height: unset;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  font-size: 18px;
+  color: var(--color-text-mute);
+  cursor: pointer;
+  transition: background var(--duration-fast), color var(--duration-fast);
+}
+.tab-bar__new:hover {
+  background: var(--color-surface-hi);
+  color: var(--color-text);
+}
+
+/* ── Context menu ────────────────────────────────────────── */
+.context-menu__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+}
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 140px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-surface-hi);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 4px 16px oklch(0% 0 0 / 0.4);
+}
+.context-menu__item {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--color-text);
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  text-align: left;
+  cursor: pointer;
+  min-width: unset;
+  min-height: unset;
+  transition: background var(--duration-fast);
+}
+.context-menu__item:hover { background: var(--color-surface-hi); }
+.context-menu__item.is-danger { color: var(--color-danger); }
+.context-menu__item.is-danger:hover { background: oklch(30% 0.08 25 / 0.6); }
 .session-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-1); }
 .session-list__item {
   padding: var(--space-2) var(--space-3);

@@ -14,6 +14,7 @@ export type TerminalHandle = {
   close: () => void;
   probeNow: () => void;
   retry: () => void;
+  fit: () => void;
   readonly isConnected: boolean;
   readonly state: TerminalState;
   onStateChange: (cb: (state: TerminalState, attempt?: number) => void) => void;
@@ -509,6 +510,11 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       reconnectAttempt = 0;
       setState("reconnecting", 0);
       scheduleReconnectAttempt();
+    },
+    fit: () => {
+      if (disposed) return;
+      try { fit.fit(); } catch {}
+      publishResize();
     },
     close: () => {
       disposed = true;
