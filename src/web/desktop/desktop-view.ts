@@ -143,7 +143,36 @@ export function renderDesktop(root: HTMLElement): void {
   attachBtn.className = "input-bar__attach";
   inputBar.appendChild(ta);
 
-  // Paste handler for images
+  // Paste image in textarea → upload → insert path into textarea
+  ta.addEventListener("paste", (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imageItem = Array.from(items).find((it) => it.type.startsWith("image/"));
+    if (!imageItem) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const file = imageItem.getAsFile();
+    if (!file || !openedName) return;
+    const sessionAtPaste = openedName;
+    void (async () => {
+      try {
+        const path = await uploadImageForSession(sessionAtPaste, file);
+        if (openedName !== sessionAtPaste) {
+          showToast(`已切到其他 session，图片 ${path} 未注入`, "error");
+          return;
+        }
+        const start = ta.selectionStart;
+        const end = ta.selectionEnd;
+        ta.value = ta.value.substring(0, start) + path + " " + ta.value.substring(end);
+        const cursor = start + path.length + 1;
+        ta.setSelectionRange(cursor, cursor);
+      } catch (err) {
+        showToast(`上传失败：${(err as Error).message}`, "error");
+      }
+    })();
+  });
+
+  // Paste image elsewhere (e.g. terminal focused) → upload → send path to terminal
   root.addEventListener("paste", (e) => {
     const items = (e as ClipboardEvent).clipboardData?.items;
     if (!items) return;
