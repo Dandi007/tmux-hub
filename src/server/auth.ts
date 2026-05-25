@@ -19,7 +19,7 @@ const PUBLIC_PATHS = new Set([
 
 function isReadOnly(method: string, path: string): boolean {
   if (method !== "GET") return false;
-  if (path === "/" || path === "/templates" || path === "/events") return true;
+  if (path === "/" || path === "/index.html" || path === "/templates" || path === "/events") return true;
   if (path === "/system/auth-check") return true;
   if (path === "/manifest.webmanifest" || path === "/sw.js") return true;
   if (path.startsWith("/web/") || path.startsWith("/assets/")) return true;
