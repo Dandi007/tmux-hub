@@ -1,7 +1,8 @@
 import { tmux } from "./tmux-cmd";
 import type { SessionInfo, ServerEvent } from "../shared/protocol";
 import { REGISTRY_INTERVAL_MS } from "./config";
-import { isGrammarOk, isManagedSessionName } from "../shared/session-name";
+import { isGrammarOk } from "../shared/session-name";
+import type { ManagedSessionDb } from "./managed-db";
 import { createLogger } from "./logger";
 
 const logger = createLogger("registry");
@@ -56,11 +57,10 @@ export class SessionRegistry {
   private serverReachable = true;
   private timer: ReturnType<typeof setInterval> | null = null;
   private listeners = new Set<(event: ServerEvent) => void>();
-  private managedNames = new Set<string>();
-  private templateIds: string[];
+  private db: ManagedSessionDb;
 
-  constructor(templateIds: string[]) {
-    this.templateIds = templateIds;
+  constructor(db: ManagedSessionDb) {
+    this.db = db;
   }
 
   async start(): Promise<void> {
@@ -80,16 +80,6 @@ export class SessionRegistry {
 
   isServerReachable(): boolean {
     return this.serverReachable;
-  }
-
-  registerManaged(name: string): void {
-    this.managedNames.add(name);
-  }
-
-  renameManagedSession(oldName: string, newName: string): void {
-    if (this.managedNames.delete(oldName)) {
-      this.managedNames.add(newName);
-    }
   }
 
   async pollNow(): Promise<void> {
@@ -121,20 +111,15 @@ export class SessionRegistry {
       this.emit({ event: "server_up" });
     }
 
-    // Auto-discover managed sessions by template prefix
-    for (const s of all) {
-      if (isManagedSessionName(s.name, this.templateIds)) {
-        this.managedNames.add(s.name);
-      }
+    const managed = this.db.all();
+
+    // Prune DB entries whose tmux sessions no longer exist
+    const alive = new Set(all.map((s) => s.name));
+    for (const name of managed) {
+      if (!alive.has(name)) this.db.remove(name);
     }
 
-    // Prune managed names whose tmux sessions no longer exist
-    const allNames = new Set(all.map((s) => s.name));
-    for (const name of this.managedNames) {
-      if (!allNames.has(name)) this.managedNames.delete(name);
-    }
-
-    const next = all.filter((s) => this.managedNames.has(s.name));
+    const next = all.filter((s) => managed.has(s.name));
     const events = diffSessions(this.state, next);
     this.state = next;
     for (const e of events) {

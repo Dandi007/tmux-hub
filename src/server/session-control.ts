@@ -3,7 +3,7 @@ import { tmux as defaultTmux } from "./tmux-cmd";
 import { CAPTURE_PANE_LINES } from "./config";
 import { isGrammarOk } from "../shared/session-name";
 import type { BroadcasterRegistry } from "./output-broadcaster";
-import type { SessionRegistry } from "./session-registry";
+import type { ManagedSessionDb } from "./managed-db";
 import { createLogger } from "./logger";
 
 const logger = createLogger("session-control");
@@ -12,7 +12,7 @@ export type TmuxRun = (args: string[]) => Promise<{ stdout: string; stderr: stri
 
 export type SessionControlDeps = {
   broadcasters: BroadcasterRegistry;
-  registry?: SessionRegistry;
+  managedDb?: ManagedSessionDb;
   tmuxRun?: TmuxRun;
 };
 
@@ -36,6 +36,7 @@ export function buildSessionControlRoutes(deps: SessionControlDeps): Hono {
       logger.warn({ session: name, stderr: result.stderr }, "kill-session failed");
       return c.json({ error: result.stderr }, 410);
     }
+    deps.managedDb?.remove(name);
     await deps.broadcasters.stop(name);
     logger.info({ session: name }, "session killed");
     return c.json({ ok: true });
@@ -53,7 +54,7 @@ export function buildSessionControlRoutes(deps: SessionControlDeps): Hono {
       logger.warn({ session: name, to, stderr: result.stderr }, "rename-session failed");
       return c.json({ error: result.stderr }, 400);
     }
-    deps.registry?.renameManagedSession(name, to);
+    deps.managedDb?.rename(name, to);
     logger.info({ session: name, to }, "session renamed");
     return c.json({ ok: true, name: to });
   });
