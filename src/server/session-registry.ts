@@ -2,6 +2,7 @@ import { tmux } from "./tmux-cmd";
 import type { SessionInfo, ServerEvent } from "../shared/protocol";
 import { REGISTRY_INTERVAL_MS } from "./config";
 import { isGrammarOk } from "../shared/session-name";
+import type { ManagedSessionDb } from "./managed-db";
 import { createLogger } from "./logger";
 
 const logger = createLogger("registry");
@@ -56,10 +57,15 @@ export class SessionRegistry {
   private serverReachable = true;
   private timer: ReturnType<typeof setInterval> | null = null;
   private listeners = new Set<(event: ServerEvent) => void>();
+  private db: ManagedSessionDb;
 
-  start() {
+  constructor(db: ManagedSessionDb) {
+    this.db = db;
+  }
+
+  async start(): Promise<void> {
     if (this.timer) return;
-    void this.poll();
+    await this.poll();
     this.timer = setInterval(() => { void this.poll(); }, REGISTRY_INTERVAL_MS);
   }
 
@@ -76,6 +82,10 @@ export class SessionRegistry {
     return this.serverReachable;
   }
 
+  async pollNow(): Promise<void> {
+    await this.poll();
+  }
+
   subscribe(fn: (event: ServerEvent) => void): () => void {
     this.listeners.add(fn);
     return () => { this.listeners.delete(fn); };
@@ -86,8 +96,8 @@ export class SessionRegistry {
   }
 
   private async poll() {
-    const next = await listSessions();
-    if (next === null) {
+    const all = await listSessions();
+    if (all === null) {
       if (this.serverReachable) {
         this.serverReachable = false;
         logger.error("tmux server unreachable");
@@ -100,6 +110,16 @@ export class SessionRegistry {
       logger.info("tmux server recovered");
       this.emit({ event: "server_up" });
     }
+
+    const managed = this.db.all();
+
+    // Prune DB entries whose tmux sessions no longer exist
+    const alive = new Set(all.map((s) => s.name));
+    for (const name of managed) {
+      if (!alive.has(name)) this.db.remove(name);
+    }
+
+    const next = all.filter((s) => managed.has(s.name));
     const events = diffSessions(this.state, next);
     this.state = next;
     for (const e of events) {

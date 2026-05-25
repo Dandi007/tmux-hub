@@ -1,7 +1,15 @@
 const NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+const TS14_RE = /^\d{14}$/;
 
 export function isGrammarOk(name: string): boolean {
   return NAME_RE.test(name);
+}
+
+export function isManagedSessionName(name: string, templateIds: string[]): boolean {
+  return templateIds.some((id) => {
+    if (!name.startsWith(id + "-")) return false;
+    return TS14_RE.test(name.slice(id.length + 1));
+  });
 }
 
 export class GrammarError extends Error {

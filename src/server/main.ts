@@ -11,18 +11,36 @@ import { pinViewport } from "./viewport-pinner";
 import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS, IMAGE_DIR, MAX_IMAGE_BYTES } from "./config";
 import { loadOrCreateSecret, safeEqual } from "./secret";
 import { authGate } from "./auth";
-import { isGrammarOk } from "../shared/session-name";
+import { isGrammarOk, isManagedSessionName } from "../shared/session-name";
 import { buildSessionControlRoutes } from "./session-control";
 import { buildImageUploadRoutes } from "./image-upload";
 import { TemplateRunner, TemplateError } from "./template-runner";
+import { ManagedSessionDb } from "./managed-db";
+import { listSessions } from "./session-registry";
 import { createLogger, LOG_FILE } from "./logger";
 
 const logger = createLogger("main");
 
 const SECRET = loadOrCreateSecret();
-const registry = new SessionRegistry();
-registry.start();
+const templates = loadTemplates();
+const templateIds = templates.map((t) => t.id);
+const templateRunner = new TemplateRunner(templates);
 
+const managedDb = new ManagedSessionDb();
+
+// Migrate existing tmux sessions that match template patterns into DB
+const existing = await listSessions();
+if (existing) {
+  for (const s of existing) {
+    if (isManagedSessionName(s.name, templateIds) && !managedDb.has(s.name)) {
+      const tid = templateIds.find((id) => s.name.startsWith(id + "-"));
+      managedDb.add(s.name, tid);
+      logger.info({ session: s.name }, "migrated existing session to db");
+    }
+  }
+}
+
+const registry = new SessionRegistry(managedDb);
 const sse = new SseHub();
 const broadcasters = new BroadcasterRegistry();
 const input = new InputRouter();
@@ -37,16 +55,27 @@ registry.subscribe(async (event) => {
   }
 });
 
-setTimeout(() => {
-  for (const s of registry.snapshot()) {
-    void broadcasters.get(s.name).catch((e) => {
-      logger.error({ session: s.name, err: e }, "initial prime failed");
-    });
-  }
-}, 100);
+await registry.start();
 
-const templates = loadTemplates();
-const templateRunner = new TemplateRunner(templates);
+// Auto-create a default session if none are managed
+if (registry.snapshot().length === 0 && templates.length > 0) {
+  const defaultTemplate = templates.find((t) => t.id === "shell") ?? templates[0]!;
+  const cwd = defaultTemplate.cwd_choices[0]!;
+  try {
+    const name = await templateRunner.run(defaultTemplate.id, cwd);
+    managedDb.add(name, defaultTemplate.id);
+    await registry.pollNow();
+    logger.info({ session: name, template: defaultTemplate.id }, "auto-created default session");
+  } catch (e) {
+    logger.error({ err: e }, "auto-create default session failed");
+  }
+}
+
+for (const s of registry.snapshot()) {
+  void broadcasters.get(s.name).catch((e) => {
+    logger.error({ session: s.name, err: e }, "initial prime failed");
+  });
+}
 
 const app = new Hono();
 app.use("*", authGate);
@@ -62,6 +91,7 @@ app.post("/templates/:id/run", async (c) => {
   const body = await c.req.json<{ cwd: string }>().catch(() => ({ cwd: "" }));
   try {
     const name = await templateRunner.run(id, body.cwd);
+    managedDb.add(name, id);
     return c.json({ name }, 201);
   } catch (e) {
     if (e instanceof TemplateError) return c.json({ error: e.message }, e.status as 400 | 404 | 409 | 500);
@@ -69,7 +99,7 @@ app.post("/templates/:id/run", async (c) => {
   }
 });
 app.get("/events", () => sse.attach({ event: "snapshot", payload: registry.snapshot() }));
-app.route("/", buildSessionControlRoutes({ broadcasters }));
+app.route("/", buildSessionControlRoutes({ broadcasters, managedDb }));
 app.route("/", buildImageUploadRoutes({
   imageDir: IMAGE_DIR,
   maxBytes: MAX_IMAGE_BYTES,
