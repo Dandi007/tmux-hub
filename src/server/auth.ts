@@ -17,15 +17,14 @@ const PUBLIC_PATHS = new Set([
   "/sw.js",
 ]);
 
+const STATIC_EXT = /\.(html|js|css|json|map|svg|png|jpg|jpeg|webp|avif|ico|woff2?|ttf|webmanifest)$/;
+
 function isReadOnly(method: string, path: string): boolean {
   if (method !== "GET") return false;
-  if (path === "/" || path === "/index.html" || path === "/templates" || path === "/events") return true;
+  if (path === "/" || path === "/templates" || path === "/events") return true;
   if (path === "/system/auth-check") return true;
-  if (path === "/manifest.webmanifest" || path === "/sw.js") return true;
-  if (path.startsWith("/web/") || path.startsWith("/assets/")) return true;
-  // PWA icons and other static files emitted by Vite into dist/web/ are
-  // referenced from manifest/index.html at the site root.
-  if (/^\/(pwa-|favicon-|apple-touch-icon-|registerSW\.js$)/.test(path)) return true;
+  if (path.startsWith("/assets/")) return true;
+  if (STATIC_EXT.test(path)) return true;
   return false;
 }
 
