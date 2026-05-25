@@ -20,9 +20,10 @@ import { createLogger, LOG_FILE } from "./logger";
 const logger = createLogger("main");
 
 const SECRET = loadOrCreateSecret();
-const registry = new SessionRegistry();
-registry.start();
+const templates = loadTemplates();
+const templateRunner = new TemplateRunner(templates);
 
+const registry = new SessionRegistry(templates.map((t) => t.id));
 const sse = new SseHub();
 const broadcasters = new BroadcasterRegistry();
 const input = new InputRouter();
@@ -37,16 +38,27 @@ registry.subscribe(async (event) => {
   }
 });
 
-setTimeout(() => {
-  for (const s of registry.snapshot()) {
-    void broadcasters.get(s.name).catch((e) => {
-      logger.error({ session: s.name, err: e }, "initial prime failed");
-    });
-  }
-}, 100);
+await registry.start();
 
-const templates = loadTemplates();
-const templateRunner = new TemplateRunner(templates);
+// Auto-create a default session if none are managed
+if (registry.snapshot().length === 0 && templates.length > 0) {
+  const defaultTemplate = templates.find((t) => t.id === "shell") ?? templates[0]!;
+  const cwd = defaultTemplate.cwd_choices[0]!;
+  try {
+    const name = await templateRunner.run(defaultTemplate.id, cwd);
+    registry.registerManaged(name);
+    await registry.pollNow();
+    logger.info({ session: name, template: defaultTemplate.id }, "auto-created default session");
+  } catch (e) {
+    logger.error({ err: e }, "auto-create default session failed");
+  }
+}
+
+for (const s of registry.snapshot()) {
+  void broadcasters.get(s.name).catch((e) => {
+    logger.error({ session: s.name, err: e }, "initial prime failed");
+  });
+}
 
 const app = new Hono();
 app.use("*", authGate);
@@ -69,7 +81,7 @@ app.post("/templates/:id/run", async (c) => {
   }
 });
 app.get("/events", () => sse.attach({ event: "snapshot", payload: registry.snapshot() }));
-app.route("/", buildSessionControlRoutes({ broadcasters }));
+app.route("/", buildSessionControlRoutes({ broadcasters, registry }));
 app.route("/", buildImageUploadRoutes({
   imageDir: IMAGE_DIR,
   maxBytes: MAX_IMAGE_BYTES,

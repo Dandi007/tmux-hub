@@ -3,6 +3,7 @@ import { tmux as defaultTmux } from "./tmux-cmd";
 import { CAPTURE_PANE_LINES } from "./config";
 import { isGrammarOk } from "../shared/session-name";
 import type { BroadcasterRegistry } from "./output-broadcaster";
+import type { SessionRegistry } from "./session-registry";
 import { createLogger } from "./logger";
 
 const logger = createLogger("session-control");
@@ -11,6 +12,7 @@ export type TmuxRun = (args: string[]) => Promise<{ stdout: string; stderr: stri
 
 export type SessionControlDeps = {
   broadcasters: BroadcasterRegistry;
+  registry?: SessionRegistry;
   tmuxRun?: TmuxRun;
 };
 
@@ -51,6 +53,7 @@ export function buildSessionControlRoutes(deps: SessionControlDeps): Hono {
       logger.warn({ session: name, to, stderr: result.stderr }, "rename-session failed");
       return c.json({ error: result.stderr }, 400);
     }
+    deps.registry?.renameManagedSession(name, to);
     logger.info({ session: name, to }, "session renamed");
     return c.json({ ok: true, name: to });
   });
