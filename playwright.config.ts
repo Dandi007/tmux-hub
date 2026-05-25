@@ -13,7 +13,7 @@ const E2E_PORT = "3201";
 const cwdHash = Buffer.from(process.cwd()).toString("base64url").slice(0, 12);
 const E2E_ENV_FILE = join(tmpdir(), `tmux-hub-e2e-env-${cwdHash}.json`);
 
-type E2EEnv = { socket: string; tmuxTmpdir: string; secretPath: string; logDir: string; port: string };
+type E2EEnv = { socket: string; tmuxTmpdir: string; secretPath: string; logDir: string; dbPath: string; port: string };
 let env: E2EEnv;
 if (existsSync(E2E_ENV_FILE)) {
   env = JSON.parse(readFileSync(E2E_ENV_FILE, "utf8")) as E2EEnv;
@@ -24,6 +24,7 @@ if (existsSync(E2E_ENV_FILE)) {
     tmuxTmpdir: `/tmp/tht-e2e-${id}`,
     secretPath: `/tmp/tht-e2e-secret-${id}/hub.secret`,
     logDir: `/tmp/tht-e2e-logs-${id}`,
+    dbPath: `/tmp/tht-e2e-${id}/managed-sessions.db`,
     port: E2E_PORT,
   };
   mkdirSync(env.tmuxTmpdir, { recursive: true });
@@ -33,7 +34,7 @@ if (existsSync(E2E_ENV_FILE)) {
 }
 process.env.TMUX_HUB_E2E_ENV_FILE = E2E_ENV_FILE;
 
-const { socket: E2E_SOCKET, tmuxTmpdir: E2E_TMUX_TMPDIR, secretPath: E2E_SECRET_PATH, logDir: E2E_LOG_DIR } = env;
+const { socket: E2E_SOCKET, tmuxTmpdir: E2E_TMUX_TMPDIR, secretPath: E2E_SECRET_PATH, logDir: E2E_LOG_DIR, dbPath: E2E_DB_PATH } = env;
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -50,6 +51,7 @@ export default defineConfig({
       `TMUX_HUB_DEV_BIND_SECRET=1 ` +
       `TMUX_HUB_SECRET_PATH=${E2E_SECRET_PATH} ` +
       `TMUX_HUB_LOG_DIR=${E2E_LOG_DIR} ` +
+      `TMUX_HUB_DB_PATH=${E2E_DB_PATH} ` +
       `TMUX_HUB_PORT=${E2E_PORT} ` +
       `bun run start`,
     url: `http://127.0.0.1:${E2E_PORT}/system/health`,

@@ -10,7 +10,7 @@ export class ManagedSessionDb {
   private db: Database;
 
   constructor(dbPath?: string) {
-    const path = dbPath ?? resolve(homedir(), ".cache/tmux-hub/managed-sessions.db");
+    const path = dbPath ?? process.env.TMUX_HUB_DB_PATH ?? resolve(homedir(), ".cache/tmux-hub/managed-sessions.db");
     mkdirSync(resolve(path, ".."), { recursive: true });
     this.db = new Database(path);
     this.db.run("PRAGMA journal_mode=WAL");
