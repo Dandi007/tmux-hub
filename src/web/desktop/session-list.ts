@@ -99,7 +99,7 @@ export function renderSessionList(parent: HTMLElement): SessionListHandle {
 
         input.addEventListener("keydown", (e) => {
           e.stopPropagation();
-          if (e.key === "Enter") { e.preventDefault(); void commit(); }
+          if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); void commit(); }
           else if (e.key === "Escape") { e.preventDefault(); committed = true; cleanup(); }
         });
         input.addEventListener("blur", () => { void commit(); });
