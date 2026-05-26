@@ -45,6 +45,21 @@ describe("InputRouter", () => {
     await expect(r.send("Bad.Name!", { kind: "key", name: "Enter" })).rejects.toThrow();
   });
 
+  test("large literal produces multiple send-keys calls", async () => {
+    const calls: string[][] = [];
+    const spy = async (args: string[]) => {
+      calls.push(args);
+      return { stdout: "", stderr: "", code: 0 };
+    };
+    const r = new InputRouter(spy);
+    await r.send(S, { kind: "keys", literal: "a".repeat(3000) });
+    const skCalls = calls.filter((c) => c[0] === "send-keys");
+    expect(skCalls.length).toBe(3);
+    for (const c of skCalls) {
+      expect(Buffer.byteLength(c[4])).toBeLessThanOrEqual(1024);
+    }
+  });
+
   test("resize calls tmux resize-window", async () => {
     const calls: string[][] = [];
     const spy = async (args: string[]) => {
@@ -55,6 +70,18 @@ describe("InputRouter", () => {
     await r.send(S, { kind: "resize", cols: 180, rows: 42 });
     const resizeCall = calls.find((c) => c[0] === "resize-window");
     expect(resizeCall).toEqual(["resize-window", "-t", `${S}:0`, "-x", "180", "-y", "42"]);
+  });
+
+  test("large literal is chunked and fully delivered", async () => {
+    const r = new InputRouter(tmuxTest);
+    const marker = "CHUNK_OK_" + Date.now();
+    const padding = "x".repeat(3000);
+    const payload = `echo ${marker}${padding}`;
+    await r.send(S, { kind: "keys", literal: payload });
+    await r.send(S, { kind: "key", name: "Enter" });
+    await new Promise((res) => setTimeout(res, 500));
+    const cap = await tmuxTest(["capture-pane", "-p", "-t", `${S}:@0.0`]);
+    expect(cap.stdout).toContain(marker);
   });
 
   test("resize clamps to bounds", async () => {
