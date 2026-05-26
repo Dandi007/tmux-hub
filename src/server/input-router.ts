@@ -7,6 +7,10 @@ const logger = createLogger("input");
 
 export type TmuxRun = (args: string[]) => Promise<{ stdout: string; stderr: string; code: number }>;
 
+// tmux send-keys -l passes the literal as a single execve argument;
+// macOS ARG_MAX and tmux's own parser both impose length limits.
+const SEND_KEYS_CHUNK_BYTES = 1024;
+
 const ALLOWED_KEYS = new Set([
   "Enter", "Escape", "Tab", "BSpace",
   "Up", "Down", "Left", "Right",
@@ -47,10 +51,14 @@ export class InputRouter {
 
   private async doSend(session: string, msg: ClientWsMessage): Promise<void> {
     if (msg.kind === "keys") {
-      const r = await this.run(["send-keys", "-t", `${session}:0.0`, "-l", msg.literal]);
-      if (r.code !== 0) {
-        logger.error({ session, stderr: r.stderr }, "send-keys (literal) failed");
-        throw classifyTmuxError(session, r.stderr);
+      const target = `${session}:0.0`;
+      const chunks = chunkString(msg.literal, SEND_KEYS_CHUNK_BYTES);
+      for (const chunk of chunks) {
+        const r = await this.run(["send-keys", "-t", target, "-l", chunk]);
+        if (r.code !== 0) {
+          logger.error({ session, stderr: r.stderr, chunkLen: chunk.length }, "send-keys (literal) failed");
+          throw classifyTmuxError(session, r.stderr);
+        }
       }
     } else if (msg.kind === "key") {
       if (!ALLOWED_KEYS.has(msg.name)) {
@@ -71,4 +79,19 @@ export class InputRouter {
       }
     }
   }
+}
+
+export function chunkString(s: string, maxBytes: number): string[] {
+  if (Buffer.byteLength(s) <= maxBytes) return [s];
+  const chunks: string[] = [];
+  let start = 0;
+  while (start < s.length) {
+    let end = Math.min(start + maxBytes, s.length);
+    while (end > start && Buffer.byteLength(s.slice(start, end)) > maxBytes) {
+      end--;
+    }
+    chunks.push(s.slice(start, end));
+    start = end;
+  }
+  return chunks;
 }
