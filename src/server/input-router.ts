@@ -40,6 +40,13 @@ export class InputRouter {
   constructor(private run: TmuxRun = defaultTmux) {}
 
   send(session: string, msg: ClientWsMessage): Promise<void> {
+    // resize-window is independent of pty input and must not queue behind
+    // a long-running chunk loop — otherwise xterm.js locally resizes while
+    // tmux still outputs at the old size, causing garbled rendering.
+    if (msg.kind === "resize") {
+      assertGrammar(session);
+      return this.doSend(session, msg);
+    }
     const prev = this.locks.get(session) ?? Promise.resolve();
     const next = prev.then(() => {
       assertGrammar(session);
