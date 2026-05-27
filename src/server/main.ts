@@ -234,9 +234,9 @@ Bun.serve({
       const unsubData = b.attachWithReplay((chunk) => { try { ws.send(chunk); } catch {} });
       ws.data.unsubs.push(unsubEvents, unsubData);
     },
-    async close(ws: ServerWebSocket<WsData>) {
+    async close(ws: ServerWebSocket<WsData>, code: number, reason: string) {
       const { sessionName, connId } = ws.data;
-      logger.info({ session: sessionName, connId }, "ws close");
+      logger.info({ session: sessionName, connId, code, reason: reason || undefined }, "ws close");
       const { unsubs } = ws.data;
       for (const fn of unsubs) try { fn(); } catch {}
       ws.data.unsubs.length = 0;
