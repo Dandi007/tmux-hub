@@ -8,6 +8,7 @@ import { SseHub } from "./sse";
 import { BroadcasterRegistry } from "./output-broadcaster";
 import { InputRouter, HubError } from "./input-router";
 import { pinViewport } from "./viewport-pinner";
+import { bootstrapTmuxHooks } from "./tmux-bootstrap";
 import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS, IMAGE_DIR, MAX_IMAGE_BYTES } from "./config";
 import { loadOrCreateSecret, safeEqual } from "./secret";
 import { authGate } from "./auth";
@@ -56,6 +57,9 @@ registry.subscribe(async (event) => {
 });
 
 await registry.start();
+
+try { await bootstrapTmuxHooks(); }
+catch (e) { logger.warn({ err: e }, "bootstrap tmux hooks failed"); }
 
 // Auto-create a default session if none are managed
 if (registry.snapshot().length === 0 && templates.length > 0) {
