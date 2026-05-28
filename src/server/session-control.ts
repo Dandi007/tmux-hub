@@ -5,6 +5,7 @@ import { isGrammarOk } from "../shared/session-name";
 import type { BroadcasterRegistry } from "./output-broadcaster";
 import type { ManagedSessionDb } from "./managed-db";
 import { createLogger } from "./logger";
+import { bootstrapTmuxHooks } from "./tmux-bootstrap";
 
 const logger = createLogger("session-control");
 
@@ -81,6 +82,13 @@ export function buildSessionControlRoutes(deps: SessionControlDeps): Hono {
       return c.json({ error: result.stderr }, 500);
     }
     logger.info("tmux server started");
+    const runOk = async (args: string[]): Promise<string> => {
+      const r2 = await run(args);
+      if (r2.code !== 0) throw new Error(`tmux ${args.join(" ")} failed (${r2.code}): ${r2.stderr}`);
+      return r2.stdout;
+    };
+    try { await bootstrapTmuxHooks(runOk); }
+    catch (e) { logger.warn({ err: e }, "bootstrap tmux hooks failed"); }
     return c.json({ ok: true });
   });
 
