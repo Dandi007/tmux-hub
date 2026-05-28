@@ -92,9 +92,11 @@ app.get("/templates", (c) =>
 );
 app.post("/templates/:id/run", async (c) => {
   const id = c.req.param("id");
-  const body = await c.req.json<{ cwd: string }>().catch(() => ({ cwd: "" }));
+  const body = await c.req
+    .json<{ cwd: string; env?: Record<string, string> }>()
+    .catch(() => ({ cwd: "", env: undefined }));
   try {
-    const name = await templateRunner.run(id, body.cwd);
+    const name = await templateRunner.run(id, body.cwd, body.env);
     managedDb.add(name, id);
     return c.json({ name }, 201);
   } catch (e) {

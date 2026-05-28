@@ -61,4 +61,34 @@ describe("TemplateRunner", () => {
       expect((e as TemplateError).status).toBe(400);
     }
   });
+
+  test("propagates env vars to tmux new-session", async () => {
+    const r = new TemplateRunner(T, tmuxTest);
+    const name = await r.run("shell", "/tmp", { FOO: "bar", PROMPT_PATH: "/etc/hosts" });
+    created.push(name);
+    const foo = await tmuxTest(["show-environment", "-t", name, "FOO"]);
+    expect(foo.stdout.trim()).toBe("FOO=bar");
+    const pp = await tmuxTest(["show-environment", "-t", name, "PROMPT_PATH"]);
+    expect(pp.stdout.trim()).toBe("PROMPT_PATH=/etc/hosts");
+  });
+
+  test("rejects invalid env var name (400)", async () => {
+    const r = new TemplateRunner(T, tmuxTest);
+    try {
+      await r.run("shell", "/tmp", { "bad name": "x" });
+      throw new Error("should have thrown");
+    } catch (e) {
+      expect((e as TemplateError).status).toBe(400);
+    }
+  });
+
+  test("rejects env var value containing NUL (400)", async () => {
+    const r = new TemplateRunner(T, tmuxTest);
+    try {
+      await r.run("shell", "/tmp", { OK: "a\0b" });
+      throw new Error("should have thrown");
+    } catch (e) {
+      expect((e as TemplateError).status).toBe(400);
+    }
+  });
 });
