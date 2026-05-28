@@ -6,6 +6,23 @@
 
 ---
 
+## 界面预览
+
+<table>
+  <tr>
+    <td width="65%"><img src="docs/screenshots/desktop.png" alt="Desktop UI"/></td>
+    <td width="35%"><img src="docs/screenshots/mobile.png" alt="Mobile UI"/></td>
+  </tr>
+  <tr>
+    <td align="center">桌面端 · 1440 × 900</td>
+    <td align="center">移动端 · iPhone 14</td>
+  </tr>
+</table>
+
+> 截图由 Playwright 生成。本机起 `bun run dev` 后跑 `bun run screenshots:readme` 可重新生成——脚本会通过 `/templates/shell/run` API spawn 一个临时 demo session、跑无害命令、截图、再 kill。
+
+---
+
 ## 产品目标
 
 ### 核心功能
