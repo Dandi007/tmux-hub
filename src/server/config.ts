@@ -74,3 +74,12 @@ export const MAX_IMAGE_BYTES = parsePositiveInt(
   DEFAULT_MAX_IMAGE_BYTES,
   "TMUX_HUB_MAX_IMAGE_BYTES",
 );
+
+// Per-connection replay cap: tail of session log sent on ws attach.
+// Default 256KB keeps mobile xterm parsers from choking on large histories.
+// Full history is still preserved on disk; this only limits a single replay.
+export const REPLAY_CAP_BYTES = parsePositiveInt(
+  process.env.TMUX_HUB_REPLAY_CAP_BYTES,
+  256 * 1024,
+  "TMUX_HUB_REPLAY_CAP_BYTES",
+);

@@ -4,7 +4,7 @@
 // for spike S1a/S1b analysis.
 import { tmux } from "./tmux-cmd";
 import { RingBuffer } from "./ring-buffer";
-import { RING_BUFFER_BYTES } from "./config";
+import { RING_BUFFER_BYTES, REPLAY_CAP_BYTES } from "./config";
 import { mkdirSync, openSync, readSync, closeSync, existsSync, unlinkSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -92,7 +92,6 @@ export class SessionBroadcaster {
       this.subscribers.add(send);
       return () => { this.subscribers.delete(send); };
     }
-    const REPLAY_CAP = 5 * 1024 * 1024;     // 5 MB tail
     const pending: Uint8Array[] = [];
     const tap = (chunk: Uint8Array): void => { pending.push(chunk); };
     this.subscribers.add(tap);
@@ -100,7 +99,7 @@ export class SessionBroadcaster {
     const enc = new TextEncoder();
     try {
       const upTo = this.offset;
-      const start = Math.max(0, upTo - REPLAY_CAP);
+      const start = Math.max(0, upTo - REPLAY_CAP_BYTES);
       const len = upTo - start;
       // RIS reset clears the terminal state. If we sliced mid-sequence at
       // `start`, xterm may briefly mis-render the first cells; acceptable
