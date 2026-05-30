@@ -42,6 +42,14 @@ export const authGate: MiddlewareHandler = async (c, next) => {
   const path = new URL(c.req.url).pathname;
   if (PUBLIC_PATHS.has(path)) return next();
 
+  // The launch endpoint POST /sessions has its own dedicated adminGate (local
+  // admin secret, tunnel-rejected) and MUST bypass the standard authGate: an
+  // admin-secret-only caller holds hub.admin.secret but not hub.secret, so
+  // authGate would 401 it before adminGate ever runs. adminGate is the sole —
+  // and stricter — gate for this exact path. Scoped to the exact path so the
+  // /sessions/:name/* control routes stay under authGate.
+  if (path === "/sessions") return next();
+
   const cfJwt = c.req.header("cf-access-jwt-assertion");
   const localSecret = c.req.header("x-hub-secret");
 
