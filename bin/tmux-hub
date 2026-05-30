@@ -1,0 +1,77 @@
+#!/usr/bin/env bun
+/**
+ * tmux-hub CLI — thin wrapper over the launch HTTP endpoint.
+ *
+ * Reads the admin secret from ~/.config/tmux-hub/hub.admin.secret and
+ * POSTs to the local tmux-hub server. The server must be running.
+ *
+ * Usage:
+ *   tmux-hub launch --cwd /path/to/dir [--name session-name] [--env KEY=VAL]... -- <command...>
+ */
+
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
+import { parseLaunchArgs } from "../src/server/cli";
+
+const ADMIN_SECRET_PATH =
+  process.env.TMUX_HUB_ADMIN_SECRET_PATH ??
+  resolve(homedir(), ".config", "tmux-hub", "hub.admin.secret");
+const PORT = process.env.TMUX_HUB_PORT ?? "3101";
+const HOST = "127.0.0.1";
+
+async function main(): Promise<void> {
+  const parsed = parseLaunchArgs(process.argv.slice(2));
+  if (!parsed.ok) {
+    process.stderr.write(`usage: tmux-hub launch --cwd PATH [--name N] [--env K=V]... -- <cmd...>\n`);
+    process.stderr.write(`error: ${parsed.error}\n`);
+    process.exit(2);
+  }
+
+  const { cwd, cmd, name, env } = parsed.value;
+
+  let adminSecret: string;
+  try {
+    adminSecret = readFileSync(ADMIN_SECRET_PATH, "utf8").trim();
+  } catch {
+    process.stderr.write(`cannot read admin secret at ${ADMIN_SECRET_PATH}\n`);
+    process.exit(1);
+  }
+
+  const body: Record<string, unknown> = { cwd, cmd };
+  if (name) body.name = name;
+  if (Object.keys(env).length > 0) body.env = env;
+
+  const url = `http://${HOST}:${PORT}/sessions`;
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-hub-admin-secret": adminSecret,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      let errMsg: string;
+      try {
+        const json = await res.json();
+        errMsg = (json as { error?: string }).error ?? res.statusText;
+      } catch {
+        errMsg = res.statusText;
+      }
+      process.stderr.write(`error: ${errMsg} (${res.status})\n`);
+      process.exit(1);
+    }
+
+    const json = (await res.json()) as { name: string };
+    console.log(json.name);
+  } catch (e) {
+    process.stderr.write(`connection error: ${(e as Error).message}\n`);
+    process.exit(1);
+  }
+}
+
+main();

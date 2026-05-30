@@ -198,6 +198,72 @@ tmux-hub 默认监听 127.0.0.1，要从手机访问需要做内网穿透：
 
 ---
 
+## 通用会话启动（`POST /sessions`）
+
+用于从脚本、CI 或其他工具中启动**不受模板限制**的 tmux 会话。与模板不同，此端点不限制 cwd 白名单且不绑定 template_id。
+
+### API
+
+```
+POST /sessions
+Content-Type: application/json
+X-Hub-Admin-Secret: <admin-secret>
+
+{
+  "cmd": "zsh",           // 必填：在 tmux 中执行的命令
+  "cwd": "/path/to/dir",  // 必填：工作目录（必须存在，支持 ~ 展开）
+  "name": "my-session",   // 可选：会话名（默认 adhoc-<14位时间戳>）
+  "env": {                // 可选：注入到 tmux 的环境变量
+    "MY_VAR": "value"
+  }
+}
+```
+
+**响应**：
+
+| code | body | 触发条件 |
+|------|------|----------|
+| `201` | `{"name": "..."}` | 成功创建 |
+| `400` | `{"error": "..."}` | cwd 不存在、name 非法、缺少必填字段 |
+| `401` | `{"error": "unauthorized"}` | 缺少 `x-hub-admin-secret` 或值不匹配 |
+| `403` | `{"error": "forbidden: not available via tunnel"}` | 请求带有 `cf-access-jwt-assertion` 或 `x-forwarded-for` |
+| `409` | `{"error": "session already exists: ..."}` | 同名会话已存在 |
+
+### 信任模型
+
+`POST /sessions` 使用**独立的 admin secret**（`~/.config/tmux-hub/hub.admin.secret`），与浏览器认证使用的 `hub.secret` 不同：
+
+- **`hub.secret`**：通过 `GET /system/auth-check` 分发给浏览器，手机在 CF Access 登录后也会获取到
+- **`hub.admin.secret`**：启动时自动生成（0600 权限），**任何 endpoint 都不得返回它**，只有能直接读写本机文件系统的进程才能获取
+
+这样就实现了「仅本机可启动任意命令」的安全边界：手机虽然有 `hub.secret`，但没有 `hub.admin.secret`，无法调用 launch 端点。
+
+### CLI
+
+```bash
+bin/tmux-hub launch --cwd /path/to/dir [--name session-name] [--env KEY=VAL]... -- <command...>
+```
+
+示例：
+
+```bash
+# 启动一个 zsh 会话
+bin/tmux-hub launch --cwd ~/projects -- zsh
+
+# 指定会话名和环境变量
+bin/tmux-hub launch --cwd /tmp --name my-task --env TASK_ID=42 -- bash -c 'echo $TASK_ID; exec bash'
+```
+
+CLI 读取 `~/.config/tmux-hub/hub.admin.secret`（可通过 `TMUX_HUB_ADMIN_SECRET_PATH` 覆盖），向 `127.0.0.1:${TMUX_HUB_PORT:-3101}/sessions` 发送 POST 请求。成功时打印会话名到 stdout，失败时输出错误到 stderr 并以非零值退出。
+
+### 日志保留
+
+- **模板会话**：退出后日志被删除（与原有行为一致）
+- **ad-hoc 会话**（通过 `POST /sessions` 创建）：退出后日志保留在 `~/.cache/tmux-hub/logs/<name>.log`
+- 服务端通过内存 `retainLog` 集合跟踪 ad-hoc 会话，启动时从数据库重建
+
+---
+
 ## 测试
 
 ```bash

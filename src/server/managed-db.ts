@@ -43,6 +43,11 @@ export class ManagedSessionDb {
     return this.db.query("SELECT 1 FROM managed_sessions WHERE name = ?").get(name) !== null;
   }
 
+  adhocNames(): string[] {
+    const rows = this.db.query("SELECT name FROM managed_sessions WHERE template_id IS NULL").all() as { name: string }[];
+    return rows.map((r) => r.name);
+  }
+
   all(): Set<string> {
     const rows = this.db.query("SELECT name FROM managed_sessions").all() as { name: string }[];
     return new Set(rows.map((r) => r.name));

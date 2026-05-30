@@ -4,10 +4,12 @@ import { join } from "node:path";
 
 const SECRET_DIR = mkdtempSync("/tmp/tht-auth-");
 const SECRET_PATH = join(SECRET_DIR, "hub.secret");
+const ADMIN_SECRET_PATH = join(SECRET_DIR, "hub.admin.secret");
 const TEST_SECRET = "deadbeef".repeat(8);
 writeFileSync(SECRET_PATH, TEST_SECRET);
 
 process.env.TMUX_HUB_SECRET_PATH = SECRET_PATH;
+process.env.TMUX_HUB_ADMIN_SECRET_PATH = ADMIN_SECRET_PATH;
 process.env.TMUX_HUB_TEMPLATES_PATH = "deploy/templates.yaml.example";
 process.env.TMUX_HUB_PORT = "31510";
 process.env.TMUX_HUB_DEV_BIND_SECRET = "0";

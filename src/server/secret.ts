@@ -3,17 +3,30 @@ import { homedir } from "node:os";
 import { resolve, dirname } from "node:path";
 import { randomBytes } from "node:crypto";
 
-const PATH = resolve(
-  process.env.TMUX_HUB_SECRET_PATH ?? homedir() + "/.config/tmux-hub/hub.secret",
-);
+function secretPath(): string {
+  return resolve(
+    process.env.TMUX_HUB_SECRET_PATH ?? homedir() + "/.config/tmux-hub/hub.secret",
+  );
+}
 
-export function loadOrCreateSecret(): string {
-  if (existsSync(PATH)) return readFileSync(PATH, "utf8").trim();
-  mkdirSync(dirname(PATH), { recursive: true });
+export function adminSecretPath(): string {
+  return resolve(
+    process.env.TMUX_HUB_ADMIN_SECRET_PATH ?? homedir() + "/.config/tmux-hub/hub.admin.secret",
+  );
+}
+
+export function loadOrCreateSecret(path?: string): string {
+  const p = path ?? secretPath();
+  if (existsSync(p)) return readFileSync(p, "utf8").trim();
+  mkdirSync(dirname(p), { recursive: true });
   const s = randomBytes(32).toString("hex");
-  writeFileSync(PATH, s);
-  chmodSync(PATH, 0o600);
+  writeFileSync(p, s);
+  chmodSync(p, 0o600);
   return s;
+}
+
+export function loadOrCreateAdminSecret(): string {
+  return loadOrCreateSecret(adminSecretPath());
 }
 
 export function safeEqual(a: string, b: string): boolean {
