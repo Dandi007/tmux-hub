@@ -1,7 +1,7 @@
 import { describe, test, expect, afterEach, afterAll } from "bun:test";
 import { Hono } from "hono";
 import { join } from "node:path";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmuxTest, tmuxTestKillServer } from "../helpers/tmux-test";
 import { isGrammarOk } from "../../src/shared/session-name";
 import { expandHome } from "../../src/server/config";
@@ -58,8 +58,7 @@ function buildApp() {
       return c.json({ error: `invalid session name: ${name}` }, 400);
     }
     const expanded = expandHome(cwd);
-    const { existsSync: ex } = await import("node:fs");
-    if (!ex(expanded)) {
+    if (!existsSync(expanded)) {
       return c.json({ error: `cwd does not exist: ${expanded}` }, 400);
     }
 
@@ -78,7 +77,7 @@ function buildApp() {
     return c.json({ name }, 201);
   });
 
-  return { app, managedDb, retainLog };
+  return { app, managedDb, retainLog, registry };
 }
 
 async function fetchApp(app: Hono, path: string, init: RequestInit = {}) {
@@ -195,5 +194,18 @@ describe("POST /sessions (integration)", () => {
       body: JSON.stringify({ cmd: "sleep 30", cwd: "/tmp", name }),
     });
     expect(r2.status).toBe(409);
+  });
+
+  test("retainLog tracks ad-hoc session after launch", async () => {
+    const { app, retainLog } = buildApp();
+    const name = uniqSession("launch-retain");
+    const r = await fetchApp(app, "/sessions", {
+      method: "POST",
+      headers: { "x-hub-admin-secret": ADMIN_SECRET, "content-type": "application/json" },
+      body: JSON.stringify({ cmd: "sleep 30", cwd: "/tmp", name }),
+    });
+    expect(r.status).toBe(201);
+    // retainLog.add(name) was called inside the handler
+    expect(retainLog.has(name)).toBe(true);
   });
 });
