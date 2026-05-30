@@ -53,11 +53,29 @@ describe("parseLaunchArgs", () => {
     expect(r.value.env).toEqual({ A: "1", B: "2" });
   });
 
-  test("parses multi-word command", () => {
+  test("shell-quotes command words so a `-c` arg stays one token", () => {
     const r = parseLaunchArgs(["launch", "--cwd", "/tmp", "--", "bash", "-c", "echo hello world"]);
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error("unreachable");
-    expect(r.value.cmd).toBe("bash -c echo hello world");
+    // safe tokens stay bare; the multi-word arg is single-quoted as ONE token
+    expect(r.value.cmd).toBe("bash -c 'echo hello world'");
+  });
+
+  test("quotes tokens containing shell metacharacters", () => {
+    const r = parseLaunchArgs(["launch", "--cwd", "/tmp", "--", "sh", "-c", "echo a; echo $X && true"]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("unreachable");
+    expect(r.value.cmd).toBe("sh -c 'echo a; echo $X && true'");
+  });
+
+  test("round-trips through `sh -c`: cmd reproduces the original argv", () => {
+    // Naive join would give `printf [%s] a b` (→ "[a][b]"); correct quoting
+    // gives `printf '[%s]' 'a b'` (→ "[a b]"). Run it to prove the round-trip.
+    const r = parseLaunchArgs(["launch", "--cwd", "/tmp", "--", "printf", "[%s]", "a b"]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("unreachable");
+    const out = Bun.spawnSync(["sh", "-c", r.value.cmd]).stdout.toString();
+    expect(out).toBe("[a b]");
   });
 
   test("rejects missing launch subcommand", () => {
