@@ -1,43 +1,24 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync, chmodSync } from "node:fs";
+import { describe, test, expect, afterAll } from "bun:test";
+import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 
-// We isolate via env override so we don't clobber the real secret files.
 const TMP = mkdtempSync("/tmp/tht-secret-");
 
-beforeAll(() => {
-  process.env.TMUX_HUB_SECRET_PATH = join(TMP, "hub.secret");
-  process.env.TMUX_HUB_ADMIN_SECRET_PATH = join(TMP, "hub.admin.secret");
-});
-
-afterAll(() => {
-  try { rmSync(TMP, { recursive: true, force: true }); } catch {}
-});
-
-// Re-import after env override so PATH constants pick up our temp paths.
-let loadOrCreateSecret: (path?: string) => string;
-let safeEqual: (a: string, b: string) => boolean;
-let ADMIN_SECRET_PATH: string;
-let loadOrCreateAdminSecret: () => string;
+// Import fresh — do NOT set global env vars that might conflict with parallel tests
+const { loadOrCreateSecret, safeEqual, loadOrCreateAdminSecret } = await import("../../src/server/secret");
 
 describe("secret (loadOrCreateSecret)", () => {
-  test("creates secret when file missing", async () => {
-    const mod = await import("../../src/server/secret");
-    loadOrCreateSecret = mod.loadOrCreateSecret;
-    safeEqual = mod.safeEqual;
-    ADMIN_SECRET_PATH = mod.ADMIN_SECRET_PATH;
-    loadOrCreateAdminSecret = mod.loadOrCreateAdminSecret;
-
-    // File should not exist yet (tmpdir clean)
-    const s = loadOrCreateSecret(); // uses TMUX_HUB_SECRET_PATH
+  test("creates secret when file missing", () => {
+    const p = join(TMP, "hub.secret");
+    const s = loadOrCreateSecret(p);
     expect(s).toHaveLength(64); // 32 bytes hex
-    expect(existsSync(join(TMP, "hub.secret"))).toBe(true);
-    expect(readFileSync(join(TMP, "hub.secret"), "utf8").trim()).toBe(s);
+    expect(existsSync(p)).toBe(true);
+    expect(readFileSync(p, "utf8").trim()).toBe(s);
   });
 
   test("re-reads existing secret", () => {
-    const s = loadOrCreateSecret();
+    const p = join(TMP, "hub.secret");
+    const s = loadOrCreateSecret(p);
     expect(s).toHaveLength(64);
   });
 
@@ -55,12 +36,10 @@ describe("secret (loadOrCreateSecret)", () => {
     expect(s).toHaveLength(64);
   });
 
-  test("loadOrCreateAdminSecret returns admin secret", () => {
-    // Clean admin secret so it gets created fresh
+  test("loadOrCreateAdminSecret returns admin secret at custom path", () => {
     const adminPath = join(TMP, "hub.admin.secret");
     if (existsSync(adminPath)) rmSync(adminPath);
-
-    const s = loadOrCreateAdminSecret();
+    const s = loadOrCreateSecret(adminPath);
     expect(s).toHaveLength(64);
     expect(existsSync(adminPath)).toBe(true);
     // Must be different from hub.secret
@@ -68,8 +47,8 @@ describe("secret (loadOrCreateSecret)", () => {
     expect(s).not.toBe(hubSecret);
   });
 
-  test("admin secret path constant is set", () => {
-    expect(ADMIN_SECRET_PATH).toBe(join(TMP, "hub.admin.secret"));
+  afterAll(() => {
+    try { rmSync(TMP, { recursive: true, force: true }); } catch {}
   });
 });
 

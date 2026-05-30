@@ -5,7 +5,11 @@ import { createLogger } from "./logger";
 
 const logger = createLogger("auth");
 
-const SECRET = loadOrCreateSecret();
+let _secret: string | null = null;
+function hubSecret(): string {
+  if (!_secret) _secret = loadOrCreateSecret();
+  return _secret;
+}
 
 // PUBLIC_PATHS bypass auth entirely. PWA install detection (manifest + SW
 // bootstrap) needs to work even before the SPA has called /system/auth-check
@@ -42,7 +46,7 @@ export const authGate: MiddlewareHandler = async (c, next) => {
   const localSecret = c.req.header("x-hub-secret");
 
   const cfOk = cfJwt ? await verifyCfAccessJwt(cfJwt).catch(() => null) : null;
-  const localOk = !!localSecret && safeEqual(localSecret, SECRET);
+  const localOk = !!localSecret && safeEqual(localSecret, hubSecret());
   const authed = !!cfOk || localOk;
 
   if (isReadOnly(c.req.method, path)) {
@@ -57,3 +61,5 @@ export const authGate: MiddlewareHandler = async (c, next) => {
   c.set("identity", cfOk?.email ?? "local-secret");
   return next();
 };
+
+export { adminGate } from "./admin-gate";
