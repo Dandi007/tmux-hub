@@ -9,13 +9,13 @@ import { BroadcasterRegistry } from "./output-broadcaster";
 import { InputRouter, HubError } from "./input-router";
 import { pinViewport } from "./viewport-pinner";
 import { bootstrapTmuxHooks } from "./tmux-bootstrap";
-import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS, IMAGE_DIR, MAX_IMAGE_BYTES } from "./config";
+import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS, IMAGE_DIR, MAX_IMAGE_BYTES, expandHome } from "./config";
 import { loadOrCreateSecret, safeEqual } from "./secret";
-import { authGate } from "./auth";
+import { authGate, adminGate } from "./auth";
 import { isGrammarOk, isManagedSessionName } from "../shared/session-name";
 import { buildSessionControlRoutes } from "./session-control";
 import { buildImageUploadRoutes } from "./image-upload";
-import { TemplateRunner, TemplateError } from "./template-runner";
+import { TemplateRunner, TemplateError, launchSession, formatTs14 } from "./template-runner";
 import { ManagedSessionDb } from "./managed-db";
 import { listSessions } from "./session-registry";
 import { createLogger, LOG_FILE } from "./logger";
@@ -28,6 +28,16 @@ const templateIds = templates.map((t) => t.id);
 const templateRunner = new TemplateRunner(templates);
 
 const managedDb = new ManagedSessionDb();
+
+// retainLog tracks ad-hoc sessions whose logs should survive session exit.
+// Default: template sessions delete logs on exit; ad-hoc sessions keep them.
+const retainLog = new Set<string>();
+for (const n of managedDb.adhocNames()) {
+  retainLog.add(n);
+}
+if (retainLog.size > 0) {
+  logger.info({ count: retainLog.size }, "rebuilt retainLog from db");
+}
 
 // Migrate existing tmux sessions that match template patterns into DB
 const existing = await listSessions();
@@ -52,7 +62,9 @@ registry.subscribe(async (event) => {
     try { await broadcasters.get(event.payload.name); }
     catch (e) { logger.error({ session: event.payload.name, err: e }, "prime broadcaster failed"); }
   } else if (event.event === "session_removed") {
-    await broadcasters.stop(event.payload.name, { deleteLog: true });
+    const keepLog = retainLog.has(event.payload.name);
+    await broadcasters.stop(event.payload.name, { deleteLog: !keepLog });
+    retainLog.delete(event.payload.name);
   }
 });
 
@@ -105,6 +117,40 @@ app.post("/templates/:id/run", async (c) => {
   }
 });
 app.get("/events", () => sse.attach({ event: "snapshot", payload: registry.snapshot() }));
+app.post("/sessions", adminGate, async (c) => {
+  const body = await c.req
+    .json<{ cmd: string; cwd: string; name?: string; env?: Record<string, string> }>()
+    .catch(() => null);
+  if (!body || typeof body.cmd !== "string" || typeof body.cwd !== "string") {
+    return c.json({ error: "body requires cmd (string) and cwd (string)" }, 400);
+  }
+  const { cmd, cwd, env } = body;
+  let name = body.name ?? `adhoc-${formatTs14(new Date())}`;
+
+  if (!isGrammarOk(name)) {
+    return c.json({ error: `invalid session name: ${name}` }, 400);
+  }
+  const expanded = expandHome(cwd);
+  if (!existsSync(expanded)) {
+    return c.json({ error: `cwd does not exist: ${expanded}` }, 400);
+  }
+
+  try {
+    await launchSession({ name, cwd: expanded, cmd, env });
+  } catch (e) {
+    if (e instanceof TemplateError) return c.json({ error: e.message }, e.status as 400 | 404 | 409 | 500);
+    return c.json({ error: (e as Error).message }, 500);
+  }
+
+  managedDb.add(name); // template_id IS NULL → ad-hoc
+  retainLog.add(name);
+  try { await broadcasters.get(name); } catch (e) {
+    logger.error({ session: name, err: e }, "launch broadcaster prime failed");
+  }
+  await registry.pollNow();
+  logger.info({ session: name, cwd: expanded, cmd }, "ad-hoc session launched");
+  return c.json({ name }, 201);
+});
 app.route("/", buildSessionControlRoutes({ broadcasters, managedDb }));
 app.route("/", buildImageUploadRoutes({
   imageDir: IMAGE_DIR,
