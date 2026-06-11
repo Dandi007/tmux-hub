@@ -8,6 +8,7 @@ import { SseHub } from "./sse";
 import { BroadcasterRegistry } from "./output-broadcaster";
 import { InputRouter, HubError } from "./input-router";
 import { pinViewport, getNativeAttachCount } from "./viewport-pinner";
+import { tmux } from "./tmux-cmd";
 import { bootstrapTmuxHooks } from "./tmux-bootstrap";
 import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS, IMAGE_DIR, MAX_IMAGE_BYTES, expandHome } from "./config";
 import { loadOrCreateSecret, safeEqual } from "./secret";
@@ -263,15 +264,38 @@ Bun.serve({
       logger.info({ session: sessionName, cols, rows, connId }, "ws open");
 
       // Ownership guard: skip pin if native client attached
-      const attachCount = await getNativeAttachCount(sessionName);
+      let attachCount = 0;
+      try {
+        attachCount = await getNativeAttachCount(sessionName);
+      } catch (e) {
+        logger.warn({ session: sessionName, connId, err: e }, "getNativeAttachCount failed, assuming native attached");
+        attachCount = 1; // fail-safe: treat as native attached
+      }
       if (attachCount === 0) {
         try { await pinViewport(sessionName, cols, rows); }
         catch (e) {
           logger.warn({ session: sessionName, connId, err: e }, "viewport pin failed");
           try { ws.send(`[hub] viewport pin failed: ${(e as Error).message}\n`); } catch {}
         }
+        // R3: send viewport message — web owns
+        try { ws.send(JSON.stringify({ kind: "viewport", cols, rows, owner: "web" })); } catch {}
       } else {
         logger.debug({ session: sessionName, attachCount }, "native client attached, skipping viewport pin");
+        // R3: send viewport message — native owns, query current size
+        try {
+          const sizeOut = await tmux(["display-message", "-p", "-t", `${sessionName}:0`, "#{window_width}|#{window_height}"]);
+          if (sizeOut.code === 0) {
+            const parts = sizeOut.stdout.split("|").map(Number);
+            const nc = parts[0]; const nr = parts[1];
+            if (Number.isFinite(nc) && Number.isFinite(nr) && nc > 0 && nr > 0) {
+              try { ws.send(JSON.stringify({ kind: "viewport", cols: nc, rows: nr, owner: "native" })); } catch {}
+            } else {
+              logger.warn({ session: sessionName, raw: sizeOut.stdout }, "viewport query returned invalid size");
+            }
+          }
+        } catch (e) {
+          logger.warn({ session: sessionName, err: e }, "viewport query for native owner failed");
+        }
       }
 
       let b: Awaited<ReturnType<typeof broadcasters.get>>;

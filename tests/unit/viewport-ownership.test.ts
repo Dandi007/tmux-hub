@@ -3,6 +3,7 @@ import { getNativeAttachCount } from "../../src/server/viewport-pinner";
 import {
   handleViewportMessage,
   shouldSendResize,
+  handleSessionActivity,
   type ViewportState,
 } from "../../src/web/viewport-owner";
 
@@ -38,6 +39,13 @@ describe("getNativeAttachCount", () => {
     const runner = async () => "invalid";
     const count = await getNativeAttachCount("test-session", runner);
     expect(count).toBe(0);
+  });
+
+  test("throws error when runner fails", async () => {
+    const runner = async () => {
+      throw new Error("tmux command failed");
+    };
+    await expect(getNativeAttachCount("test-session", runner)).rejects.toThrow("tmux command failed");
   });
 });
 
@@ -78,11 +86,41 @@ describe("handleViewportMessage", () => {
 describe("shouldSendResize", () => {
   test("web owner: allows resize", () => {
     const state: ViewportState = { owner: "web", cols: 100, rows: 30 };
-    expect(shouldSendResize(state, 120, 40)).toBe(true);
+    expect(shouldSendResize(state)).toBe(true);
   });
 
   test("native owner: suppresses resize", () => {
     const state: ViewportState = { owner: "native", cols: 120, rows: 40 };
-    expect(shouldSendResize(state, 100, 30)).toBe(false);
+    expect(shouldSendResize(state)).toBe(false);
+  });
+});
+
+describe("handleSessionActivity", () => {
+  test("native→web: attached drops to 0 triggers reclaim", () => {
+    const current: ViewportState = { owner: "native", cols: 120, rows: 40 };
+    const result = handleSessionActivity(current, 0, 100, 30);
+    expect(result.next).toEqual({ owner: "web", cols: 100, rows: 30 });
+    expect(result.action).toEqual({ type: "resize", cols: 100, rows: 30 });
+  });
+
+  test("native→native: attached remains >0 no action", () => {
+    const current: ViewportState = { owner: "native", cols: 120, rows: 40 };
+    const result = handleSessionActivity(current, 1, 100, 30);
+    expect(result.next).toEqual(current);
+    expect(result.action).toEqual({ type: "none" });
+  });
+
+  test("web→web: attached changes but already web owner", () => {
+    const current: ViewportState = { owner: "web", cols: 100, rows: 30 };
+    const result = handleSessionActivity(current, 0, 110, 35);
+    expect(result.next).toEqual(current);
+    expect(result.action).toEqual({ type: "none" });
+  });
+
+  test("web→web: attached becomes >0 but already web owner", () => {
+    const current: ViewportState = { owner: "web", cols: 100, rows: 30 };
+    const result = handleSessionActivity(current, 1, 110, 35);
+    expect(result.next).toEqual(current);
+    expect(result.action).toEqual({ type: "none" });
   });
 });

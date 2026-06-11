@@ -10,7 +10,6 @@ export type ViewportState = {
 
 export type ViewportAction =
   | { type: "resize"; cols: number; rows: number }
-  | { type: "suppress" }
   | { type: "none" };
 
 /**
@@ -38,11 +37,28 @@ export function handleViewportMessage(
 /**
  * Pure function: determine if we should send a resize request
  */
-export function shouldSendResize(
-  state: ViewportState,
-  requestedCols: number,
-  requestedRows: number,
-): boolean {
+export function shouldSendResize(state: ViewportState): boolean {
   // Only send resize if web owns the viewport
   return state.owner === "web";
+}
+
+/**
+ * Pure function: handle SSE session_activity event for ownership transition.
+ * Returns the action to take when native detaches (attached→0).
+ */
+export function handleSessionActivity(
+  current: ViewportState,
+  attached: number,
+  cols: number,
+  rows: number,
+): { next: ViewportState; action: ViewportAction } {
+  if (attached === 0 && current.owner === "native") {
+    // Native detached → web reclaims ownership
+    return {
+      next: { owner: "web", cols, rows },
+      action: { type: "resize", cols, rows },
+    };
+  }
+  // No transition
+  return { next: current, action: { type: "none" } };
 }

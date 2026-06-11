@@ -9,6 +9,7 @@ import {
   type ViewportState,
   handleViewportMessage,
   shouldSendResize,
+  handleSessionActivity,
 } from "./viewport-owner";
 
 export type TerminalState = "connected" | "reconnecting" | "dead";
@@ -20,6 +21,7 @@ export type TerminalHandle = {
   probeNow: () => void;
   retry: () => void;
   fit: () => void;
+  notifySessionActivity: (attached: number, cols: number, rows: number) => void;
   readonly isConnected: boolean;
   readonly state: TerminalState;
   onStateChange: (cb: (state: TerminalState, attempt?: number) => void) => void;
@@ -434,7 +436,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       startHeartbeat();
       const c = term.cols;
       const r = term.rows;
-      if (c > 0 && r > 0) queuedSend({ kind: "resize", cols: c, rows: r });
+      if (c > 0 && r > 0 && shouldSendResize(viewportState)) {
+        queuedSend({ kind: "resize", cols: c, rows: r });
+      }
     };
 
     socket.onclose = (ev) => {
@@ -477,7 +481,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       resizeTimer = null;
       const c = term.cols;
       const r = term.rows;
-      if (c > 0 && r > 0 && shouldSendResize(viewportState, c, r)) {
+      if (c > 0 && r > 0 && shouldSendResize(viewportState)) {
         queuedSend({ kind: "resize", cols: c, rows: r });
       }
     }, 150);
@@ -499,7 +503,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     setTimeout(() => {
       const c = term.cols;
       const r = term.rows;
-      if (c > 0 && r > 0 && ws.readyState === WebSocket.OPEN && shouldSendResize(viewportState, c, r)) {
+      if (c > 0 && r > 0 && ws.readyState === WebSocket.OPEN && shouldSendResize(viewportState)) {
         queuedSend({ kind: "resize", cols: c, rows: r });
       }
     }, 100);
@@ -543,6 +547,21 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       if (disposed) return;
       try { fit.fit(); } catch {}
       publishResize();
+    },
+    notifySessionActivity: (attached: number, cols: number, rows: number) => {
+      if (disposed) return;
+      const result = handleSessionActivity(viewportState, attached, cols, rows);
+      viewportState = result.next;
+      if (result.action.type === "resize") {
+        // Native detached → web reclaims ownership, fit and send resize
+        try { fit.fit(); } catch {}
+        const c = term.cols;
+        const r = term.rows;
+        if (c > 0 && r > 0 && shouldSendResize(viewportState)) {
+          queuedSend({ kind: "resize", cols: c, rows: r });
+        }
+        console.log(`[tmux-hub] viewport reclaimed by web: ${c}x${r}`);
+      }
     },
     close: () => {
       disposed = true;

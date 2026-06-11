@@ -103,6 +103,7 @@ export function renderDesktop(root: HTMLElement): void {
       if (openedName === e.payload.name) openedName = null;
     } else if (e.event === "session_activity") {
       sessions = sessions.map((s) => s.name === e.payload.name ? e.payload : s);
+      pool.notifySessionActivity(e.payload.name, e.payload.attached, e.payload.cols, e.payload.rows);
     } else return;
     refreshUI();
   });

@@ -74,4 +74,43 @@ describe("viewport-ownership integration", () => {
     const out = await isolatedRunner(["display", "-p", "-t", `${S}:@0`, "#{window_width}x#{window_height}"]);
     expect(out).toBe("160x40");
   });
+
+  test("after detach: web reclaims ownership and resize works", async () => {
+    // Start with a known size
+    await pinViewport(S, 140, 35, isolatedRunner);
+    const sizeBefore = await isolatedRunner(["display", "-p", "-t", `${S}:@0`, "#{window_width}x#{window_height}"]);
+    expect(sizeBefore).toBe("140x35");
+
+    // Attach a client
+    const { socket } = setupIsolatedTmux();
+    const attachProc = Bun.spawn(
+      ["script", "-q", "/dev/null", "tmux", "-L", socket, "attach", "-t", S],
+      { stdout: "pipe", stderr: "pipe" }
+    );
+
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    try {
+      const attachCount = await getNativeAttachCount(S, isolatedRunner);
+      expect(attachCount).toBeGreaterThan(0);
+
+      // Try to resize while attached (should be skipped by server)
+      const sizeWhileAttached = await isolatedRunner(["display", "-p", "-t", `${S}:@0`, "#{window_width}x#{window_height}"]);
+      // Size should not change to our requested size
+      expect(sizeWhileAttached).not.toBe("999x99");
+    } finally {
+      attachProc.kill();
+      await attachProc.exited.catch(() => {});
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    // After detach, web should reclaim ownership and resize should work again
+    const attachCountAfter = await getNativeAttachCount(S, isolatedRunner);
+    expect(attachCountAfter).toBe(0);
+
+    // Now resize should work (web owns again)
+    await pinViewport(S, 170, 42, isolatedRunner);
+    const sizeAfterReclaim = await isolatedRunner(["display", "-p", "-t", `${S}:@0`, "#{window_width}x#{window_height}"]);
+    expect(sizeAfterReclaim).toBe("170x42");
+  });
 });

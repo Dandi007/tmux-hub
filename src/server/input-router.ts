@@ -86,8 +86,14 @@ export class InputRouter {
         // Query current viewport size to send back
         const sizeOut = await this.run(["display-message", "-p", "-t", `${session}:0`, "#{window_width}|#{window_height}"]);
         if (sizeOut.code === 0) {
-          const [cols, rows] = sizeOut.stdout.split("|").map(Number);
-          return { skipped: true, cols, rows };
+          const parts = sizeOut.stdout.split("|").map(Number);
+          const cols = parts[0];
+          const rows = parts[1];
+          if (Number.isFinite(cols) && Number.isFinite(rows) && cols > 0 && rows > 0) {
+            return { skipped: true, cols, rows };
+          } else {
+            logger.warn({ session, raw: sizeOut.stdout }, "viewport query returned invalid size");
+          }
         }
         return { skipped: true };
       }
