@@ -12,12 +12,14 @@ import { relativeTime } from "../shared/session-name";
 
 export type MenuItem =
   | { kind: "session"; name: string; attached: boolean; activity: string; raw: SessionInfo }
-  | { kind: "template"; id: string; name: string }
+  | { kind: "template"; id: string; name: string; cwd_choices: string[] }
   | { kind: "new-shell"; name: string };
 
 export interface TemplateSummary {
   id: string;
   name: string;
+  /** Allowed working directories (server enforces cwd ∈ cwd_choices). */
+  cwd_choices: string[];
 }
 
 // ─── Menu assembly (pure) ───────────────────────────────────────────────────
@@ -47,7 +49,7 @@ export function buildMenu(
 
   // Templates
   for (const t of templates) {
-    items.push({ kind: "template", id: t.id, name: t.name });
+    items.push({ kind: "template", id: t.id, name: t.name, cwd_choices: t.cwd_choices });
   }
 
   // Fixed "new shell" item
@@ -118,7 +120,7 @@ export function shouldExec(ctx: AttachContext): boolean {
 
 export type SelectionAction =
   | { action: "attach"; sessionName: string }
-  | { action: "run-template"; templateId: string }
+  | { action: "run-template"; templateId: string; cwd: string }
   | { action: "new-shell" }
   | { action: "quit" };
 
@@ -138,7 +140,9 @@ export function resolveSelection(items: MenuItem[], selected: number): Selection
     case "session":
       return { action: "attach", sessionName: item.name };
     case "template":
-      return { action: "run-template", templateId: item.id };
+      // cwd_choices is zod-guaranteed min(1); default to the first allowed dir.
+      // Hardcoding "~" here was the bug: server rejects cwd ∉ cwd_choices (400).
+      return { action: "run-template", templateId: item.id, cwd: item.cwd_choices[0]! };
     case "new-shell":
       return { action: "new-shell" };
   }
