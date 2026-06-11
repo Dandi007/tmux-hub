@@ -230,7 +230,8 @@ async function handleTui(argv: string[]): Promise<void> {
 
   // Use fzf if available AND stdin is a TTY (fzf needs interactive terminal).
   // When stdin is piped (e.g. from ssh or tests), fall back to numbered menu.
-  const stdinIsTty = process.stdin.isTTY === true;
+  // TMUX_HUB_FORCE_FZF=1 bypasses the TTY check for integration testing.
+  const stdinIsTty = process.stdin.isTTY === true || process.env.TMUX_HUB_FORCE_FZF === "1";
   if (hasFzf() && stdinIsTty) {
     await interactiveFzf(menu, args.loop);
   } else {

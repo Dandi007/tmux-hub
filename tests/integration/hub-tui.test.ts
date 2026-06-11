@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, chmodSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -205,16 +205,19 @@ expect {
     // Create a fake fzf script that reads stdin and outputs a fixed selection
     const fakeFzfDir = mkdtempSync(join(tmpdir(), "fake-fzf-"));
     const fakeFzfPath = join(fakeFzfDir, "fzf");
+    const markerFile = join(fakeFzfDir, "fzf-was-called");
     writeFileSync(
       fakeFzfPath,
       `#!/bin/sh
-# Fake fzf: read stdin, output first line (simulating selection)
+# Fake fzf: mark that we were called, read stdin, output first line (simulating selection)
+touch "${markerFile}"
 head -n 1
 `,
     );
     chmodSync(fakeFzfPath, 0o755);
 
     // Run CLI with PATH prepended to find our fake fzf
+    // TMUX_HUB_FORCE_FZF=1 bypasses the isTTY check so fzf path is taken even with piped stdin
     const proc = Bun.spawn(["bun", BIN, "tui"], {
       stdin: "pipe",
       stdout: "pipe",
@@ -222,16 +225,24 @@ head -n 1
       env: {
         ...process.env,
         TMUX_HUB_SOCKET: SOCKET,
+        TMUX_HUB_FORCE_FZF: "1",
         PATH: `${fakeFzfDir}:${process.env.PATH}`,
       },
     });
 
-    // Send a selection (index 1 = first session)
-    proc.stdin.write("1\n");
+    // fzf reads stdin and outputs the first line (which is the first menu item)
+    // The fake fzf will select the first session automatically
     proc.stdin.end();
 
+    const { stdout, stderr } = await proc;
     const code = await proc.exited;
-    // Should exit cleanly (0) or with attach attempt (non-zero if no session)
+
+    // Verify fzf was actually invoked (marker file should exist)
+    const fzfWasCalled = existsSync(markerFile);
+    expect(fzfWasCalled).toBe(true);
+
+    // Should exit cleanly after fzf selects a session and attempts attach
+    // (attach may fail if no PTY, but the fzf→action chain was exercised)
     expect(code).toBeGreaterThanOrEqual(0);
 
     // Cleanup
