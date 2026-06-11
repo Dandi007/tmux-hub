@@ -67,7 +67,11 @@ export function renderMobile(root: HTMLElement): void {
         continue;
       }
 
-      if (pendingTarget !== null && pendingTarget.name !== target) {
+      // Re-read pendingTarget: it may have been reassigned during the await above.
+      // TypeScript's control flow analysis narrowed it to null after line 55's continue,
+      // but that analysis doesn't account for mutations during async operations.
+      const recheck = pendingTarget as { name: string; force: boolean } | null;
+      if (recheck !== null && recheck.name !== target) {
         next.close();
         continue;
       }
