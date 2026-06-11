@@ -7,6 +7,7 @@ export type TerminalPoolHandle = {
   ensure: (name: string) => void;
   remove: (name: string) => void;
   send: (msg: ClientWsMessage) => void;
+  notifySessionActivity: (name: string, attached: number, cols: number, rows: number) => void;
   destroy: () => void;
   onActiveStateChange: (cb: (state: TerminalState, attempt?: number) => void) => void;
   retryActive: () => void;
@@ -100,6 +101,12 @@ export function createTerminalPool(parent: HTMLElement): TerminalPoolHandle {
     send: (msg) => {
       if (!activeName) return;
       slots.get(activeName)?.handle?.send(msg);
+    },
+
+    notifySessionActivity: (name, attached, cols, rows) => {
+      const slot = slots.get(name);
+      if (!slot?.handle) return;
+      slot.handle.notifySessionActivity(attached, cols, rows);
     },
 
     onActiveStateChange: (cb) => { stateListeners.push(cb); },

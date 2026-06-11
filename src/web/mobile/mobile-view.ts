@@ -219,6 +219,9 @@ export function renderMobile(root: HTMLElement): void {
       }
     } else if (e.event === "session_activity") {
       sessions = sessions.map((s) => s.name === e.payload.name ? e.payload : s);
+      if (term && e.payload.name === openedName) {
+        term.notifySessionActivity(e.payload.attached, e.payload.cols, e.payload.rows);
+      }
     } else {
       return;
     }

@@ -3,6 +3,8 @@ export type SessionInfo = {
   activity: number;
   attached: number;
   windows: number;
+  cols: number;
+  rows: number;
   grammar_ok: boolean;
 };
 
@@ -22,7 +24,8 @@ export type ClientWsMessage =
   | { kind: "ping"; ts: number };
 
 export type ServerWsMessage =
-  | { kind: "pong"; ts: number };
+  | { kind: "pong"; ts: number }
+  | { kind: "viewport"; cols: number; rows: number; owner: "native" | "web" };
 
 /**
  * 移动端 quick-launch 按钮硬编码调用的 template id。

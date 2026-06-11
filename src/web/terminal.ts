@@ -3,8 +3,14 @@ import { FitAddon } from "xterm-addon-fit";
 import { CanvasAddon } from "xterm-addon-canvas";
 import { attachMomentumScroll } from "./momentum-scroll";
 import "xterm/css/xterm.css";
-import type { ClientWsMessage } from "@shared/protocol";
+import type { ClientWsMessage, ServerWsMessage } from "@shared/protocol";
 import { hubWsUrl, refreshSecret } from "./hub-fetch";
+import {
+  type ViewportState,
+  handleViewportMessage,
+  shouldSendResize,
+  handleSessionActivity,
+} from "./viewport-owner";
 
 export type TerminalState = "connected" | "reconnecting" | "dead";
 
@@ -15,6 +21,7 @@ export type TerminalHandle = {
   probeNow: () => void;
   retry: () => void;
   fit: () => void;
+  notifySessionActivity: (attached: number, cols: number, rows: number) => void;
   readonly isConnected: boolean;
   readonly state: TerminalState;
   onStateChange: (cb: (state: TerminalState, attempt?: number) => void) => void;
@@ -228,6 +235,13 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     writeTerm(data);
   };
 
+  // ── Viewport ownership state ────────────────────────────────────────
+  let viewportState: ViewportState = {
+    owner: "web",
+    cols: term.cols,
+    rows: term.rows,
+  };
+
   // ── State machine ──────────────────────────────────────────────────
   let currentState: TerminalState = "connected";
   let stateListeners: Array<(state: TerminalState, attempt?: number) => void> = [];
@@ -314,9 +328,23 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
         try {
           const parsed = JSON.parse(m.data);
           if (parsed && typeof parsed === "object") {
-            if ("kind" in parsed && (parsed as { kind: string }).kind === "pong") {
-              receivePong();
-              return;
+            if ("kind" in parsed) {
+              const kind = (parsed as { kind: string }).kind;
+              if (kind === "pong") {
+                receivePong();
+                return;
+              }
+              if (kind === "viewport") {
+                const msg = parsed as Extract<ServerWsMessage, { kind: "viewport" }>;
+                const result = handleViewportMessage(msg, viewportState);
+                viewportState = result.next;
+                if (result.action.type === "resize") {
+                  // Native owns: adopt server's viewport size
+                  term.resize(result.action.cols, result.action.rows);
+                  console.log(`[tmux-hub] viewport locked to native: ${result.action.cols}x${result.action.rows}`);
+                }
+                return;
+              }
             }
             if ("error" in parsed) {
               writeTerm(`\r\n[hub] ${(parsed as { error: string }).error}\r\n`);
@@ -408,7 +436,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       startHeartbeat();
       const c = term.cols;
       const r = term.rows;
-      if (c > 0 && r > 0) queuedSend({ kind: "resize", cols: c, rows: r });
+      if (c > 0 && r > 0 && shouldSendResize(viewportState)) {
+        queuedSend({ kind: "resize", cols: c, rows: r });
+      }
     };
 
     socket.onclose = (ev) => {
@@ -451,7 +481,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       resizeTimer = null;
       const c = term.cols;
       const r = term.rows;
-      if (c > 0 && r > 0) queuedSend({ kind: "resize", cols: c, rows: r });
+      if (c > 0 && r > 0 && shouldSendResize(viewportState)) {
+        queuedSend({ kind: "resize", cols: c, rows: r });
+      }
     }, 150);
   };
 
@@ -471,7 +503,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     setTimeout(() => {
       const c = term.cols;
       const r = term.rows;
-      if (c > 0 && r > 0 && ws.readyState === WebSocket.OPEN) {
+      if (c > 0 && r > 0 && ws.readyState === WebSocket.OPEN && shouldSendResize(viewportState)) {
         queuedSend({ kind: "resize", cols: c, rows: r });
       }
     }, 100);
@@ -515,6 +547,21 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       if (disposed) return;
       try { fit.fit(); } catch {}
       publishResize();
+    },
+    notifySessionActivity: (attached: number, cols: number, rows: number) => {
+      if (disposed) return;
+      const result = handleSessionActivity(viewportState, attached, cols, rows);
+      viewportState = result.next;
+      if (result.action.type === "resize") {
+        // Native detached → web reclaims ownership, fit and send resize
+        try { fit.fit(); } catch {}
+        const c = term.cols;
+        const r = term.rows;
+        if (c > 0 && r > 0 && shouldSendResize(viewportState)) {
+          queuedSend({ kind: "resize", cols: c, rows: r });
+        }
+        console.log(`[tmux-hub] viewport reclaimed by web: ${c}x${r}`);
+      }
     },
     close: () => {
       disposed = true;
