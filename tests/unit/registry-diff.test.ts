@@ -2,11 +2,13 @@ import { describe, test, expect } from "bun:test";
 import { diffSessions } from "../../src/server/session-registry";
 import type { SessionInfo } from "../../src/shared/protocol";
 
-const s = (name: string, activity = 0, attached = 0, windows = 1): SessionInfo => ({
+const s = (name: string, activity = 0, attached = 0, windows = 1, cols = 80, rows = 24): SessionInfo => ({
   name,
   activity,
   attached,
   windows,
+  cols,
+  rows,
   grammar_ok: false,
 });
 
