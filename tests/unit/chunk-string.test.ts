@@ -14,9 +14,9 @@ describe("chunkString", () => {
     const s = "a".repeat(3000);
     const chunks = chunkString(s, 1024);
     expect(chunks.length).toBe(3);
-    expect(chunks[0].length).toBe(1024);
-    expect(chunks[1].length).toBe(1024);
-    expect(chunks[2].length).toBe(952);
+    expect(chunks[0]!.length).toBe(1024);
+    expect(chunks[1]!.length).toBe(1024);
+    expect(chunks[2]!.length).toBe(952);
     expect(chunks.join("")).toBe(s);
   });
 

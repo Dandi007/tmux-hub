@@ -37,13 +37,13 @@ function app(): Hono {
 }
 
 function call(path: string, headers: Record<string, string>): Promise<Response> {
-  return app().fetch(
+  return Promise.resolve(app().fetch(
     new Request(`http://localhost${path}`, {
       method: "POST",
       headers: { "content-type": "application/json", ...headers },
       body: JSON.stringify({ cmd: "sleep 30", cwd: "/tmp" }),
     }),
-  );
+  ));
 }
 
 afterAll(() => {
