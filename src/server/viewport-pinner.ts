@@ -5,6 +5,15 @@ const logger = createLogger("viewport");
 
 export type TmuxRunner = (args: string[]) => Promise<string>;
 
+export async function getNativeAttachCount(
+  session: string,
+  runner: TmuxRunner = tmuxOk,
+): Promise<number> {
+  const out = await runner(["display-message", "-p", "-t", session, "#{session_attached}"]);
+  const count = parseInt(out.trim(), 10);
+  return Number.isFinite(count) ? count : 0;
+}
+
 export async function pinViewport(
   session: string,
   cols: number,

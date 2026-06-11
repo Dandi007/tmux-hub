@@ -1,4 +1,5 @@
 import { tmux as defaultTmux } from "./tmux-cmd";
+import { getNativeAttachCount } from "./viewport-pinner";
 import type { ClientWsMessage } from "../shared/protocol";
 import { assertGrammar } from "../shared/session-name";
 import { createLogger } from "./logger";
@@ -39,7 +40,7 @@ export class InputRouter {
 
   constructor(private run: TmuxRun = defaultTmux) {}
 
-  send(session: string, msg: ClientWsMessage): Promise<void> {
+  send(session: string, msg: ClientWsMessage): Promise<{ skipped?: boolean; cols?: number; rows?: number }> {
     // resize-window is independent of pty input and must not queue behind
     // a long-running chunk loop — otherwise xterm.js locally resizes while
     // tmux still outputs at the old size, causing garbled rendering.
@@ -53,10 +54,10 @@ export class InputRouter {
       return this.doSend(session, msg);
     });
     this.locks.set(session, next.catch(() => {}));
-    return next.then(() => {});
+    return next.then(() => ({}));
   }
 
-  private async doSend(session: string, msg: ClientWsMessage): Promise<void> {
+  private async doSend(session: string, msg: ClientWsMessage): Promise<{ skipped?: boolean; cols?: number; rows?: number }> {
     if (msg.kind === "keys") {
       const target = `${session}:0.0`;
       const chunks = chunkString(msg.literal, SEND_KEYS_CHUNK_BYTES);
@@ -78,6 +79,19 @@ export class InputRouter {
         throw classifyTmuxError(session, r.stderr);
       }
     } else if (msg.kind === "resize") {
+      // Ownership guard: skip resize if native client attached
+      const attachCount = await getNativeAttachCount(session);
+      if (attachCount > 0) {
+        logger.debug({ session, attachCount }, "native client attached, skipping resize");
+        // Query current viewport size to send back
+        const sizeOut = await this.run(["display-message", "-p", "-t", `${session}:0`, "#{window_width}|#{window_height}"]);
+        if (sizeOut.code === 0) {
+          const [cols, rows] = sizeOut.stdout.split("|").map(Number);
+          return { skipped: true, cols, rows };
+        }
+        return { skipped: true };
+      }
+
       const cols = Math.max(20, Math.min(500, Math.floor(msg.cols)));
       const rows = Math.max(5, Math.min(200, Math.floor(msg.rows)));
       const r = await this.run(["resize-window", "-t", `${session}:0`, "-x", String(cols), "-y", String(rows)]);
@@ -85,6 +99,7 @@ export class InputRouter {
         logger.warn({ session, cols, rows, stderr: r.stderr }, "resize-window failed");
       }
     }
+    return {};
   }
 }
 

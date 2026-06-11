@@ -7,7 +7,7 @@ import { SessionRegistry } from "./session-registry";
 import { SseHub } from "./sse";
 import { BroadcasterRegistry } from "./output-broadcaster";
 import { InputRouter, HubError } from "./input-router";
-import { pinViewport } from "./viewport-pinner";
+import { pinViewport, getNativeAttachCount } from "./viewport-pinner";
 import { bootstrapTmuxHooks } from "./tmux-bootstrap";
 import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS, IMAGE_DIR, MAX_IMAGE_BYTES, expandHome } from "./config";
 import { loadOrCreateSecret, safeEqual } from "./secret";
@@ -261,10 +261,17 @@ Bun.serve({
     async open(ws: ServerWebSocket<WsData>) {
       const { sessionName, cols, rows, connId } = ws.data;
       logger.info({ session: sessionName, cols, rows, connId }, "ws open");
-      try { await pinViewport(sessionName, cols, rows); }
-      catch (e) {
-        logger.warn({ session: sessionName, connId, err: e }, "viewport pin failed");
-        try { ws.send(`[hub] viewport pin failed: ${(e as Error).message}\n`); } catch {}
+
+      // Ownership guard: skip pin if native client attached
+      const attachCount = await getNativeAttachCount(sessionName);
+      if (attachCount === 0) {
+        try { await pinViewport(sessionName, cols, rows); }
+        catch (e) {
+          logger.warn({ session: sessionName, connId, err: e }, "viewport pin failed");
+          try { ws.send(`[hub] viewport pin failed: ${(e as Error).message}\n`); } catch {}
+        }
+      } else {
+        logger.debug({ session: sessionName, attachCount }, "native client attached, skipping viewport pin");
       }
 
       let b: Awaited<ReturnType<typeof broadcasters.get>>;
@@ -309,7 +316,14 @@ Bun.serve({
         try { ws.send(JSON.stringify({ kind: "pong", ts })); } catch {}
         return;
       }
-      input.send(sessionName, parsed as Parameters<typeof input.send>[1]).catch((e: unknown) => {
+      input.send(sessionName, parsed as Parameters<typeof input.send>[1]).then((result) => {
+        // If resize was skipped (native attached), send authoritative viewport back
+        if (result?.skipped && result.cols && result.rows) {
+          try {
+            ws.send(JSON.stringify({ kind: "viewport", cols: result.cols, rows: result.rows, owner: "native" }));
+          } catch {}
+        }
+      }).catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : String(e);
         if (e instanceof HubError && e.code === 410) {
           logger.warn({ session: sessionName, connId }, "input send: session gone");

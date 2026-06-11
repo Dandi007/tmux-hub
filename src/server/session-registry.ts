@@ -7,7 +7,7 @@ import { createLogger } from "./logger";
 
 const logger = createLogger("registry");
 
-const FORMAT = "#{session_name}|#{session_activity}|#{session_attached}|#{session_windows}";
+const FORMAT = "#{session_name}|#{session_activity}|#{session_attached}|#{session_windows}|#{window_width}|#{window_height}";
 
 export function diffSessions(prev: SessionInfo[], next: SessionInfo[]): ServerEvent[] {
   const prevMap = new Map(prev.map((s) => [s.name, s]));
@@ -20,7 +20,9 @@ export function diffSessions(prev: SessionInfo[], next: SessionInfo[]): ServerEv
     } else if (
       p.activity !== info.activity ||
       p.attached !== info.attached ||
-      p.windows !== info.windows
+      p.windows !== info.windows ||
+      p.cols !== info.cols ||
+      p.rows !== info.rows
     ) {
       events.push({ event: "session_activity", payload: info });
     }
@@ -41,12 +43,14 @@ export async function listSessions(): Promise<SessionInfo[] | null> {
   }
   if (!r.stdout) return [];
   return r.stdout.split("\n").map((line) => {
-    const [name, activity, attached, windows] = line.split("|");
+    const [name, activity, attached, windows, cols, rows] = line.split("|");
     return {
       name: name!,
       activity: Number(activity),
       attached: Number(attached),
       windows: Number(windows),
+      cols: Number(cols),
+      rows: Number(rows),
       grammar_ok: isGrammarOk(name!),
     };
   });
