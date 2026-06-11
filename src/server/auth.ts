@@ -11,6 +11,11 @@ function hubSecret(): string {
   return _secret;
 }
 
+/** Reset cached secret — test-only, allows re-reading from a new env path. */
+export function _resetSecretForTest(): void {
+  _secret = null;
+}
+
 // PUBLIC_PATHS bypass auth entirely. PWA install detection (manifest + SW
 // bootstrap) needs to work even before the SPA has called /system/auth-check
 // to acquire the hub.secret; Cloudflare Access still wraps everything at the
