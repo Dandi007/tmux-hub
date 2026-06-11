@@ -10,7 +10,23 @@ export interface LaunchArgs {
   env: Record<string, string>;
 }
 
+export interface TuiArgs {
+  /** Print menu as JSON and exit (non-interactive) */
+  list: boolean;
+  /** Select a session by name (non-interactive) */
+  select?: string;
+  /** Select a template by id (non-interactive) */
+  selectTemplate?: string;
+  /** Print the attach command instead of executing it */
+  printCmd: boolean;
+  /** Dry run: don't actually POST to server */
+  dryRun: boolean;
+  /** Loop mode: return to menu after detach */
+  loop: boolean;
+}
+
 type ParseResult = { ok: true; value: LaunchArgs } | { ok: false; error: string };
+type TuiParseResult = { ok: true; value: TuiArgs } | { ok: false; error: string };
 
 export function parseLaunchArgs(argv: string[]): ParseResult {
   if (argv.length < 1 || argv[0] !== "launch") {
@@ -74,6 +90,61 @@ export function parseLaunchArgs(argv: string[]): ParseResult {
   const cmd = argv.slice(i).map(shQuote).join(" ");
   const result: LaunchArgs = { cwd, cmd, env };
   if (name) result.name = name;
+
+  return { ok: true, value: result };
+}
+
+export function parseTuiArgs(argv: string[]): TuiParseResult {
+  if (argv.length < 1 || argv[0] !== "tui") {
+    return { ok: false, error: "expected 'tui' subcommand" };
+  }
+
+  const result: TuiArgs = {
+    list: false,
+    printCmd: false,
+    dryRun: false,
+    loop: false,
+  };
+
+  let i = 1;
+  while (i < argv.length) {
+    const a = argv[i]!;
+    if (a === "--list") {
+      result.list = true;
+    } else if (a === "--select") {
+      i++;
+      if (i >= argv.length) return { ok: false, error: "--select requires a value" };
+      result.select = argv[i]!;
+    } else if (a.startsWith("--select=")) {
+      result.select = a.slice("--select=".length);
+    } else if (a === "--select-template") {
+      i++;
+      if (i >= argv.length) return { ok: false, error: "--select-template requires a value" };
+      result.selectTemplate = argv[i]!;
+    } else if (a.startsWith("--select-template=")) {
+      result.selectTemplate = a.slice("--select-template=".length);
+    } else if (a === "--print-cmd") {
+      result.printCmd = true;
+    } else if (a === "--dry-run") {
+      result.dryRun = true;
+    } else if (a === "--loop") {
+      result.loop = true;
+    } else if (a === "--help" || a === "-h") {
+      // Help is handled by the caller
+      return { ok: false, error: "help requested" };
+    } else {
+      return { ok: false, error: `unknown flag: ${a}` };
+    }
+    i++;
+  }
+
+  // Validation
+  if (result.select && result.selectTemplate) {
+    return { ok: false, error: "--select and --select-template are mutually exclusive" };
+  }
+  if (result.dryRun && !result.selectTemplate) {
+    return { ok: false, error: "--dry-run only applies to --select-template" };
+  }
 
   return { ok: true, value: result };
 }

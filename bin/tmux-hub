@@ -7,12 +7,27 @@
  *
  * Usage:
  *   tmux-hub launch --cwd /path/to/dir [--name session-name] [--env KEY=VAL]... -- <command...>
+ *   tmux-hub tui [--list | --select NAME | --select-template ID] [--print-cmd] [--dry-run] [--loop]
  */
 
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { parseLaunchArgs } from "../src/server/cli";
+import { createInterface } from "node:readline";
+import { parseLaunchArgs, parseTuiArgs } from "../src/server/cli";
+import { listSessions } from "../src/server/session-registry";
+import {
+  buildMenu,
+  buildListOutput,
+  buildAttachCmd,
+  shouldExec,
+  resolveSelection,
+  formatMenuItem,
+  hasFzf,
+  runFzfSelection,
+  shQuote,
+} from "../src/server/hub-tui";
+import type { MenuItem, AttachContext } from "../src/server/hub-tui";
 
 const ADMIN_SECRET_PATH =
   process.env.TMUX_HUB_ADMIN_SECRET_PATH ??
@@ -21,7 +36,25 @@ const PORT = process.env.TMUX_HUB_PORT ?? "3101";
 const HOST = "127.0.0.1";
 
 async function main(): Promise<void> {
-  const parsed = parseLaunchArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+
+  // Route to subcommand
+  if (argv[0] === "tui") {
+    await handleTui(argv);
+  } else if (argv[0] === "launch") {
+    await handleLaunch(argv);
+  } else {
+    process.stderr.write(`usage: tmux-hub <launch|tui> [options]\n`);
+    process.stderr.write(`\n`);
+    process.stderr.write(`Subcommands:\n`);
+    process.stderr.write(`  launch    Create a new managed session\n`);
+    process.stderr.write(`  tui       Interactive terminal menu for session selection\n`);
+    process.exit(2);
+  }
+}
+
+async function handleLaunch(argv: string[]): Promise<void> {
+  const parsed = parseLaunchArgs(argv);
   if (!parsed.ok) {
     process.stderr.write(`usage: tmux-hub launch --cwd PATH [--name N] [--env K=V]... -- <cmd...>\n`);
     process.stderr.write(`error: ${parsed.error}\n`);
@@ -72,6 +105,339 @@ async function main(): Promise<void> {
     process.stderr.write(`connection error: ${(e as Error).message}\n`);
     process.exit(1);
   }
+}
+
+async function handleTui(argv: string[]): Promise<void> {
+  const parsed = parseTuiArgs(argv);
+  if (!parsed.ok) {
+    if (parsed.error === "help requested") {
+      printTuiHelp();
+      process.exit(0);
+    }
+    process.stderr.write(`usage: tmux-hub tui [--list | --select NAME | --select-template ID] [--print-cmd] [--dry-run] [--loop]\n`);
+    process.stderr.write(`error: ${parsed.error}\n`);
+    process.exit(2);
+  }
+
+  const args = parsed.value;
+
+  // Fetch sessions (always needed)
+  const sessions = await listSessions();
+  if (!sessions) {
+    process.stderr.write(`error: tmux server unreachable\n`);
+    process.exit(1);
+  }
+
+  // Fetch templates (may fail if server offline)
+  let templates: Array<{ id: string; name: string }> = [];
+  try {
+    const url = `http://${HOST}:${PORT}/templates`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
+    if (res.ok) {
+      const json = (await res.json()) as Array<{ id: string; name: string }>;
+      templates = json;
+    }
+  } catch (e) {
+    process.stderr.write(`warning: server offline, templates unavailable (${(e as Error).message})\n`);
+  }
+
+  // --list mode: print JSON and exit
+  if (args.list) {
+    const output = buildListOutput(sessions, templates);
+    console.log(JSON.stringify(output, null, 2));
+    process.exit(0);
+  }
+
+  // Build menu
+  const menu = buildMenu(sessions, templates);
+
+  // --select mode: find session by name
+  if (args.select) {
+    const item = menu.find((m) => m.kind === "session" && m.name === args.select);
+    if (!item) {
+      process.stderr.write(`error: session not found: ${args.select}\n`);
+      process.exit(1);
+    }
+    if (args.printCmd) {
+      const cmd = buildAttachCmd({
+        tmuxEnv: process.env.TMUX ?? "",
+        target: args.select,
+        loop: args.loop,
+        socket: process.env.TMUX_HUB_SOCKET,
+      });
+      console.log(cmd.map(shQuote).join(" "));
+      process.exit(0);
+    }
+    // Real attach (non-interactive --select path)
+    await doAttach(args.select, args.loop);
+    return;
+  }
+
+  // --select-template mode: POST to server and attach
+  if (args.selectTemplate) {
+    if (args.dryRun) {
+      console.log(`POST http://${HOST}:${PORT}/templates/${encodeURIComponent(args.selectTemplate)}/run`);
+      process.exit(0);
+    }
+    // POST to create session
+    let adminSecret: string;
+    try {
+      adminSecret = readFileSync(ADMIN_SECRET_PATH, "utf8").trim();
+    } catch {
+      process.stderr.write(`cannot read admin secret at ${ADMIN_SECRET_PATH}\n`);
+      process.exit(1);
+    }
+    const url = `http://${HOST}:${PORT}/templates/${encodeURIComponent(args.selectTemplate)}/run`;
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-hub-admin-secret": adminSecret,
+        },
+        body: JSON.stringify({ cwd: "~" }),
+      });
+      if (!res.ok) {
+        const json = (await res.json()) as { error?: string };
+        process.stderr.write(`error: ${json.error ?? res.statusText}\n`);
+        process.exit(1);
+      }
+      const json = (await res.json()) as { name: string };
+      if (args.printCmd) {
+        const cmd = buildAttachCmd({
+          tmuxEnv: process.env.TMUX ?? "",
+          target: json.name,
+          loop: args.loop,
+          socket: process.env.TMUX_HUB_SOCKET,
+        });
+        console.log(cmd.map(shQuote).join(" "));
+        process.exit(0);
+      }
+      // Real attach
+      await doAttach(json.name, args.loop);
+      return;
+    } catch (e) {
+      process.stderr.write(`connection error: ${(e as Error).message}\n`);
+      process.exit(1);
+    }
+  }
+
+  // Interactive mode (no flags)
+  if (menu.length === 0) {
+    process.stderr.write(`no sessions or templates available\n`);
+    process.exit(0);
+  }
+
+  // Use fzf if available AND stdin is a TTY (fzf needs interactive terminal).
+  // When stdin is piped (e.g. from ssh or tests), fall back to numbered menu.
+  // TMUX_HUB_FORCE_FZF=1 bypasses the TTY check for integration testing.
+  const stdinIsTty = process.stdin.isTTY === true || process.env.TMUX_HUB_FORCE_FZF === "1";
+  if (hasFzf() && stdinIsTty) {
+    await interactiveFzf(menu, args.loop);
+  } else {
+    await interactiveNumbered(menu, args.loop);
+  }
+}
+
+/**
+ * Execute the attach/switch command. In loop mode, spawns and waits (so the
+ * process survives to return to the menu). In non-loop mode outside tmux,
+ * spawns with inherited stdio and exits with the child's code (bun has no
+ * exec, so spawn+inherit+exit is the equivalent).
+ */
+async function doAttach(target: string, loop: boolean): Promise<void> {
+  const ctx: AttachContext = {
+    tmuxEnv: process.env.TMUX ?? "",
+    target,
+    loop,
+    socket: process.env.TMUX_HUB_SOCKET,
+  };
+  const cmd = buildAttachCmd(ctx);
+  const execMode = shouldExec(ctx);
+
+  const proc = Bun.spawn(cmd, {
+    stdio: ["inherit", "inherit", "inherit"],
+  });
+  const code = await proc.exited;
+
+  if (execMode) {
+    process.exit(code);
+  }
+  // In loop mode or inside tmux (switch-client), return to caller
+}
+
+async function interactiveFzf(menu: MenuItem[], loop: boolean): Promise<void> {
+  do {
+    const idx = await runFzfSelection(menu, process.env.TMUX_HUB_SOCKET);
+    if (idx < 0) {
+      // User cancelled (ESC / Ctrl-C)
+      process.exit(0);
+    }
+    const action = resolveSelection(menu, idx);
+    if (action.action === "quit") {
+      process.exit(0);
+    }
+    await executeAction(action, loop);
+  } while (loop);
+}
+
+/**
+ * Read all lines from stdin using Node.js readline. Handles EOF gracefully —
+ * returns whatever was read (empty array for immediate EOF).
+ */
+async function readStdinLines(): Promise<string[]> {
+  const lines: string[] = [];
+  const rl = createInterface({
+    input: process.stdin,
+    terminal: false,
+  });
+  for await (const line of rl) {
+    lines.push(line.trim());
+  }
+  rl.close();
+  return lines;
+}
+
+async function interactiveNumbered(menu: MenuItem[], loop: boolean): Promise<void> {
+  // Read all stdin lines upfront using readline (handles EOF gracefully)
+  const lines = await readStdinLines();
+
+  // If no input at all (EOF with empty stdin), exit cleanly
+  if (lines.length === 0) {
+    process.exit(0);
+  }
+
+  let lineIdx = 0;
+
+  do {
+    // Print numbered menu
+    menu.forEach((item, idx) => {
+      console.log(`${idx + 1}. ${formatMenuItem(item)}`);
+    });
+    process.stdout.write(`\nSelect [1-${menu.length}] (q to quit): `);
+
+    // Consume next line from pre-read buffer
+    const input = lineIdx < lines.length ? lines[lineIdx++]! : "";
+
+    if (input === "q" || input === "") {
+      process.exit(0);
+    }
+
+    const idx = parseInt(input, 10) - 1;
+    if (isNaN(idx) || idx < 0 || idx >= menu.length) {
+      process.stderr.write(`error: invalid selection\n`);
+      process.exit(1);
+    }
+
+    const action = resolveSelection(menu, idx);
+    if (action.action === "quit") {
+      process.exit(0);
+    }
+
+    await executeAction(action, loop);
+  } while (loop);
+}
+
+/**
+ * Execute a resolved SelectionAction. For attach/new-shell, calls doAttach.
+ * For templates, POSTs to the server first to create the session.
+ */
+async function executeAction(
+  action: ReturnType<typeof resolveSelection>,
+  loop: boolean,
+): Promise<void> {
+  switch (action.action) {
+    case "attach":
+      await doAttach(action.sessionName, loop);
+      break;
+    case "run-template": {
+      // POST to create session from template, then attach
+      let adminSecret: string;
+      try {
+        adminSecret = readFileSync(ADMIN_SECRET_PATH, "utf8").trim();
+      } catch {
+        process.stderr.write(`cannot read admin secret at ${ADMIN_SECRET_PATH}\n`);
+        return;
+      }
+      const url = `http://${HOST}:${PORT}/templates/${encodeURIComponent(action.templateId)}/run`;
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-hub-admin-secret": adminSecret,
+          },
+          body: JSON.stringify({ cwd: "~" }),
+        });
+        if (!res.ok) {
+          const json = (await res.json()) as { error?: string };
+          process.stderr.write(`error: ${json.error ?? res.statusText}\n`);
+          return;
+        }
+        const json = (await res.json()) as { name: string };
+        await doAttach(json.name, loop);
+      } catch (e) {
+        process.stderr.write(`connection error: ${(e as Error).message}\n`);
+      }
+      break;
+    }
+    case "new-shell": {
+      // Create a new shell session via the launch endpoint
+      let adminSecret: string;
+      try {
+        adminSecret = readFileSync(ADMIN_SECRET_PATH, "utf8").trim();
+      } catch {
+        process.stderr.write(`cannot read admin secret at ${ADMIN_SECRET_PATH}\n`);
+        return;
+      }
+      const url = `http://${HOST}:${PORT}/sessions`;
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-hub-admin-secret": adminSecret,
+          },
+          body: JSON.stringify({ cwd: "~", cmd: ["zsh"] }),
+        });
+        if (!res.ok) {
+          const json = (await res.json()) as { error?: string };
+          process.stderr.write(`error: ${json.error ?? res.statusText}\n`);
+          return;
+        }
+        const json = (await res.json()) as { name: string };
+        await doAttach(json.name, loop);
+      } catch (e) {
+        process.stderr.write(`connection error: ${(e as Error).message}\n`);
+      }
+      break;
+    }
+    case "quit":
+      process.exit(0);
+  }
+}
+
+function printTuiHelp(): void {
+  console.log(`tmux-hub tui — Interactive terminal menu for session selection
+
+Usage:
+  tmux-hub tui [options]
+
+Options:
+  --list                    Print menu as JSON and exit (non-interactive)
+  --select NAME             Select a session by name (non-interactive)
+  --select-template ID      Select a template by id (non-interactive)
+  --print-cmd               Print the attach command instead of executing it
+  --dry-run                 Don't actually POST to server (with --select-template)
+  --loop                    Return to menu after detach (for ssh RemoteCommand)
+  -h, --help                Show this help message
+
+Examples:
+  tmux-hub tui                          # Interactive menu
+  tmux-hub tui --list                   # Print JSON menu
+  tmux-hub tui --select mysession       # Attach to session
+  tmux-hub tui --select-template shell  # Launch template and attach
+`);
 }
 
 main();

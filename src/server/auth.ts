@@ -11,7 +11,10 @@ function hubSecret(): string {
   return _secret;
 }
 
-/** Reset cached secret — test-only, allows re-reading from a new env path. */
+/**
+ * Reset cached secret — test-only, allows re-reading from a new env path.
+ * @internal Test-only helper for integration tests that swap the secret path.
+ */
 export function _resetSecretForTest(): void {
   _secret = null;
 }
