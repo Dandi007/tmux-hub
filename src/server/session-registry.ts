@@ -9,6 +9,17 @@ const logger = createLogger("registry");
 
 const FORMAT = "#{session_name}|#{session_activity}|#{session_attached}|#{session_windows}|#{window_width}|#{window_height}";
 
+/**
+ * Filter the full tmux session list down to the tmux-hub-managed subset.
+ *
+ * This is the single source of truth for "which sessions belong to the hub":
+ * both the WEB path (SessionRegistry.poll → snapshot) and the TUI path
+ * (bin/tmux-hub) call it, so the two surfaces can never drift apart.
+ */
+export function filterManagedSessions(all: SessionInfo[], managed: Set<string>): SessionInfo[] {
+  return all.filter((s) => managed.has(s.name));
+}
+
 export function diffSessions(prev: SessionInfo[], next: SessionInfo[]): ServerEvent[] {
   const prevMap = new Map(prev.map((s) => [s.name, s]));
   const nextMap = new Map(next.map((s) => [s.name, s]));
@@ -123,7 +134,7 @@ export class SessionRegistry {
       if (!alive.has(name)) this.db.remove(name);
     }
 
-    const next = all.filter((s) => managed.has(s.name));
+    const next = filterManagedSessions(all, managed);
     const events = diffSessions(this.state, next);
     this.state = next;
     for (const e of events) {

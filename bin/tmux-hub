@@ -15,7 +15,8 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { parseLaunchArgs, parseTuiArgs } from "../src/server/cli";
-import { listSessions } from "../src/server/session-registry";
+import { listSessions, filterManagedSessions } from "../src/server/session-registry";
+import { readManagedNames } from "../src/server/managed-db";
 import {
   buildMenu,
   buildListOutput,
@@ -121,12 +122,16 @@ async function handleTui(argv: string[]): Promise<void> {
 
   const args = parsed.value;
 
-  // Fetch sessions (always needed)
-  const sessions = await listSessions();
-  if (!sessions) {
+  // Fetch sessions (always needed), then keep only tmux-hub-managed ones.
+  // Same filter the server registry applies for the WEB, so TUI and WEB show
+  // the identical session set. managed names come straight from the managed-db
+  // (server-less read) — consistent even when the hub HTTP server is down.
+  const all = await listSessions();
+  if (!all) {
     process.stderr.write(`error: tmux server unreachable\n`);
     process.exit(1);
   }
+  const sessions = filterManagedSessions(all, readManagedNames());
 
   // Fetch templates (may fail if server offline)
   let templates: Array<{ id: string; name: string; cwd_choices: string[] }> = [];

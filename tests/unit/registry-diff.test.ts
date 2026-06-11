@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { diffSessions } from "../../src/server/session-registry";
+import { diffSessions, filterManagedSessions } from "../../src/server/session-registry";
 import type { SessionInfo } from "../../src/shared/protocol";
 
 const s = (name: string, activity = 0, attached = 0, windows = 1, cols = 80, rows = 24): SessionInfo => ({
@@ -46,5 +46,30 @@ describe("diffSessions", () => {
     expect(events).toHaveLength(3);
     const kinds = events.map((e) => e.event).sort();
     expect(kinds).toEqual(["session_activity", "session_created", "session_removed"]);
+  });
+});
+
+describe("filterManagedSessions", () => {
+  test("keeps only sessions present in the managed set", () => {
+    const all = [s("hub-a"), s("private-b"), s("hub-c")];
+    const managed = new Set(["hub-a", "hub-c"]);
+    expect(filterManagedSessions(all, managed).map((x) => x.name)).toEqual(["hub-a", "hub-c"]);
+  });
+
+  test("empty managed set hides every session", () => {
+    const all = [s("a"), s("b")];
+    expect(filterManagedSessions(all, new Set())).toEqual([]);
+  });
+
+  test("managed name with no live session simply does not appear (intersection)", () => {
+    const all = [s("alive")];
+    const managed = new Set(["alive", "dead-but-still-in-db"]);
+    expect(filterManagedSessions(all, managed).map((x) => x.name)).toEqual(["alive"]);
+  });
+
+  test("preserves order and SessionInfo payloads of the input list", () => {
+    const all = [s("b", 200, 1), s("a", 100, 0)];
+    const managed = new Set(["a", "b"]);
+    expect(filterManagedSessions(all, managed)).toEqual(all);
   });
 });
