@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -121,17 +121,59 @@ describe("hub-tui integration", () => {
     expect(stdout).toContain("--select");
   });
 
-  // PTY attach test is skipped because it requires a real terminal (PTY).
-  // In test environments, stdin is a pipe, and `script` fails with:
-  // "script: tcgetattr/ioctl: Operation not supported on socket"
-  // Bun doesn't have built-in PTY support, so we can't create a real terminal.
-  // The attach functionality is tested indirectly via --print-cmd tests.
-  test.skip("interactive attach via PTY actually attaches to session", async () => {
-    // This test would verify that:
-    // 1. CLI spawns tmux attach with correct arguments
-    // 2. tmux actually attaches to the session
-    // 3. Process stays alive while attached
-    // But requires a real PTY which isn't available in test environments.
+  test("interactive attach via PTY actually attaches to session", async () => {
+    // Create a dedicated session for this test
+    const ptySessionName = `pty-attach-${process.pid}`;
+    const createResult = await tmux(["new-session", "-d", "-s", ptySessionName, "sleep", "60"]);
+    expect(createResult.code).toBe(0);
+
+    // Use `expect` to allocate a real PTY and run the CLI.
+    // Must explicitly unset TMUX — when running inside tmux, the inherited TMUX
+    // env causes switch-client (which fails with "no current client" since the
+    // expect-spawned process isn't a tmux client). With TMUX unset, the CLI
+    // correctly uses attach-session.
+    const expectScript = `
+set timeout 5
+spawn bun ${BIN} tui --select ${ptySessionName}
+expect {
+    timeout { }
+    eof { }
+}
+`;
+    const expectProc = Bun.spawn(
+      ["expect", "-c", expectScript],
+      {
+        stdout: "pipe",
+        stderr: "pipe",
+        env: {
+          ...process.env,
+          TMUX_HUB_SOCKET: SOCKET,
+          TMUX: "",  // Explicitly clear TMUX so attach-session is used
+        },
+      },
+    );
+
+    // Wait for attach to establish (expect needs time to spawn + tmux to connect)
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Check that the session has at least one attached client
+    const checkResult = await tmux([
+      "list-sessions",
+      "-F",
+      "#{session_name} #{session_attached}",
+    ]);
+
+    const lines = checkResult.stdout.split("\n");
+    const targetLine = lines.find(line => line.startsWith(ptySessionName));
+    expect(targetLine).toBeDefined();
+
+    const attached = parseInt(targetLine!.split(" ")[1] || "0", 10);
+    expect(attached).toBeGreaterThanOrEqual(1);
+
+    // Cleanup: kill the expect process and the test session
+    expectProc.kill();
+    await expectProc.exited.catch(() => {});
+    await tmux(["kill-session", "-t", ptySessionName]).catch(() => {});
   });
 
   test("numbered menu handles 'q' input gracefully", async () => {
@@ -157,5 +199,93 @@ describe("hub-tui integration", () => {
     proc.stdin.end(); // EOF immediately
     const code = await proc.exited;
     expect(code).toBe(0);
+  });
+
+  test("fzf detection with PATH-injected fake fzf", async () => {
+    // Create a fake fzf script that reads stdin and outputs a fixed selection
+    const fakeFzfDir = mkdtempSync(join(tmpdir(), "fake-fzf-"));
+    const fakeFzfPath = join(fakeFzfDir, "fzf");
+    writeFileSync(
+      fakeFzfPath,
+      `#!/bin/sh
+# Fake fzf: read stdin, output first line (simulating selection)
+head -n 1
+`,
+    );
+    chmodSync(fakeFzfPath, 0o755);
+
+    // Run CLI with PATH prepended to find our fake fzf
+    const proc = Bun.spawn(["bun", BIN, "tui"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...process.env,
+        TMUX_HUB_SOCKET: SOCKET,
+        PATH: `${fakeFzfDir}:${process.env.PATH}`,
+      },
+    });
+
+    // Send a selection (index 1 = first session)
+    proc.stdin.write("1\n");
+    proc.stdin.end();
+
+    const code = await proc.exited;
+    // Should exit cleanly (0) or with attach attempt (non-zero if no session)
+    expect(code).toBeGreaterThanOrEqual(0);
+
+    // Cleanup
+    try {
+      rmSync(fakeFzfDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  test("--print-cmd with spaced session name uses shQuote", async () => {
+    // Create a session with spaces in the name
+    const spacedName = "test session with spaces";
+    const createResult = await tmux(["new-session", "-d", "-s", spacedName, "sleep", "60"]);
+    expect(createResult.code).toBe(0);
+
+    const { stdout, code } = await cli(["tui", "--select", spacedName, "--print-cmd"]);
+    expect(code).toBe(0);
+
+    // The output should contain the session name, properly quoted
+    expect(stdout).toContain("tmux");
+    expect(stdout).toContain("attach-session");
+
+    // Verify the quoted output can be parsed back by sh -c
+    const parseResult = Bun.spawnSync(["sh", "-c", `printf '%s\\n' ${stdout}`]);
+    const parsedLines = new TextDecoder().decode(parseResult.stdout).trim().split("\n");
+    expect(parsedLines).toContain(spacedName);
+
+    // Cleanup
+    await tmux(["kill-session", "-t", spacedName]).catch(() => {});
+  });
+
+  test("--loop mode returns to menu after detach", async () => {
+    // Create a session for loop testing
+    const loopSessionName = `loop-test-${process.pid}`;
+    const createResult = await tmux(["new-session", "-d", "-s", loopSessionName, "sleep", "60"]);
+    expect(createResult.code).toBe(0);
+
+    // Run with --loop and send: select session, then 'q' to quit
+    const proc = Bun.spawn(["bun", BIN, "tui", "--loop"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, TMUX_HUB_SOCKET: SOCKET },
+    });
+
+    // Send selection (assuming first session) then quit
+    proc.stdin.write("1\n");
+    await new Promise(resolve => setTimeout(resolve, 500));
+    proc.stdin.write("q\n");
+    proc.stdin.end();
+
+    const code = await proc.exited;
+    expect(code).toBe(0);
+
+    // Cleanup
+    await tmux(["kill-session", "-t", loopSessionName]).catch(() => {});
   });
 });

@@ -264,4 +264,55 @@ describe("hub-tui pure functions", () => {
       expect(resolveSelection(menu, 3)).toEqual({ action: "new-shell" });
     });
   });
+
+  describe("--print-cmd with spaced session names", () => {
+    test("buildAttachCmd output with shQuote survives shell parsing", () => {
+      const cmd = buildAttachCmd({
+        tmuxEnv: "",
+        target: "my session name",
+        loop: false,
+      });
+      const quoted = cmd.map(shQuote).join(" ");
+      // The quoted string should parse back to the same argv via sh -c
+      const result = Bun.spawnSync(["sh", "-c", `printf '%s\\n' ${quoted}`]);
+      const lines = new TextDecoder().decode(result.stdout).trim().split("\n");
+      expect(lines).toEqual(["tmux", "attach-session", "-t", "my session name"]);
+    });
+
+    test("buildAttachCmd with socket and spaced name", () => {
+      const cmd = buildAttachCmd({
+        tmuxEnv: "",
+        target: "test session",
+        loop: false,
+        socket: "hub-test",
+      });
+      const quoted = cmd.map(shQuote).join(" ");
+      const result = Bun.spawnSync(["sh", "-c", `printf '%s\\n' ${quoted}`]);
+      const lines = new TextDecoder().decode(result.stdout).trim().split("\n");
+      expect(lines).toEqual(["tmux", "-L", "hub-test", "attach-session", "-t", "test session"]);
+    });
+  });
+
+  describe("--loop control flow", () => {
+    test("buildAttachCmd in loop mode does not change command structure", () => {
+      const cmd = buildAttachCmd({
+        tmuxEnv: "",
+        target: "mysession",
+        loop: true,
+      });
+      expect(cmd).toEqual(["tmux", "attach-session", "-t", "mysession"]);
+    });
+
+    test("shouldExec returns false in loop mode", () => {
+      expect(shouldExec({ tmuxEnv: "", target: "x", loop: true })).toBe(false);
+    });
+
+    test("shouldExec returns false inside tmux even without loop", () => {
+      expect(shouldExec({ tmuxEnv: "/tmp/tmux-1000/default", target: "x", loop: false })).toBe(false);
+    });
+
+    test("shouldExec returns true only outside tmux and not looping", () => {
+      expect(shouldExec({ tmuxEnv: "", target: "x", loop: false })).toBe(true);
+    });
+  });
 });
