@@ -120,4 +120,42 @@ describe("hub-tui integration", () => {
     expect(stdout).toContain("--list");
     expect(stdout).toContain("--select");
   });
+
+  // PTY attach test is skipped because it requires a real terminal (PTY).
+  // In test environments, stdin is a pipe, and `script` fails with:
+  // "script: tcgetattr/ioctl: Operation not supported on socket"
+  // Bun doesn't have built-in PTY support, so we can't create a real terminal.
+  // The attach functionality is tested indirectly via --print-cmd tests.
+  test.skip("interactive attach via PTY actually attaches to session", async () => {
+    // This test would verify that:
+    // 1. CLI spawns tmux attach with correct arguments
+    // 2. tmux actually attaches to the session
+    // 3. Process stays alive while attached
+    // But requires a real PTY which isn't available in test environments.
+  });
+
+  test("numbered menu handles 'q' input gracefully", async () => {
+    const proc = Bun.spawn(["bun", BIN, "tui"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, TMUX_HUB_SOCKET: SOCKET },
+    });
+    proc.stdin.write("q\n");
+    proc.stdin.end();
+    const code = await proc.exited;
+    expect(code).toBe(0);
+  });
+
+  test("numbered menu handles EOF gracefully", async () => {
+    const proc = Bun.spawn(["bun", BIN, "tui"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, TMUX_HUB_SOCKET: SOCKET },
+    });
+    proc.stdin.end(); // EOF immediately
+    const code = await proc.exited;
+    expect(code).toBe(0);
+  });
 });

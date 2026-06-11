@@ -148,14 +148,60 @@ export function resolveSelection(items: MenuItem[], selected: number): Selection
 
 /**
  * Check if fzf is available on PATH.
+ *
+ * Uses Bun.which (PATH lookup) rather than spawning `command -v fzf` — the
+ * latter is a shell builtin and Bun.spawnSync execve's directly, so it would
+ * always fail with ENOENT.
  */
 export function hasFzf(): boolean {
-  try {
-    const r = Bun.spawnSync(["command", "-v", "fzf"]);
-    return r.exitCode === 0;
-  } catch {
-    return false;
-  }
+  return Bun.which("fzf") !== null;
+}
+
+/**
+ * Run fzf over a list of menu items and return the selected index (or -1 if
+ * the user cancelled / fzf exited non-zero). Preview content for session items
+ * uses `tmux capture-pane -ep -t <name>`; template items show a cwd/cmd stub.
+ *
+ * Exported for tests that inject a fake fzf via PATH.
+ */
+export async function runFzfSelection(
+  items: MenuItem[],
+  socket?: string,
+): Promise<number> {
+  const lines = items.map((it) => formatMenuItem(it));
+  const input = lines.join("\n") + "\n";
+
+  // Build a preview script: given the selected line, find its index and show
+  // context-appropriate preview. Session names are shell-quoted so names with
+  // spaces/special chars survive the sh -c round-trip.
+  const previewScript = buildFzfPreviewScript(socket);
+
+  const proc = Bun.spawn(
+    ["fzf", "--ansi", "--no-sort", "--preview", previewScript],
+    {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "inherit",
+    },
+  );
+  // Bun Subprocess stdin is a FileSink (write + end), not a WritableStream
+  proc.stdin.write(input);
+  proc.stdin.end();
+
+  const out = await new Response(proc.stdout).text();
+  const code = await proc.exited;
+  if (code !== 0) return -1;
+
+  const selected = out.trimEnd();
+  const idx = lines.indexOf(selected);
+  return idx;
+}
+
+function buildFzfPreviewScript(socket?: string): string {
+  const sockFlag = socket ? `-L ${shQuote(socket)}` : "";
+  // fzf passes the selected line as {}. We match it back to a session name by
+  // stripping the leading marker and trailing [relative-time] bracket.
+  return `sh -c 'line="$1"; name=$(printf "%s" "$line" | sed -E "s/^[● ] //; s/  \\[.*\\]$//"); case "$line" in "  ▸"*) printf "%s\\n" "(template)" ;; "  +"*) printf "%s\\n" "(new shell)" ;; *) tmux ${sockFlag} capture-pane -ep -t "$name" 2>/dev/null | tail -n 30 ;; esac' _ {}`;
 }
 
 // ─── Non-interactive mode helpers ───────────────────────────────────────────
@@ -183,4 +229,18 @@ export function buildListOutput(
     })),
     templates,
   };
+}
+
+// ─── Shell quoting ──────────────────────────────────────────────────────────
+
+/**
+ * Quote a single argv token for safe re-parsing by `sh -c`. Shell-safe tokens
+ * (alnum and a few unambiguous punctuation chars) pass through unquoted; all
+ * others are wrapped in single quotes with embedded single quotes escaped.
+ *
+ * Exported for use in bin/tmux-hub --print-cmd output.
+ */
+export function shQuote(s: string): string {
+  if (s.length > 0 && /^[A-Za-z0-9_./:=@%+,-]+$/.test(s)) return s;
+  return `'${s.replace(/'/g, `'\\''`)}'`;
 }

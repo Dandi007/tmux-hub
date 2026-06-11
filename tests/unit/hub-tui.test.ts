@@ -6,6 +6,7 @@ import {
   formatMenuItem,
   buildListOutput,
   shouldExec,
+  shQuote,
 } from "../../src/server/hub-tui";
 import type { SessionInfo } from "../../src/shared/protocol";
 
@@ -202,6 +203,65 @@ describe("hub-tui pure functions", () => {
       expect(output.sessions[0]!.attached).toBe(true);
       expect(output.templates).toHaveLength(1);
       expect(output.templates[0]!.id).toBe("shell");
+    });
+  });
+
+  describe("shQuote", () => {
+    test("passes safe tokens through unquoted", () => {
+      expect(shQuote("tmux")).toBe("tmux");
+      expect(shQuote("attach-session")).toBe("attach-session");
+      expect(shQuote("my-session")).toBe("my-session");
+    });
+
+    test("quotes tokens with spaces", () => {
+      const quoted = shQuote("my session");
+      expect(quoted).toBe("'my session'");
+      // Verify it round-trips through sh -c
+      const result = Bun.spawnSync(["sh", "-c", `printf '%s' ${quoted}`]);
+      expect(new TextDecoder().decode(result.stdout)).toBe("my session");
+    });
+
+    test("quotes tokens with single quotes", () => {
+      const quoted = shQuote("it's a test");
+      expect(quoted).toContain("'");
+      const result = Bun.spawnSync(["sh", "-c", `printf '%s' ${quoted}`]);
+      expect(new TextDecoder().decode(result.stdout)).toBe("it's a test");
+    });
+
+    test("buildAttachCmd output with shQuote survives shell parsing for spaced session names", () => {
+      const cmd = buildAttachCmd({
+        tmuxEnv: "",
+        target: "my session name",
+        loop: false,
+      });
+      const quoted = cmd.map(shQuote).join(" ");
+      // The quoted string should parse back to the same argv via sh -c
+      const result = Bun.spawnSync(["sh", "-c", `printf '%s\\n' ${quoted}`]);
+      const lines = new TextDecoder().decode(result.stdout).trim().split("\n");
+      expect(lines).toEqual(["tmux", "attach-session", "-t", "my session name"]);
+    });
+  });
+
+  describe("fzf absent fallback", () => {
+    test("resolveSelection works as fallback when fzf is unavailable", () => {
+      // When fzf is absent, the numbered menu uses resolveSelection(index)
+      // to map user input to actions. This tests that the fallback path works.
+      const menu = buildMenu(
+        [
+          { name: "s1", activity: 100, attached: 0, windows: 1, grammar_ok: true },
+          { name: "s2", activity: 200, attached: 0, windows: 1, grammar_ok: true },
+        ],
+        [{ id: "shell", name: "Shell" }],
+      );
+      // buildMenu sorts by activity descending, so s2 (200) comes before s1 (100)
+      // Selecting index 0 → first session (s2, highest activity)
+      expect(resolveSelection(menu, 0)).toEqual({ action: "attach", sessionName: "s2" });
+      // Selecting index 1 → second session (s1)
+      expect(resolveSelection(menu, 1)).toEqual({ action: "attach", sessionName: "s1" });
+      // Selecting index 2 → template
+      expect(resolveSelection(menu, 2)).toEqual({ action: "run-template", templateId: "shell" });
+      // Selecting index 3 → new-shell
+      expect(resolveSelection(menu, 3)).toEqual({ action: "new-shell" });
     });
   });
 });

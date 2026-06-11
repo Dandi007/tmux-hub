@@ -264,6 +264,82 @@ CLI 读取 `~/.config/tmux-hub/hub.admin.secret`（可通过 `TMUX_HUB_ADMIN_SEC
 
 ---
 
+## Terminal entry (hub TUI)
+
+交互式终端菜单，用于快速选择、切换或创建 tmux 会话。支持从任意终端（包括 SSH）直接使用，也可嵌入 tmux popup。
+
+### 使用方式
+
+```bash
+# 交互模式：显示菜单，选择后 attach/switch
+tmux-hub tui
+
+# 非交互模式：列出所有会话和模板（JSON 格式）
+tmux-hub tui --list
+
+# 非交互模式：直接 attach 到指定会话
+tmux-hub tui --select my-session
+
+# 非交互模式：通过模板创建新会话并 attach
+tmux-hub tui --select-template shell
+
+# 打印将要执行的命令（不实际执行）
+tmux-hub tui --select my-session --print-cmd
+
+# 循环模式：detach 后自动返回菜单（适合 SSH RemoteCommand）
+tmux-hub tui --loop
+```
+
+### SSH 配置示例
+
+在 `~/.ssh/config` 中配置，SSH 登录后自动进入 TUI：
+
+```
+Host my-mac
+  HostName 192.168.1.100
+  User yourname
+  RemoteCommand tmux-hub tui --loop
+  RequestTTY yes
+```
+
+### tmux popup 集成
+
+在 `~/.tmux.conf` 中添加快捷键，从 tmux 内部呼出 TUI popup：
+
+```bash
+bind-key T display-popup -E -w 80% -h 70% "tmux-hub tui"
+```
+
+按 `prefix + T` 即可呼出菜单，选择后自动 switch-client 到目标会话。
+
+### 嵌套行为
+
+TUI 会根据 `$TMUX` 环境变量自动选择正确的命令：
+
+- **在 tmux 外部**（普通终端或 SSH）：使用 `tmux attach-session -t <name>`
+- **在 tmux 内部**（popup 或嵌套调用）：使用 `tmux switch-client -t <name>`
+
+这样可以避免 "sessions should be nested with care" 错误。
+
+### 菜单内容
+
+TUI 菜单按以下顺序显示：
+
+1. **活跃会话**：按最近活动时间排序，已 attach 的会话标记 `●`
+2. **模板**：从 `GET /templates` 获取，显示模板名称和 ID
+3. **新建 shell**：固定选项，创建一个新的 zsh 会话
+
+如果 server 不可达，模板部分会降级（仅显示会话），不会崩溃。
+
+### 选择器
+
+- **fzf 可用时**：使用 fzf 进行模糊搜索和选择，支持预览窗口
+- **fzf 不可用时**：回退到数字菜单（打印编号列表，输入数字选择）
+
+选择器逻辑已抽成纯函数，便于单元测试。
+
+---
+
 ## 测试
 
 ```bash
