@@ -129,12 +129,12 @@ async function handleTui(argv: string[]): Promise<void> {
   }
 
   // Fetch templates (may fail if server offline)
-  let templates: Array<{ id: string; name: string }> = [];
+  let templates: Array<{ id: string; name: string; cwd_choices: string[] }> = [];
   try {
     const url = `http://${HOST}:${PORT}/templates`;
     const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
     if (res.ok) {
-      const json = (await res.json()) as Array<{ id: string; name: string }>;
+      const json = (await res.json()) as Array<{ id: string; name: string; cwd_choices: string[] }>;
       templates = json;
     }
   } catch (e) {
@@ -176,9 +176,18 @@ async function handleTui(argv: string[]): Promise<void> {
   // --select-template mode: POST to server and attach
   if (args.selectTemplate) {
     if (args.dryRun) {
+      // Dry-run only prints the URL and never POSTs, so it needs no cwd lookup.
       console.log(`POST http://${HOST}:${PORT}/templates/${encodeURIComponent(args.selectTemplate)}/run`);
       process.exit(0);
     }
+    // Resolve the template's working dir from its declared cwd_choices.
+    // Hardcoding "~" here was a bug: server rejects cwd ∉ cwd_choices (400).
+    const tpl = templates.find((t) => t.id === args.selectTemplate);
+    if (!tpl) {
+      process.stderr.write(`error: template not found: ${args.selectTemplate}\n`);
+      process.exit(1);
+    }
+    const cwd = tpl.cwd_choices[0]!;
     // POST to create session
     let adminSecret: string;
     try {
@@ -195,7 +204,7 @@ async function handleTui(argv: string[]): Promise<void> {
           "content-type": "application/json",
           "x-hub-admin-secret": adminSecret,
         },
-        body: JSON.stringify({ cwd: "~" }),
+        body: JSON.stringify({ cwd }),
       });
       if (!res.ok) {
         const json = (await res.json()) as { error?: string };
@@ -367,7 +376,8 @@ async function executeAction(
             "content-type": "application/json",
             "x-hub-admin-secret": adminSecret,
           },
-          body: JSON.stringify({ cwd: "~" }),
+          // cwd comes from the template's cwd_choices (resolveSelection), not "~".
+          body: JSON.stringify({ cwd: action.cwd }),
         });
         if (!res.ok) {
           const json = (await res.json()) as { error?: string };

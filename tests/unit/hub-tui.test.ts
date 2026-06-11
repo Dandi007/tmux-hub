@@ -18,8 +18,8 @@ describe("hub-tui pure functions", () => {
         { name: "s2", activity: 200, attached: 1, windows: 2, grammar_ok: true },
       ];
       const templates = [
-        { id: "shell", name: "Shell" },
-        { id: "dev", name: "Dev" },
+        { id: "shell", name: "Shell", cwd_choices: ["~"] },
+        { id: "dev", name: "Dev", cwd_choices: ["/work/dev"] },
       ];
       const menu = buildMenu(sessions, templates);
       expect(menu).toHaveLength(5); // 2 sessions + 2 templates + 1 new-shell
@@ -130,9 +130,20 @@ describe("hub-tui pure functions", () => {
     });
 
     test("resolves template selection", () => {
-      const menu = buildMenu([], [{ id: "shell", name: "Shell" }]);
+      const menu = buildMenu([], [{ id: "shell", name: "Shell", cwd_choices: ["~"] }]);
       const action = resolveSelection(menu, 0);
-      expect(action).toEqual({ action: "run-template", templateId: "shell" });
+      expect(action).toEqual({ action: "run-template", templateId: "shell", cwd: "~" });
+    });
+
+    test("template selection carries the template's cwd_choices[0], not hardcoded ~", () => {
+      // Regression for the bug where the TUI POSTed {cwd:"~"} for every template,
+      // which the server rejected (400) for templates whose cwd_choices is an
+      // absolute path — so Enter on those templates silently bounced to the menu.
+      const absCwd = "/Users/x/Library/Mobile Documents/iCloud~md~obsidian/Documents/Zettelkasten";
+      const menu = buildMenu([], [{ id: "kb-cc", name: "知识库 cc", cwd_choices: [absCwd] }]);
+      const action = resolveSelection(menu, 0);
+      expect(action).toEqual({ action: "run-template", templateId: "kb-cc", cwd: absCwd });
+      expect((action as { cwd: string }).cwd).not.toBe("~");
     });
 
     test("resolves new-shell selection", () => {
@@ -176,7 +187,7 @@ describe("hub-tui pure functions", () => {
     });
 
     test("formats template with arrow", () => {
-      const menu = buildMenu([], [{ id: "shell", name: "Shell" }]);
+      const menu = buildMenu([], [{ id: "shell", name: "Shell", cwd_choices: ["~"] }]);
       const formatted = formatMenuItem(menu[0]!);
       expect(formatted).toContain("▸");
       expect(formatted).toContain("Shell");
@@ -196,7 +207,7 @@ describe("hub-tui pure functions", () => {
       const sessions: SessionInfo[] = [
         { name: "s1", activity: 100, attached: 1, windows: 2, grammar_ok: true },
       ];
-      const templates = [{ id: "shell", name: "Shell" }];
+      const templates = [{ id: "shell", name: "Shell", cwd_choices: ["~"] }];
       const output = buildListOutput(sessions, templates);
       expect(output.sessions).toHaveLength(1);
       expect(output.sessions[0]!.name).toBe("s1");
@@ -251,7 +262,7 @@ describe("hub-tui pure functions", () => {
           { name: "s1", activity: 100, attached: 0, windows: 1, grammar_ok: true },
           { name: "s2", activity: 200, attached: 0, windows: 1, grammar_ok: true },
         ],
-        [{ id: "shell", name: "Shell" }],
+        [{ id: "shell", name: "Shell", cwd_choices: ["~"] }],
       );
       // buildMenu sorts by activity descending, so s2 (200) comes before s1 (100)
       // Selecting index 0 → first session (s2, highest activity)
@@ -259,7 +270,7 @@ describe("hub-tui pure functions", () => {
       // Selecting index 1 → second session (s1)
       expect(resolveSelection(menu, 1)).toEqual({ action: "attach", sessionName: "s1" });
       // Selecting index 2 → template
-      expect(resolveSelection(menu, 2)).toEqual({ action: "run-template", templateId: "shell" });
+      expect(resolveSelection(menu, 2)).toEqual({ action: "run-template", templateId: "shell", cwd: "~" });
       // Selecting index 3 → new-shell
       expect(resolveSelection(menu, 3)).toEqual({ action: "new-shell" });
     });
