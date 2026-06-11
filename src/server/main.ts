@@ -286,7 +286,8 @@ Bun.serve({
           const sizeOut = await tmux(["display-message", "-p", "-t", `${sessionName}:0`, "#{window_width}|#{window_height}"]);
           if (sizeOut.code === 0) {
             const parts = sizeOut.stdout.split("|").map(Number);
-            const nc = parts[0]; const nr = parts[1];
+            const nc = parts[0] ?? NaN;
+            const nr = parts[1] ?? NaN;
             if (Number.isFinite(nc) && Number.isFinite(nr) && nc > 0 && nr > 0) {
               try { ws.send(JSON.stringify({ kind: "viewport", cols: nc, rows: nr, owner: "native" })); } catch {}
             } else {

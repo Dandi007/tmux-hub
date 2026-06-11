@@ -87,8 +87,8 @@ export class InputRouter {
         const sizeOut = await this.run(["display-message", "-p", "-t", `${session}:0`, "#{window_width}|#{window_height}"]);
         if (sizeOut.code === 0) {
           const parts = sizeOut.stdout.split("|").map(Number);
-          const cols = parts[0];
-          const rows = parts[1];
+          const cols = parts[0] ?? NaN;
+          const rows = parts[1] ?? NaN;
           if (Number.isFinite(cols) && Number.isFinite(rows) && cols > 0 && rows > 0) {
             return { skipped: true, cols, rows };
           } else {
