@@ -16,7 +16,10 @@ process.env.TMUX_HUB_DEV_BIND_SECRET = "0";
 
 // Import AFTER env setup so module-level loadOrCreateSecret reads our temp path
 const { Hono } = await import("hono");
-const { authGate } = await import("../../src/server/auth");
+const { authGate, _resetSecretForTest } = await import("../../src/server/auth");
+
+// Reset cached secret so it re-reads from our test env path
+_resetSecretForTest();
 
 function makeApp() {
   const app = new Hono();

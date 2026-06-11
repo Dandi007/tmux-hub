@@ -56,7 +56,7 @@ describe("InputRouter", () => {
     const skCalls = calls.filter((c) => c[0] === "send-keys");
     expect(skCalls.length).toBe(3);
     for (const c of skCalls) {
-      expect(Buffer.byteLength(c[4])).toBeLessThanOrEqual(1024);
+      expect(Buffer.byteLength(c[4]!)).toBeLessThanOrEqual(1024);
     }
   });
 
