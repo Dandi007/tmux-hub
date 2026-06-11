@@ -2,10 +2,21 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, chmodSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { ManagedSessionDb } from "../../src/server/managed-db";
 
 const SOCKET = `hub-tui-test-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
 const TMPDIR = mkdtempSync(join(tmpdir(), "hub-tui-test-"));
 const BIN = join(import.meta.dir, "../../bin/tmux-hub");
+// Isolated managed-db so the CLI's managed filter reads test state, not the
+// real ~/.cache/tmux-hub db. The TUI only lists sessions registered here.
+const DB_PATH = join(TMPDIR, "managed-sessions.db");
+
+// Register a session as tmux-hub-managed so the TUI will list/select it.
+function addManaged(name: string, templateId?: string): void {
+  const db = new ManagedSessionDb(DB_PATH);
+  db.add(name, templateId);
+  db.close();
+}
 
 // Helper to run tmux commands with the same socket the CLI will use
 async function tmux(args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
@@ -22,7 +33,7 @@ async function tmux(args: string[]): Promise<{ stdout: string; stderr: string; c
 // Helper to run CLI
 async function cli(args: string[], env?: Record<string, string>): Promise<{ stdout: string; stderr: string; code: number }> {
   // Explicitly unset TMUX unless caller provides it, so tests run outside tmux by default
-  const baseEnv: Record<string, string | undefined> = { ...process.env, TMUX_HUB_SOCKET: SOCKET };
+  const baseEnv: Record<string, string | undefined> = { ...process.env, TMUX_HUB_SOCKET: SOCKET, TMUX_HUB_DB_PATH: DB_PATH };
   if (!env?.TMUX) {
     delete baseEnv.TMUX;
   }
@@ -44,6 +55,7 @@ describe("hub-tui integration", () => {
     if (r.code !== 0) {
       throw new Error(`failed to create test session: ${r.stderr}`);
     }
+    addManaged("test-session");
   });
 
   afterAll(async () => {
@@ -70,6 +82,37 @@ describe("hub-tui integration", () => {
     expect(code).toBe(0);
     const data = JSON.parse(stdout);
     expect(data.templates).toBeArray();
+  });
+
+  test("unmanaged tmux session is hidden from --list (parity with WEB)", async () => {
+    // A raw tmux session that was never registered as tmux-hub-managed must NOT
+    // appear in the TUI — same filtering the server registry applies for WEB.
+    const stray = `unmanaged-${process.pid}`;
+    const r = await tmux(["new-session", "-d", "-s", stray, "sleep", "60"]);
+    expect(r.code).toBe(0);
+    try {
+      const { stdout, code } = await cli(["tui", "--list"]);
+      expect(code).toBe(0);
+      const data = JSON.parse(stdout);
+      const names = data.sessions.map((s: any) => s.name);
+      expect(names).not.toContain(stray);   // hidden: not managed
+      expect(names).toContain("test-session"); // managed: still visible
+    } finally {
+      await tmux(["kill-session", "-t", stray]).catch(() => {});
+    }
+  });
+
+  test("--select on an unmanaged session reports not found", async () => {
+    const stray = `unmanaged-select-${process.pid}`;
+    const r = await tmux(["new-session", "-d", "-s", stray, "sleep", "60"]);
+    expect(r.code).toBe(0);
+    try {
+      const { code, stderr } = await cli(["tui", "--select", stray, "--print-cmd"]);
+      expect(code).not.toBe(0);
+      expect(stderr).toContain("not found");
+    } finally {
+      await tmux(["kill-session", "-t", stray]).catch(() => {});
+    }
   });
 
   test("--select with valid session prints attach command", async () => {
@@ -126,6 +169,7 @@ describe("hub-tui integration", () => {
     const ptySessionName = `pty-attach-${process.pid}`;
     const createResult = await tmux(["new-session", "-d", "-s", ptySessionName, "sleep", "60"]);
     expect(createResult.code).toBe(0);
+    addManaged(ptySessionName);
 
     // Use `expect` to allocate a real PTY and run the CLI.
     // Must explicitly unset TMUX — when running inside tmux, the inherited TMUX
@@ -148,6 +192,7 @@ expect {
         env: {
           ...process.env,
           TMUX_HUB_SOCKET: SOCKET,
+          TMUX_HUB_DB_PATH: DB_PATH,
           TMUX: "",  // Explicitly clear TMUX so attach-session is used
         },
       },
@@ -181,7 +226,7 @@ expect {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
-      env: { ...process.env, TMUX_HUB_SOCKET: SOCKET },
+      env: { ...process.env, TMUX_HUB_SOCKET: SOCKET, TMUX_HUB_DB_PATH: DB_PATH },
     });
     proc.stdin.write("q\n");
     proc.stdin.end();
@@ -194,7 +239,7 @@ expect {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
-      env: { ...process.env, TMUX_HUB_SOCKET: SOCKET },
+      env: { ...process.env, TMUX_HUB_SOCKET: SOCKET, TMUX_HUB_DB_PATH: DB_PATH },
     });
     proc.stdin.end(); // EOF immediately
     const code = await proc.exited;
@@ -225,6 +270,7 @@ head -n 1
       env: {
         ...process.env,
         TMUX_HUB_SOCKET: SOCKET,
+        TMUX_HUB_DB_PATH: DB_PATH,
         TMUX_HUB_FORCE_FZF: "1",
         PATH: `${fakeFzfDir}:${process.env.PATH}`,
       },
@@ -256,6 +302,7 @@ head -n 1
     const spacedName = "test session with spaces";
     const createResult = await tmux(["new-session", "-d", "-s", spacedName, "sleep", "60"]);
     expect(createResult.code).toBe(0);
+    addManaged(spacedName);
 
     const { stdout, code } = await cli(["tui", "--select", spacedName, "--print-cmd"]);
     expect(code).toBe(0);
@@ -278,13 +325,14 @@ head -n 1
     const loopSessionName = `loop-test-${process.pid}`;
     const createResult = await tmux(["new-session", "-d", "-s", loopSessionName, "sleep", "60"]);
     expect(createResult.code).toBe(0);
+    addManaged(loopSessionName);
 
     // Run with --loop and send: select session, then 'q' to quit
     const proc = Bun.spawn(["bun", BIN, "tui", "--loop"], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
-      env: { ...process.env, TMUX_HUB_SOCKET: SOCKET },
+      env: { ...process.env, TMUX_HUB_SOCKET: SOCKET, TMUX_HUB_DB_PATH: DB_PATH },
     });
 
     // Send selection (assuming first session) then quit
