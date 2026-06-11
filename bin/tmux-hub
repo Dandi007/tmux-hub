@@ -33,6 +33,13 @@ import type { MenuItem, AttachContext } from "../src/server/hub-tui";
 const ADMIN_SECRET_PATH =
   process.env.TMUX_HUB_ADMIN_SECRET_PATH ??
   resolve(homedir(), ".config", "tmux-hub", "hub.admin.secret");
+// hub.secret is the standard auth credential checked by authGate. Template runs
+// go through authGate (POST /templates/:id/run), NOT the admin gate — the same
+// path the web client uses with X-Hub-Secret — so the TUI must present this
+// secret, not the admin secret. Only POST /sessions (new shell) uses adminGate.
+const SECRET_PATH =
+  process.env.TMUX_HUB_SECRET_PATH ??
+  resolve(homedir(), ".config", "tmux-hub", "hub.secret");
 const PORT = process.env.TMUX_HUB_PORT ?? "3101";
 const HOST = "127.0.0.1";
 
@@ -193,12 +200,13 @@ async function handleTui(argv: string[]): Promise<void> {
       process.exit(1);
     }
     const cwd = tpl.cwd_choices[0]!;
-    // POST to create session
-    let adminSecret: string;
+    // POST to create session. /templates/:id/run is gated by authGate, so we
+    // authenticate with hub.secret (x-hub-secret), exactly like the web client.
+    let hubSecret: string;
     try {
-      adminSecret = readFileSync(ADMIN_SECRET_PATH, "utf8").trim();
+      hubSecret = readFileSync(SECRET_PATH, "utf8").trim();
     } catch {
-      process.stderr.write(`cannot read admin secret at ${ADMIN_SECRET_PATH}\n`);
+      process.stderr.write(`cannot read hub secret at ${SECRET_PATH}\n`);
       process.exit(1);
     }
     const url = `http://${HOST}:${PORT}/templates/${encodeURIComponent(args.selectTemplate)}/run`;
@@ -207,7 +215,7 @@ async function handleTui(argv: string[]): Promise<void> {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-hub-admin-secret": adminSecret,
+          "x-hub-secret": hubSecret,
         },
         body: JSON.stringify({ cwd }),
       });
@@ -365,12 +373,14 @@ async function executeAction(
       await doAttach(action.sessionName, loop);
       break;
     case "run-template": {
-      // POST to create session from template, then attach
-      let adminSecret: string;
+      // POST to create session from template, then attach. /templates/:id/run is
+      // gated by authGate, so authenticate with hub.secret (x-hub-secret) — the
+      // same credential the web client sends — not the admin secret.
+      let hubSecret: string;
       try {
-        adminSecret = readFileSync(ADMIN_SECRET_PATH, "utf8").trim();
+        hubSecret = readFileSync(SECRET_PATH, "utf8").trim();
       } catch {
-        process.stderr.write(`cannot read admin secret at ${ADMIN_SECRET_PATH}\n`);
+        process.stderr.write(`cannot read hub secret at ${SECRET_PATH}\n`);
         return;
       }
       const url = `http://${HOST}:${PORT}/templates/${encodeURIComponent(action.templateId)}/run`;
@@ -379,7 +389,7 @@ async function executeAction(
           method: "POST",
           headers: {
             "content-type": "application/json",
-            "x-hub-admin-secret": adminSecret,
+            "x-hub-secret": hubSecret,
           },
           // cwd comes from the template's cwd_choices (resolveSelection), not "~".
           body: JSON.stringify({ cwd: action.cwd }),
