@@ -86,12 +86,20 @@ export class SessionBroadcaster {
     logger.info({ session: this.session, logPath: this.logPath }, "broadcaster started");
   }
 
-  // Lazily build the emulator on first attach. Prime it from the current log
-  // tail so the snapshot reflects existing history; xterm keeps only the last
-  // `scrollback` lines. Mid-stream resize tracking lands in P1.
-  private ensureEmulator(): SessionEmulator {
-    if (this.emulator) return this.emulator;
-    const e = new SessionEmulator(WINDOW_COLS, WINDOW_ROWS, SNAPSHOT_SCROLLBACK_LINES);
+  // Lazily build the emulator on first attach, sized to the ACTUAL pane width.
+  // The pipe-pane byte stream is width-specific — it was rendered by the app for
+  // the current pane size — so the emulator MUST match that width or every wide
+  // rule wraps and every absolute cursor move clamps, corrupting the snapshot.
+  // Prime it from the current log tail so the snapshot reflects existing
+  // history; xterm keeps only the last `scrollback` lines. A later attach may
+  // re-pin the pane to a new size, so an existing emulator is resized to track
+  // it. (Mid-stream reflow of already-captured history lands in P1.)
+  private ensureEmulator(cols: number, rows: number): SessionEmulator {
+    if (this.emulator) {
+      this.emulator.resize(cols, rows);
+      return this.emulator;
+    }
+    const e = new SessionEmulator(cols, rows, SNAPSHOT_SCROLLBACK_LINES);
     if (this.fd !== null && this.offset > 0) {
       const cap = REPLAY_CAP_BYTES;
       const start = Math.max(0, this.offset - cap);
@@ -128,7 +136,10 @@ export class SessionBroadcaster {
   // attach for live updates. Bytes that arrive during the replay read are
   // buffered into a tap and flushed AFTER the history so that the subscriber
   // sees a strict 0->now byte order. Subscriber is then attached for live.
-  attachWithReplay(send: Subscriber): () => void {
+  // `paneCols`/`paneRows` are the authoritative pane size the caller just pinned
+  // the tmux window to (or the native owner's size). The emulator is built/kept
+  // at that size; invalid/omitted values fall back to the WINDOW_* defaults.
+  attachWithReplay(send: Subscriber, paneCols?: number, paneRows?: number): () => void {
     if (this.fd === null) {
       // Broadcaster hasn't started — fall back to plain attach.
       this.subscribers.add(send);
@@ -145,7 +156,9 @@ export class SessionBroadcaster {
         // point are captured by `tap` and flushed below (no overlap, no gap).
         // snapshot() and the tap registration are synchronous + single-threaded,
         // so nothing interleaves between binding and flush.
-        const snap = this.ensureEmulator().snapshot();
+        const cols = normalizeDim(paneCols, WINDOW_COLS);
+        const rows = normalizeDim(paneRows, WINDOW_ROWS);
+        const snap = this.ensureEmulator(cols, rows).snapshot();
         send(enc.encode(snap));
       } else {
         const upTo = this.offset;
@@ -173,6 +186,15 @@ export class SessionBroadcaster {
     }
     this.subscribers.add(send);
     return () => { this.subscribers.delete(send); };
+  }
+
+  // Re-size the live emulator to track a pane resize (client viewport change).
+  // No-op until the emulator is lazily built on first attach — the next attach
+  // builds it at the then-current pane size anyway.
+  syncEmulatorSize(cols: number, rows: number): void {
+    if (this.emulator && Number.isFinite(cols) && Number.isFinite(rows) && cols > 0 && rows > 0) {
+      this.emulator.resize(Math.floor(cols), Math.floor(rows));
+    }
   }
 
   onEvent(fn: EventListener): () => void {
@@ -237,6 +259,12 @@ export class SessionBroadcaster {
 
 function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+// A positive finite integer, or the fallback. Used to resolve attach-time pane
+// dimensions before building the emulator.
+function normalizeDim(v: number | undefined, fallback: number): number {
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : fallback;
 }
 
 export class BroadcasterRegistry {
