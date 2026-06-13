@@ -2,14 +2,13 @@ import { Terminal } from "@xterm/headless";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { ModeShadow } from "./mode-shadow";
 
-// xterm's _core.writeSync is marked deprecated but is stable in 6.0.0 and is
-// the only way to get synchronous parsing (so snapshot() reflects writes made
-// in the same call frame). We suppress the deprecation console.warn once here.
-const _origWarn = console.warn.bind(console);
-console.warn = (...args: unknown[]) => {
-  if (typeof args[0] === "string" && args[0].includes("writeSync is unreliable")) return;
-  _origWarn(...args);
-};
+// xterm's _core.writeSync is marked deprecated but is the only way to achieve
+// synchronous parsing: the broadcaster's attach path snapshots terminal state
+// immediately after feeding bytes, requiring that the emulator state reflects
+// every byte written in the SAME synchronous frame — an async term.write()
+// would reintroduce a snapshot/delta overlap race. writeSync fires one
+// deprecation console.warn per process on first call; that single line is
+// harmless and accepted (no process-wide console.warn patch needed).
 
 /**
  * Server-side authoritative terminal for one session. Fed the raw pipe-pane
@@ -22,7 +21,8 @@ export class SessionEmulator {
   private shadow: ModeShadow;
   private disposed = false;
   private readonly decoder = new TextDecoder();
-  // Internal reference to xterm core for synchronous writes
+  // Direct core reference: writeSync() is required for synchronous parsing so that
+  // snapshot() always reflects every byte fed in the same synchronous frame (see top comment).
   private readonly core: { writeSync(data: string): void };
 
   constructor(
