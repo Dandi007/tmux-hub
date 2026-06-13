@@ -1,27 +1,32 @@
 import { test, expect } from "./fixtures";
-import { bindSecret, uniqSession } from "./helpers";
-import type { Page } from "@playwright/test";
+import { bindSecret } from "./helpers";
+import type { Page, Locator } from "@playwright/test";
 
-async function openSidebar(page: Page): Promise<void> {
-  await page.locator(".desktop-shell__sidebar-toggle").click();
-  await page.waitForTimeout(300);
+// Conformance of the desktop xterm.onData keystroke path: real typing into the
+// focused terminal must flow through the WS to the pane. Sessions are managed
+// (ctx.createSession), selected via the tab-bar, then driven by the keyboard.
+
+function tab(page: Page, name: string): Locator {
+  return page.locator(`.tab-bar__tab[data-session="${name}"]`);
+}
+
+async function openAndFocus(page: Page, name: string): Promise<void> {
+  await page.goto("/");
+  await bindSecret(page);
+  await page.reload();
+
+  await expect(tab(page, name)).toBeVisible({ timeout: 10_000 });
+  await tab(page, name).click();
+  await expect(page.locator(".desktop-shell__term-host")).toBeVisible({ timeout: 10_000 });
+  await page.locator(".desktop-shell__term-host").click();
+  // Let xterm + WS finish init and consume the initial replay before typing.
+  await page.waitForTimeout(1500);
 }
 
 test.describe("key conformance (desktop xterm.onData path)", () => {
-  test("plain text + Enter via desktop xterm flows to pane", async ({ page, ctx }) => {
-    const name = uniqSession("shell");
-    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
-
-    await page.goto("/");
-    await bindSecret(page);
-    await page.reload();
-
-    await openSidebar(page);
-    await page.locator(".session-list__item", { hasText: name }).click();
-    await expect(page.locator(".desktop-shell__term-host")).toBeVisible({ timeout: 10_000 });
-    await page.locator(".desktop-shell__term-host").click();
-    // Wait for xterm + WS to fully initialize and consume initial replay
-    await page.waitForTimeout(1500);
+  test("plain text + Enter flows to the pane", async ({ page, ctx }) => {
+    const name = await ctx.createSession("kb-cc"); // plain sh — deterministic echo, no zsh ghost
+    await openAndFocus(page, name);
 
     await page.keyboard.type("echo KEY_CONFORMANCE_OK");
     await page.waitForTimeout(200);
@@ -35,18 +40,8 @@ test.describe("key conformance (desktop xterm.onData path)", () => {
   });
 
   test("Backspace deletes characters", async ({ page, ctx }) => {
-    const name = uniqSession("shell");
-    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
-
-    await page.goto("/");
-    await bindSecret(page);
-    await page.reload();
-
-    await openSidebar(page);
-    await page.locator(".session-list__item", { hasText: name }).click();
-    await expect(page.locator(".desktop-shell__term-host")).toBeVisible({ timeout: 10_000 });
-    await page.locator(".desktop-shell__term-host").click();
-    await page.waitForTimeout(1500);
+    const name = await ctx.createSession("kb-cc"); // plain sh — deterministic echo, no zsh ghost
+    await openAndFocus(page, name);
 
     await page.keyboard.type("echo BAD");
     await page.waitForTimeout(200);
@@ -67,22 +62,12 @@ test.describe("key conformance (desktop xterm.onData path)", () => {
   });
 
   test("Ctrl-C interrupts a running command", async ({ page, ctx }) => {
-    const name = uniqSession("shell");
-    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
+    const name = await ctx.createSession("kb-cc"); // plain sh — deterministic echo, no zsh ghost
+    await openAndFocus(page, name);
 
-    await page.goto("/");
-    await bindSecret(page);
-    await page.reload();
-
-    await openSidebar(page);
-    await page.locator(".session-list__item", { hasText: name }).click();
-    await expect(page.locator(".desktop-shell__term-host")).toBeVisible({ timeout: 10_000 });
-    await page.locator(".desktop-shell__term-host").click();
-    await page.waitForTimeout(1500);
-
-    // Avoid putting any test-marker substring in the COMMAND text itself, so
-    // the only way it appears in the captured pane is via stdout (which proves
-    // the command ran — i.e. Ctrl-C failed).
+    // Keep the test-marker substring OUT of the command text itself, so the
+    // only way it appears in the captured pane is via stdout (i.e. Ctrl-C
+    // failed and the command actually ran).
     await page.keyboard.type("sleep 10 && echo SHOULD_NOT_PRINT");
     await page.waitForTimeout(200);
     await page.keyboard.press("Enter");
@@ -96,8 +81,8 @@ test.describe("key conformance (desktop xterm.onData path)", () => {
 
     const captured = ctx.tmuxE2E(["capture-pane", "-p", "-t", name]);
     expect(captured).toContain("AFTER_CTRL_C");
-    // SHOULD_NOT_PRINT appears once in the prompt line (typed command); if Ctrl-C
-    // failed it would also appear as an echoed stdout line. Require exactly 1 hit.
+    // SHOULD_NOT_PRINT appears once in the typed command line; a second
+    // occurrence as echoed stdout would mean Ctrl-C did not interrupt.
     const occurrences = (captured.match(/SHOULD_NOT_PRINT/g) ?? []).length;
     expect(occurrences).toBe(1);
 
