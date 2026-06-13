@@ -98,7 +98,21 @@ export class SessionBroadcaster {
       const len = this.offset - start;
       if (len > 0) {
         const buf = new Uint8Array(len);
-        try { readSync(this.fd, buf, 0, len, start); e.write(buf); } catch { /* best effort */ }
+        try {
+          readSync(this.fd, buf, 0, len, start);
+          // Starting at a line boundary avoids mid-line corruption. A residual
+          // mid-escape-sequence risk across the newline is rare and the visible
+          // screen (end of stream) is always correct; a fully clean rebuild from
+          // byte 0 is a possible P1 refinement.
+          if (start > 0) {
+            const nlIdx = buf.indexOf(0x0a);
+            e.write(nlIdx !== -1 ? buf.subarray(nlIdx + 1) : buf);
+          } else {
+            e.write(buf);
+          }
+        } catch (err) {
+          logger.warn({ session: this.session, err }, "emulator prime read failed");
+        }
       }
     }
     this.emulator = e;
@@ -228,12 +242,12 @@ function shellQuote(s: string): string {
 export class BroadcasterRegistry {
   private map = new Map<string, SessionBroadcaster>();
 
-  constructor(private run: TmuxRunner = tmux) {}
+  constructor(private run: TmuxRunner = tmux, private emulatorEnabled?: boolean) {}
 
   async get(session: string): Promise<SessionBroadcaster> {
     const existing = this.map.get(session);
     if (existing) return existing;
-    const b = new SessionBroadcaster(session, this.run);
+    const b = new SessionBroadcaster(session, this.run, this.emulatorEnabled);
     this.map.set(session, b);
     await b.start();
     return b;

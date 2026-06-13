@@ -1,4 +1,4 @@
-import { test, expect, afterEach } from "bun:test";
+import { test, expect } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,7 +6,6 @@ import { join } from "node:path";
 // Isolate: private log dir so we never touch ~/.cache/tmux-hub.
 const dir = mkdtempSync(join(tmpdir(), "emu-attach-"));
 process.env.TMUX_HUB_LOG_DIR = dir;
-afterEach(() => { /* keep dir until process exit; cheap */ });
 
 // Fake tmux runner: pipe-pane succeeds; we drive the log file ourselves.
 const fakeRun = async () => ({ stdout: "", stderr: "", code: 0 });
@@ -19,7 +18,13 @@ test("attach with EMULATOR_ENABLED sends a coherent snapshot, not a raw slice", 
   await b.start();
   // simulate pane output landing in the log
   await Bun.write(b.logPath, "echo hi\r\nhi\r\n\x1b[31mRED\x1b[0m\r\n");
-  await new Promise((r) => setTimeout(r, 30)); // let poll ingest
+
+  // Deterministic wait: poll until broadcaster has ingested at least one byte,
+  // with a 500 ms safety timeout instead of a fixed sleep.
+  const deadline = Date.now() + 500;
+  while (b.bytesBroadcast() === 0 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 5));
+  }
 
   const frames: string[] = [];
   b.attachWithReplay((chunk: Uint8Array | string) => {
