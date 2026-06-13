@@ -9,7 +9,7 @@
     "build": "bun run build:web",
     "start": "bun run src/server/main.ts",
     "lint:tests": "bun run tests/helpers/lint-no-default-socket.ts",
-    "test": "bun run lint:tests && bun test tests/unit tests/integration",
+    "test": "bun run lint:tests && bun test --bail tests/unit tests/integration",
     "test:e2e": "playwright test tests/e2e",
     "screenshots:readme": "playwright test --config scripts/capture-readme.config.ts"
   },
