@@ -104,6 +104,9 @@ export class InputRouter {
       if (r.code !== 0) {
         logger.warn({ session, cols, rows, stderr: r.stderr }, "resize-window failed");
       }
+      // Report the applied (clamped) size so the caller can keep the emulator
+      // grid aligned with the pane.
+      return { cols, rows };
     }
     return {};
   }

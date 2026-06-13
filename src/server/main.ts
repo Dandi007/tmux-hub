@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { SessionRegistry } from "./session-registry";
 import { SseHub } from "./sse";
-import { BroadcasterRegistry } from "./output-broadcaster";
+import { BroadcasterRegistry, type SessionBroadcaster } from "./output-broadcaster";
 import { InputRouter, HubError } from "./input-router";
 import { pinViewport, getNativeAttachCount } from "./viewport-pinner";
 import { tmux } from "./tmux-cmd";
@@ -210,6 +210,9 @@ type WsData = {
   rows: number;
   connId: string;
   unsubs: Array<() => void>;
+  // The session's broadcaster, set after attach so resize messages can keep the
+  // emulator grid aligned with the pane.
+  broadcaster?: SessionBroadcaster;
 };
 
 function clampInt(v: number, lo: number, hi: number, fallback: number): number {
@@ -263,6 +266,12 @@ Bun.serve({
       const { sessionName, cols, rows, connId } = ws.data;
       logger.info({ session: sessionName, cols, rows, connId }, "ws open");
 
+      // Authoritative pane size for the emulator snapshot. Defaults to this
+      // client's requested size (web owns → we pin the pane to it below); when a
+      // native client owns the pane, it is overwritten with the queried size.
+      let paneCols = cols;
+      let paneRows = rows;
+
       // Ownership guard: skip pin if native client attached
       let attachCount = 0;
       try {
@@ -289,6 +298,8 @@ Bun.serve({
             const nc = parts[0] ?? NaN;
             const nr = parts[1] ?? NaN;
             if (Number.isFinite(nc) && Number.isFinite(nr) && nc > 0 && nr > 0) {
+              paneCols = nc;
+              paneRows = nr;
               try { ws.send(JSON.stringify({ kind: "viewport", cols: nc, rows: nr, owner: "native" })); } catch {}
             } else {
               logger.warn({ session: sessionName, raw: sizeOut.stdout }, "viewport query returned invalid size");
@@ -309,13 +320,14 @@ Bun.serve({
         return;
       }
       if (b.ring.truncated()) sse.emit({ event: "replay_truncated", payload: { name: sessionName } });
+      ws.data.broadcaster = b;
 
       const unsubEvents = b.onEvent((ev) => {
         if (ev.kind === "replay_truncated") {
           sse.emit({ event: "replay_truncated", payload: { name: sessionName } });
         }
       });
-      const unsubData = b.attachWithReplay((chunk) => { try { ws.send(chunk); } catch {} });
+      const unsubData = b.attachWithReplay((chunk) => { try { ws.send(chunk); } catch {} }, paneCols, paneRows);
       ws.data.unsubs.push(unsubEvents, unsubData);
     },
     async close(ws: ServerWebSocket<WsData>, code: number, reason: string) {
@@ -347,6 +359,10 @@ Bun.serve({
           try {
             ws.send(JSON.stringify({ kind: "viewport", cols: result.cols, rows: result.rows, owner: "native" }));
           } catch {}
+        } else if (!result?.skipped && result?.cols && result?.rows) {
+          // Web resize applied → pane changed size; keep the emulator grid aligned
+          // so later snapshots stay coherent at the new width.
+          ws.data.broadcaster?.syncEmulatorSize(result.cols, result.rows);
         }
       }).catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : String(e);

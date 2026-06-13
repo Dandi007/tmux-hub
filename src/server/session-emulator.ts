@@ -26,8 +26,10 @@ export class SessionEmulator {
   private readonly core: { writeSync(data: string): void };
 
   constructor(
-    public readonly cols: number,
-    public readonly rows: number,
+    // Mutable: resize() keeps these in sync so callers can read the live grid
+    // size (used by the broadcaster to detect when a re-attach needs a resize).
+    public cols: number,
+    public rows: number,
     private readonly scrollbackLines: number,
   ) {
     this.term = new Terminal({ cols, rows, scrollback: scrollbackLines, allowProposedApi: true });
@@ -55,7 +57,10 @@ export class SessionEmulator {
 
   resize(cols: number, rows: number): void {
     if (this.disposed) return;
+    if (cols === this.cols && rows === this.rows) return;
     this.term.resize(cols, rows);
+    this.cols = cols;
+    this.rows = rows;
   }
 
   dispose(): void {
