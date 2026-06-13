@@ -27,6 +27,8 @@
     "xterm-addon-fit": "^0.8.0"
   },
   "dependencies": {
+    "@xterm/addon-serialize": "0.14.0",
+    "@xterm/headless": "6.0.0",
     "hono": "^4.12.21",
     "pino": "^10.3.1",
     "xterm-addon-canvas": "^0.5.0",
