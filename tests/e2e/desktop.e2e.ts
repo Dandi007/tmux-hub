@@ -1,96 +1,69 @@
 import { join } from "node:path";
 import { test, expect } from "./fixtures";
-import { bindSecret, uniqSession } from "./helpers";
-import type { Page } from "@playwright/test";
+import { bindSecret } from "./helpers";
+import type { Page, Locator } from "@playwright/test";
 
-async function openSidebar(page: Page): Promise<void> {
-  await page.locator(".desktop-shell__sidebar-toggle").click();
-  await page.waitForTimeout(300);
+// The desktop shell is a tab-bar UI (one tab per managed session). These tests
+// drive it the way a user does: sessions are born through the hub's managed
+// launch path (ctx.createSession / the + button), never side-loaded as raw
+// tmux sessions — the registry only surfaces managed sessions, so a raw
+// `tmux new-session` would be invisible and prove nothing.
+
+function tab(page: Page, name: string): Locator {
+  return page.locator(`.tab-bar__tab[data-session="${name}"]`);
 }
 
-async function selectSessionViaSidebar(page: Page, name: string): Promise<void> {
-  await openSidebar(page);
-  await page.locator(`.session-list__item[data-session-name="${name}"]`).click();
-  // sidebar auto-closes on select
+async function openApp(page: Page): Promise<void> {
+  await page.goto("/");
+  await bindSecret(page);
+  await page.reload();
 }
 
-test.describe("desktop view", () => {
-  test("dashboard renders session list and attaches terminal", async ({ page, ctx }) => {
-    const name = uniqSession("shell");
-    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
+test.describe("desktop tab-bar", () => {
+  test("managed session shows a tab and attaches its terminal", async ({ page, ctx }) => {
+    const name = await ctx.createSession();
 
-    await page.goto("/");
-    await bindSecret(page);
-    await page.reload();
+    await openApp(page);
 
-    await openSidebar(page);
-    await expect(page.locator(`.session-list__item[data-session-name="${name}"]`))
-      .toBeVisible({ timeout: 10_000 });
-    await page.locator(`.session-list__item[data-session-name="${name}"]`).click();
-    await expect(page.locator(".session-picker__name")).toHaveText(name, { timeout: 5_000 });
+    await expect(tab(page, name)).toBeVisible({ timeout: 10_000 });
+    await tab(page, name).click();
+    await expect(tab(page, name)).toHaveClass(/is-active/, { timeout: 5_000 });
     await expect(page.locator(".desktop-shell__term-host")).toBeVisible();
 
     ctx.tmuxE2E(["kill-session", "-t", name]);
   });
 
-  test("kill button requires confirm modal — cancel keeps session alive", async ({ page, ctx }) => {
-    const name = uniqSession("shell");
-    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sleep 60"]);
+  test("close (×) opens confirm modal — cancel keeps the session alive", async ({ page, ctx }) => {
+    const name = await ctx.createSession();
 
-    await page.goto("/");
-    await bindSecret(page);
-    await page.reload();
+    await openApp(page);
 
-    await selectSessionViaSidebar(page, name);
-    await page.locator(".session-picker__kill").click();
+    await tab(page, name).click();
+    await tab(page, name).locator(".tab-bar__close").click();
 
+    await expect(page.locator(".modal-dialog")).toBeVisible();
+    await expect(page.locator(".modal-dialog__title")).toHaveText("关闭会话");
     await page.getByRole("button", { name: "取消", exact: true }).click();
+    await expect(page.locator(".modal-dialog")).not.toBeVisible();
 
     expect(ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n")).toContain(name);
 
     ctx.tmuxE2E(["kill-session", "-t", name]);
   });
 
-  test("desktop image attach: toolbar button → upload → path injected to pane", async ({ page, ctx }) => {
-    const name = uniqSession("shell");
-    ctx.tmuxE2E(["new-session", "-d", "-s", name, "-x", "120", "-y", "40", "sh"]);
+  test("close (×) confirm destroys the session and removes its tab", async ({ page, ctx }) => {
+    const keep = await ctx.createSession();
+    const kill = await ctx.createSession();
 
-    await page.goto("/");
-    await bindSecret(page);
-    await page.reload();
+    await openApp(page);
 
-    await selectSessionViaSidebar(page, name);
-    await page.waitForTimeout(800);
-
-    const fixturePath = join(process.cwd(), "tests/e2e/fixtures/red.png");
-    await page.locator("input.mobile-toolbar__image-attach-input").setInputFiles(fixturePath);
-
-    // Give upload + send-keys round-trip time
-    await page.waitForTimeout(800);
-    const captured = ctx.tmuxE2E(["capture-pane", "-p", "-t", name]);
-    expect(captured).toMatch(/[\/\w-]+\.png/);
-
-    ctx.tmuxE2E(["kill-session", "-t", name]);
-  });
-
-  test("kill confirm destroys session and removes from sidebar", async ({ page, ctx }) => {
-    const keep = uniqSession("keep");
-    const kill = uniqSession("kill");
-    ctx.tmuxE2E(["new-session", "-d", "-s", keep, "sh"]);
-    ctx.tmuxE2E(["new-session", "-d", "-s", kill, "sleep 60"]);
-
-    await page.goto("/");
-    await bindSecret(page);
-    await page.reload();
-
-    await selectSessionViaSidebar(page, kill);
-    await page.locator(".session-picker__kill").click();
+    await expect(tab(page, kill)).toBeVisible({ timeout: 10_000 });
+    await tab(page, kill).click();
+    await tab(page, kill).locator(".tab-bar__close").click();
     await expect(page.locator(".modal-dialog")).toBeVisible();
     await page.locator(".modal-dialog__actions button.is-danger").click();
 
-    await openSidebar(page);
-    await expect(page.locator(`.session-list__item[data-session-name="${kill}"]`))
-      .toHaveCount(0, { timeout: 10_000 });
+    await expect(tab(page, kill)).toHaveCount(0, { timeout: 10_000 });
     const sessions = ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n");
     expect(sessions).not.toContain(kill);
     expect(sessions).toContain(keep);
@@ -98,150 +71,156 @@ test.describe("desktop view", () => {
     ctx.tmuxE2E(["kill-session", "-t", keep]);
   });
 
-  test("rename inline edit commits on Enter", async ({ page, ctx }) => {
-    const name = uniqSession("shell");
+  test("rename via context menu commits on Enter", async ({ page, ctx }) => {
+    const name = await ctx.createSession();
     const renamed = `${name}-r`;
-    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
 
-    await page.goto("/");
-    await bindSecret(page);
-    await page.reload();
+    await openApp(page);
 
-    await openSidebar(page);
-    await expect(page.locator(`.session-list__item[data-session-name="${name}"]`))
-      .toBeVisible({ timeout: 10_000 });
-    await page.locator(`.session-list__item[data-session-name="${name}"] .session-list__rename`).click();
+    await expect(tab(page, name)).toBeVisible({ timeout: 10_000 });
+    await tab(page, name).click({ button: "right" });
+    await page.locator(".context-menu__item", { hasText: "编辑名称" }).click();
 
-    const input = page.locator(".session-list__input");
+    const input = page.locator(".tab-bar__rename-input");
     await expect(input).toBeVisible();
     await input.fill(renamed);
     await input.press("Enter");
 
-    await expect(page.locator(`.session-list__item[data-session-name="${renamed}"]`))
-      .toBeVisible({ timeout: 10_000 });
+    await expect(tab(page, renamed)).toBeVisible({ timeout: 10_000 });
 
-    try { ctx.tmuxE2E(["kill-session", "-t", renamed]); } catch {}
+    try { ctx.tmuxE2E(["kill-session", "-t", renamed]); } catch { /* renamed away */ }
   });
 
-  test("rename inline edit cancels on Escape", async ({ page, ctx }) => {
-    const name = uniqSession("shell");
-    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
+  test("rename via context menu cancels on Escape", async ({ page, ctx }) => {
+    const name = await ctx.createSession();
 
-    await page.goto("/");
-    await bindSecret(page);
-    await page.reload();
+    await openApp(page);
 
-    await openSidebar(page);
-    await expect(page.locator(`.session-list__item[data-session-name="${name}"]`))
-      .toBeVisible({ timeout: 10_000 });
-    await page.locator(`.session-list__item[data-session-name="${name}"] .session-list__rename`).click();
+    await expect(tab(page, name)).toBeVisible({ timeout: 10_000 });
+    await tab(page, name).click({ button: "right" });
+    await page.locator(".context-menu__item", { hasText: "编辑名称" }).click();
 
-    const input = page.locator(".session-list__input");
+    const input = page.locator(".tab-bar__rename-input");
     await expect(input).toBeVisible();
     await input.fill("ignored-value");
     await input.press("Escape");
 
-    await expect(input).not.toBeVisible();
-    await expect(page.locator(`.session-list__item[data-session-name="${name}"]`))
-      .toBeVisible();
+    await expect(input).toHaveCount(0);
+    await expect(tab(page, name)).toBeVisible();
 
     ctx.tmuxE2E(["kill-session", "-t", name]);
   });
 
-  test("switching sessions updates header name", async ({ page, ctx }) => {
-    const a = uniqSession("alpha");
-    const b = uniqSession("beta");
-    ctx.tmuxE2E(["new-session", "-d", "-s", a, "sh"]);
-    ctx.tmuxE2E(["new-session", "-d", "-s", b, "sh"]);
+  test("switching tabs flips the active tab and reattaches that session", async ({ page, ctx }) => {
+    const a = await ctx.createSession();
+    const b = await ctx.createSession();
+    ctx.tmuxE2E(["send-keys", "-t", a, "echo ALPHA_DESKTOP_MARK", "Enter"]);
+    ctx.tmuxE2E(["send-keys", "-t", b, "echo BETA_DESKTOP_MARK", "Enter"]);
 
-    await page.goto("/");
-    await bindSecret(page);
-    await page.reload();
+    await openApp(page);
 
-    await selectSessionViaSidebar(page, a);
-    await expect(page.locator(".session-picker__name")).toHaveText(a, { timeout: 5_000 });
+    await expect(tab(page, a)).toBeVisible({ timeout: 10_000 });
+    await tab(page, a).click();
+    await expect(tab(page, a)).toHaveClass(/is-active/, { timeout: 5_000 });
+    await expect(tab(page, b)).not.toHaveClass(/is-active/);
+    expect(ctx.tmuxE2E(["capture-pane", "-p", "-t", a])).toContain("ALPHA_DESKTOP_MARK");
 
-    await selectSessionViaSidebar(page, b);
-    await expect(page.locator(".session-picker__name")).toHaveText(b, { timeout: 5_000 });
+    await tab(page, b).click();
+    await expect(tab(page, b)).toHaveClass(/is-active/, { timeout: 5_000 });
+    await expect(tab(page, a)).not.toHaveClass(/is-active/);
+    await expect(page.locator(".desktop-shell__term-host")).toBeVisible();
+    expect(ctx.tmuxE2E(["capture-pane", "-p", "-t", b])).toContain("BETA_DESKTOP_MARK");
 
     ctx.tmuxE2E(["kill-session", "-t", a]);
     ctx.tmuxE2E(["kill-session", "-t", b]);
   });
 
-  test("template drawer launches a new session", async ({ page, ctx }) => {
-    await page.goto("/");
-    await bindSecret(page);
-    await page.reload();
+  test("+ button launches a new managed zsh session", async ({ page, ctx }) => {
+    await openApp(page);
 
-    await openSidebar(page);
-    const drawer = page.locator(".template-drawer");
-    await expect(drawer).toBeVisible({ timeout: 10_000 });
-    const shellBtn = drawer.locator(".template-drawer__btn").first();
-    await expect(shellBtn).toBeVisible();
-    await shellBtn.click();
+    await page.locator(".tab-bar__new").click();
 
     let names: string[] = [];
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 40; i++) {
       names = ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n").filter(Boolean);
       if (names.some((n) => n.startsWith("shell-"))) break;
       await page.waitForTimeout(200);
     }
     const newName = names.find((n) => n.startsWith("shell-"));
-    expect(newName).toBeTruthy();
+    expect(newName, `expected a shell-* session in ${JSON.stringify(names)}`).toBeTruthy();
 
-    await openSidebar(page);
-    await expect(page.locator(`.session-list__item[data-session-name="${newName!}"]`))
-      .toBeVisible({ timeout: 10_000 });
+    await expect(tab(page, newName!)).toBeVisible({ timeout: 10_000 });
 
     ctx.tmuxE2E(["kill-session", "-t", newName!]);
   });
 
-  test("session created externally appears in sidebar via SSE", async ({ page, ctx }) => {
-    await page.goto("/");
-    await bindSecret(page);
-    await page.reload();
-    await page.waitForTimeout(1000);
+  test("a managed session created after load appears as a tab via SSE", async ({ page, ctx }) => {
+    await openApp(page);
+    await page.waitForTimeout(500);
 
-    const name = uniqSession("late");
-    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
+    const name = await ctx.createSession();
 
-    await openSidebar(page);
-    await expect(page.locator(`.session-list__item[data-session-name="${name}"]`))
-      .toBeVisible({ timeout: 10_000 });
+    await expect(tab(page, name)).toBeVisible({ timeout: 10_000 });
 
     ctx.tmuxE2E(["kill-session", "-t", name]);
   });
 
-  test("session killed externally disappears from sidebar via SSE", async ({ page, ctx }) => {
-    const name = uniqSession("ephemeral");
-    ctx.tmuxE2E(["new-session", "-d", "-s", name, "sh"]);
+  test("an unmanaged tmux session never shows up (managed-only filter)", async ({ page, ctx }) => {
+    await openApp(page);
+    await page.waitForTimeout(500);
 
-    await page.goto("/");
-    await bindSecret(page);
-    await page.reload();
+    // Side-load a raw, unmanaged session directly onto the tmux server. The hub
+    // must NOT surface it — only sessions it manages are shown.
+    const external = `ext-${Date.now().toString().slice(-12)}`;
+    ctx.tmuxE2E(["new-session", "-d", "-s", external, "sh"]);
 
-    await openSidebar(page);
-    await expect(page.locator(`.session-list__item[data-session-name="${name}"]`))
-      .toBeVisible({ timeout: 10_000 });
+    // Give the registry several poll cycles; the tab must stay absent.
+    await page.waitForTimeout(3_000);
+    await expect(tab(page, external)).toHaveCount(0);
+
+    ctx.tmuxE2E(["kill-session", "-t", external]);
+  });
+
+  test("a session killed externally disappears from the tab-bar via SSE", async ({ page, ctx }) => {
+    const name = await ctx.createSession();
+
+    await openApp(page);
+    await expect(tab(page, name)).toBeVisible({ timeout: 10_000 });
 
     ctx.tmuxE2E(["kill-session", "-t", name]);
 
-    await expect(page.locator(`.session-list__item[data-session-name="${name}"]`))
-      .toHaveCount(0, { timeout: 10_000 });
+    await expect(tab(page, name)).toHaveCount(0, { timeout: 10_000 });
   });
 
-  test("desktop clipboard paste: image item intercepted + path injected", async ({ page, ctx }) => {
-    const name = uniqSession("shell");
-    ctx.tmuxE2E(["new-session", "-d", "-s", name, "-x", "120", "-y", "40", "sh"]);
+  test("image attach inserts the uploaded path into the input bar", async ({ page, ctx }) => {
+    const name = await ctx.createSession();
 
-    await page.goto("/");
-    await bindSecret(page);
-    await page.reload();
+    await openApp(page);
 
-    await selectSessionViaSidebar(page, name);
+    await expect(tab(page, name)).toBeVisible({ timeout: 10_000 });
+    await tab(page, name).click();
+    await page.waitForTimeout(500);
+
+    const fixturePath = join(process.cwd(), "tests/e2e/fixtures/red.png");
+    await page.locator("input.mobile-toolbar__image-attach-input").setInputFiles(fixturePath);
+
+    const ta = page.locator(".input-bar__textarea");
+    await expect(ta).toHaveValue(/\.png\s*$/, { timeout: 5_000 });
+
+    ctx.tmuxE2E(["kill-session", "-t", name]);
+  });
+
+  test("clipboard paste of an image injects the path into the pane", async ({ page, ctx }) => {
+    const name = await ctx.createSession();
+
+    await openApp(page);
+
+    await expect(tab(page, name)).toBeVisible({ timeout: 10_000 });
+    await tab(page, name).click();
     await page.waitForTimeout(800);
 
-    // Synthesize a paste event with an image item on the root desktop-shell element.
+    // Synthesize a paste with an image item on the root desktop-shell element.
+    // The root paste handler uploads then sends the path straight to the pane.
     const RED_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
     await page.evaluate((b64: string) => {
       const bin = atob(b64);
@@ -254,7 +233,7 @@ test.describe("desktop view", () => {
       document.querySelector(".desktop-shell")!.dispatchEvent(ev);
     }, RED_PNG_B64);
 
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(1000);
     const captured = ctx.tmuxE2E(["capture-pane", "-p", "-t", name]);
     expect(captured).toMatch(/[\/\w-]+\.png/);
 
