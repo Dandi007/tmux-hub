@@ -40,6 +40,11 @@ export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: false,
   workers: 1,
+  // Fail-fast: in CI, abort the whole run after the first failure instead of
+  // letting every remaining test burn its full per-test timeout. A stale or
+  // hung test must fail the suite fast, not drag it to the job-time ceiling.
+  maxFailures: process.env.CI ? 1 : undefined,
+  retries: 0,
   reporter: process.env.CI ? "github" : "list",
   timeout: 30_000,
   expect: { timeout: 5_000 },
@@ -56,7 +61,7 @@ export default defineConfig({
       `bun run start`,
     url: `http://127.0.0.1:${E2E_PORT}/system/health`,
     reuseExistingServer: false,
-    timeout: 30_000,
+    timeout: 20_000,
     stdout: "pipe",
     stderr: "pipe",
     env: { TMUX_HUB_E2E_ENV_FILE: E2E_ENV_FILE },
