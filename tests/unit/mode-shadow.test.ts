@@ -39,3 +39,7 @@ test("mouse encoding cleared on 1006l", async () => {
 test("emits nothing for a clean terminal", async () => {
   expect(await feed([])).toBe("");
 });
+
+test("captures combined DECSET (mouse tracking + SGR encoding in one CSI)", async () => {
+  expect(await feed(["\x1b[?1000;1006h"])).toContain("\x1b[?1006h");
+});

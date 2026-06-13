@@ -17,21 +17,22 @@ export class ModeShadow {
 
   attach(term: Terminal): void {
     term.parser.registerCsiHandler({ prefix: "?", final: "h" }, (params) => {
-      this.setDecset(params as number[], true);
+      this.setDecset(params, true);
       return false;
     });
     term.parser.registerCsiHandler({ prefix: "?", final: "l" }, (params) => {
-      this.setDecset(params as number[], false);
+      this.setDecset(params, false);
       return false;
     });
     term.parser.registerCsiHandler({ final: "r" }, (params) => {
-      this.setScrollRegion(params as number[]);
+      this.setScrollRegion(params);
       return false;
     });
   }
 
-  private setDecset(params: number[], on: boolean): void {
+  private setDecset(params: (number | number[])[], on: boolean): void {
     for (const p of params) {
+      if (typeof p !== "number") continue;
       if (p === 25) {
         this.cursorHidden = !on;
       } else if (p === 1006 || p === 1005 || p === 1015) {
@@ -41,14 +42,17 @@ export class ModeShadow {
     }
   }
 
-  private setScrollRegion(params: number[]): void {
+  private setScrollRegion(params: (number | number[])[]): void {
     // CSI r  -> reset to full screen; CSI t;b r -> set margins
-    if (params.length < 2 || !params[0] || !params[1]) {
+    // Zero means "not specified", which is treated as reset per DECSTBM spec.
+    const top = typeof params[0] === "number" ? params[0] : 0;
+    const bot = typeof params[1] === "number" ? params[1] : 0;
+    if (top === 0 || bot === 0) {
       this.scrollTop = null;
       this.scrollBottom = null;
     } else {
-      this.scrollTop = params[0]!;
-      this.scrollBottom = params[1]!;
+      this.scrollTop = top;
+      this.scrollBottom = bot;
     }
   }
 

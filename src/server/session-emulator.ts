@@ -46,6 +46,7 @@ export class SessionEmulator {
   }
 
   /** Coherent self-contained restore stream: reset + serialized buffer + dropped modes. */
+  // Default is the constructor cap (scrollbackLines field), evaluated at call time.
   snapshot(scrollbackLines: number = this.scrollbackLines): string {
     if (this.disposed) return "\x1bc";
     const body = this.serializer.serialize({ scrollback: scrollbackLines });
