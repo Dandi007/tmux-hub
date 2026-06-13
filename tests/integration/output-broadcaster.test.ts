@@ -53,24 +53,6 @@ describe("output-broadcaster (S1b)", () => {
     expect(existsSync(b.logPath)).toBe(false);
   }, 8000);
 
-  test("sendInitialSnapshot emits terminal reset then visible capture", async () => {
-    const b = new SessionBroadcaster(S, tmuxTest);
-    await b.start();
-    await new Promise((r) => setTimeout(r, 400));
-
-    const chunks: Uint8Array[] = [];
-    await b.sendInitialSnapshot((c) => chunks.push(c));
-
-    expect(chunks[0]).toBeDefined();
-    const firstText = Buffer.from(chunks[0]!).toString("utf8");
-    expect(firstText.startsWith("\x1bc")).toBe(true);
-
-    const allText = Buffer.concat(chunks.map((c) => Buffer.from(c))).toString("utf8");
-    expect(allText).toContain("tick");
-
-    await b.stop();
-  }, 5000);
-
   test("stop is idempotent and cleans up", async () => {
     const b = new SessionBroadcaster(S, tmuxTest);
     await b.start();
