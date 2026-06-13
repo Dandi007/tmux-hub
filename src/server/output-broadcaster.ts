@@ -132,6 +132,39 @@ export class SessionBroadcaster {
     return () => { this.subscribers.delete(send); };
   }
 
+  // Authoritative restore stream for the visible screen + scrollback, sourced
+  // from `tmux capture-pane` — which tmux reflows to the pane's CURRENT size —
+  // rather than replaying the width-frozen pipe-pane log. Replaying history
+  // authored at a different width corrupts a non-alt-screen TUI (wide rules
+  // wrap and overlay text, in-place redraw frames stack). capture-pane sidesteps
+  // that entirely: the snapshot always matches the live pane size the client was
+  // just pinned to. `-J` joins wrapped lines so the client re-wraps to its own
+  // width; `-e` keeps SGR colors. capture-pane emits LF-separated lines, so we
+  // convert to CRLF before feeding xterm (no implicit carriage return otherwise).
+  // DEC private modes are not captured by tmux, so we append the emulator's
+  // shadow-tracked modes. Falls back to the emulator serialize if capture fails.
+  private async captureSnapshot(cols: number, rows: number): Promise<string> {
+    const emu = this.ensureEmulator(cols, rows); // keep shadow primed + live-fed for modes
+    try {
+      const r = await this.run([
+        "capture-pane", "-e", "-p", "-J",
+        "-t", `${this.session}:0.0`,
+        "-S", `-${SNAPSHOT_SCROLLBACK_LINES}`,
+      ]);
+      if (r.code === 0) {
+        const body = r.stdout.replace(/\r?\n/g, "\r\n");
+        return "\x1bc" + body + emu.serializeModes();
+      }
+      logger.warn(
+        { session: this.session, code: r.code, stderr: r.stderr },
+        "capture-pane failed; falling back to emulator snapshot",
+      );
+    } catch (e) {
+      logger.warn({ session: this.session, err: e }, "capture-pane threw; falling back to emulator snapshot");
+    }
+    return emu.snapshot();
+  }
+
   // Replay buffered history (tail of log file up to REPLAY_CAP bytes) then
   // attach for live updates. Bytes that arrive during the replay read are
   // buffered into a tap and flushed AFTER the history so that the subscriber
@@ -139,7 +172,7 @@ export class SessionBroadcaster {
   // `paneCols`/`paneRows` are the authoritative pane size the caller just pinned
   // the tmux window to (or the native owner's size). The emulator is built/kept
   // at that size; invalid/omitted values fall back to the WINDOW_* defaults.
-  attachWithReplay(send: Subscriber, paneCols?: number, paneRows?: number): () => void {
+  async attachWithReplay(send: Subscriber, paneCols?: number, paneRows?: number): Promise<() => void> {
     if (this.fd === null) {
       // Broadcaster hasn't started — fall back to plain attach.
       this.subscribers.add(send);
@@ -147,18 +180,20 @@ export class SessionBroadcaster {
     }
     const pending: Uint8Array[] = [];
     const tap = (chunk: Uint8Array): void => { pending.push(chunk); };
+    // Register the tap BEFORE capturing so every live byte emitted after this
+    // point lands in `pending`; the capture reflects state at/after this moment,
+    // so the overlap is at most a few self-correcting bytes and there is no gap.
     this.subscribers.add(tap);
 
     const enc = new TextEncoder();
     try {
       if (this.emulatorEnabled) {
-        // Coherent snapshot bound to the current offset; live bytes after this
-        // point are captured by `tap` and flushed below (no overlap, no gap).
-        // snapshot() and the tap registration are synchronous + single-threaded,
-        // so nothing interleaves between binding and flush.
+        // Authoritative snapshot from tmux capture-pane (correctly reflowed to
+        // the live pane size); live bytes during the async capture are buffered
+        // by `tap` and flushed below in order.
         const cols = normalizeDim(paneCols, WINDOW_COLS);
         const rows = normalizeDim(paneRows, WINDOW_ROWS);
-        const snap = this.ensureEmulator(cols, rows).snapshot();
+        const snap = await this.captureSnapshot(cols, rows);
         send(enc.encode(snap));
       } else {
         const upTo = this.offset;

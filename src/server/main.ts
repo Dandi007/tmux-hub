@@ -327,7 +327,7 @@ Bun.serve({
           sse.emit({ event: "replay_truncated", payload: { name: sessionName } });
         }
       });
-      const unsubData = b.attachWithReplay((chunk) => { try { ws.send(chunk); } catch {} }, paneCols, paneRows);
+      const unsubData = await b.attachWithReplay((chunk) => { try { ws.send(chunk); } catch {} }, paneCols, paneRows);
       ws.data.unsubs.push(unsubEvents, unsubData);
     },
     async close(ws: ServerWebSocket<WsData>, code: number, reason: string) {

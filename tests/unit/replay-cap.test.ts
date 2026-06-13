@@ -30,10 +30,10 @@ afterAll(() => {
 });
 
 // ── helpers ──────────────────────────────────────────────────────
-function setupBroadcaster(
+async function setupBroadcaster(
   label: string,
   content: string,
-): { b: SessionBroadcaster; unsubscribe: () => void; chunks: Uint8Array[] } {
+): Promise<{ b: SessionBroadcaster; unsubscribe: () => void; chunks: Uint8Array[] }> {
   // Pin the legacy byte-slice replay path: these assertions describe the
   // pre-emulator slice behavior and must hold regardless of TMUX_HUB_EMULATOR.
   const b = new SessionBroadcaster(`replay-test-${label}`, undefined, false);
@@ -46,7 +46,7 @@ function setupBroadcaster(
   (b as any).offset = contentLen;
 
   const chunks: Uint8Array[] = [];
-  const unsubscribe = b.attachWithReplay((chunk) => chunks.push(chunk));
+  const unsubscribe = await b.attachWithReplay((chunk) => chunks.push(chunk));
   return { b, unsubscribe, chunks };
 }
 
@@ -84,15 +84,15 @@ describe("attachWithReplay replay cap", () => {
   // 400 KB of distinct data makes it easy to verify tail correctness.
   const LARGE = "0123456789".repeat(40_000); // 400 KB > 256 KB cap
 
-  test("first chunk is \\x1bc RIS reset", () => {
-    const { b, unsubscribe, chunks } = setupBroadcaster("ris-reset", LARGE);
+  test("first chunk is \\x1bc RIS reset", async () => {
+    const { b, unsubscribe, chunks } = await setupBroadcaster("ris-reset", LARGE);
     expect(chunks.length).toBeGreaterThanOrEqual(1);
     expect(firstText(chunks[0]!)).toBe("\x1bc");
     teardownBroadcaster(b, unsubscribe);
   });
 
-  test("replay payload ≤ REPLAY_CAP_BYTES when log exceeds cap", () => {
-    const { b, unsubscribe, chunks } = setupBroadcaster("gt-cap", LARGE);
+  test("replay payload ≤ REPLAY_CAP_BYTES when log exceeds cap", async () => {
+    const { b, unsubscribe, chunks } = await setupBroadcaster("gt-cap", LARGE);
 
     // chunks[0] is the RIS reset; data starts at chunks[1]
     const dataChunks = chunks.slice(1);
@@ -102,8 +102,8 @@ describe("attachWithReplay replay cap", () => {
     teardownBroadcaster(b, unsubscribe);
   });
 
-  test("replayed content is exactly the tail of the log", () => {
-    const { b, unsubscribe, chunks } = setupBroadcaster("tail", LARGE);
+  test("replayed content is exactly the tail of the log", async () => {
+    const { b, unsubscribe, chunks } = await setupBroadcaster("tail", LARGE);
 
     const dataChunks = chunks.slice(1);
     const received = concatData(dataChunks);
@@ -113,10 +113,10 @@ describe("attachWithReplay replay cap", () => {
     teardownBroadcaster(b, unsubscribe);
   });
 
-  test("replays entire file when log ≤ REPLAY_CAP_BYTES", () => {
+  test("replays entire file when log ≤ REPLAY_CAP_BYTES", async () => {
     // ~10 KB — well below the 256 KB cap.
     const content = "SHORT_LOG_" + "x".repeat(10_000);
-    const { b, unsubscribe, chunks } = setupBroadcaster("le-cap", content);
+    const { b, unsubscribe, chunks } = await setupBroadcaster("le-cap", content);
 
     const dataChunks = chunks.slice(1);
     const totalDataBytes = dataChunks.reduce((sum, c) => sum + c.length, 0);
@@ -127,14 +127,14 @@ describe("attachWithReplay replay cap", () => {
     teardownBroadcaster(b, unsubscribe);
   });
 
-  test("no data replay when offset is 0 (empty log)", () => {
+  test("no data replay when offset is 0 (empty log)", async () => {
     const b = new SessionBroadcaster("replay-test-empty", undefined, false);
     writeFileSync(b.logPath, "");
     (b as any).fd = openSync(b.logPath, "r");
     (b as any).offset = 0;
 
     const chunks: Uint8Array[] = [];
-    const unsubscribe = b.attachWithReplay((chunk) => chunks.push(chunk));
+    const unsubscribe = await b.attachWithReplay((chunk) => chunks.push(chunk));
 
     // Only the \x1bc reset, no data payload.
     expect(chunks.length).toBe(1);
@@ -143,9 +143,9 @@ describe("attachWithReplay replay cap", () => {
     teardownBroadcaster(b, unsubscribe);
   });
 
-  test("exact cap boundary: log == REPLAY_CAP_BYTES replays full file", () => {
+  test("exact cap boundary: log == REPLAY_CAP_BYTES replays full file", async () => {
     const content = "A".repeat(REPLAY_CAP_BYTES); // exactly 256 KB
-    const { b, unsubscribe, chunks } = setupBroadcaster("exact-cap", content);
+    const { b, unsubscribe, chunks } = await setupBroadcaster("exact-cap", content);
 
     const dataChunks = chunks.slice(1);
     const totalDataBytes = dataChunks.reduce((sum, c) => sum + c.length, 0);
@@ -156,11 +156,11 @@ describe("attachWithReplay replay cap", () => {
     teardownBroadcaster(b, unsubscribe);
   });
 
-  test("exact cap+1 boundary: log == REPLAY_CAP_BYTES + 1 replays tail of cap bytes", () => {
+  test("exact cap+1 boundary: log == REPLAY_CAP_BYTES + 1 replays tail of cap bytes", async () => {
     // Use distinct head/tail: 256KB of "A" + "B" = 256KB+1 total.
     // Head = all A, Tail = 256KB-1 A + "B" — observably different.
     const content = "A".repeat(REPLAY_CAP_BYTES) + "B";
-    const { b, unsubscribe, chunks } = setupBroadcaster(
+    const { b, unsubscribe, chunks } = await setupBroadcaster(
       "cap-plus-1",
       content,
     );
@@ -179,9 +179,9 @@ describe("attachWithReplay replay cap", () => {
     teardownBroadcaster(b, unsubscribe);
   });
 
-  test("subscribe/unsubscribe from attachWithReplay", () => {
+  test("subscribe/unsubscribe from attachWithReplay", async () => {
     const content = "HELLO";
-    const { b, unsubscribe, chunks } = setupBroadcaster("sub", content);
+    const { b, unsubscribe, chunks } = await setupBroadcaster("sub", content);
 
     expect(chunks.length).toBeGreaterThanOrEqual(1);
     expect(b.subscriberCount()).toBeGreaterThanOrEqual(1);
@@ -193,13 +193,13 @@ describe("attachWithReplay replay cap", () => {
     teardownBroadcaster(b, unsubscribe);
   });
 
-  test("fallback to plain attach when fd is null", () => {
+  test("fallback to plain attach when fd is null", async () => {
     const b = new SessionBroadcaster("replay-test-no-fd", undefined, false);
     // Don't set fd — simulate broadcaster that hasn't started.
     (b as any).fd = null;
 
     const chunks: Uint8Array[] = [];
-    const unsubscribe = b.attachWithReplay((chunk) => chunks.push(chunk));
+    const unsubscribe = await b.attachWithReplay((chunk) => chunks.push(chunk));
 
     // Should NOT have sent \x1bc — that only happens with fd set.
     // Falls back to plain attach which just adds subscriber.
