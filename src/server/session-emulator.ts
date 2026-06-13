@@ -55,6 +55,17 @@ export class SessionEmulator {
     return "\x1bc" + body + this.shadow.serializeModes();
   }
 
+  /**
+   * Tracked DEC private modes (mouse reporting, app-cursor keys, scroll region,
+   * cursor visibility, bracketed paste) that `tmux capture-pane` does NOT emit.
+   * Appended to a capture-pane-seeded restore stream so a reattached client
+   * inherits the modes the running app set earlier in the stream.
+   */
+  serializeModes(): string {
+    if (this.disposed) return "";
+    return this.shadow.serializeModes();
+  }
+
   resize(cols: number, rows: number): void {
     if (this.disposed) return;
     if (cols === this.cols && rows === this.rows) return;
