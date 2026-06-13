@@ -34,7 +34,9 @@ function setupBroadcaster(
   label: string,
   content: string,
 ): { b: SessionBroadcaster; unsubscribe: () => void; chunks: Uint8Array[] } {
-  const b = new SessionBroadcaster(`replay-test-${label}`);
+  // Pin the legacy byte-slice replay path: these assertions describe the
+  // pre-emulator slice behavior and must hold regardless of TMUX_HUB_EMULATOR.
+  const b = new SessionBroadcaster(`replay-test-${label}`, undefined, false);
   // SessionBroadcaster's constructor mkdir's LOG_DIR; write our fixture.
   writeFileSync(b.logPath, content);
 
@@ -126,7 +128,7 @@ describe("attachWithReplay replay cap", () => {
   });
 
   test("no data replay when offset is 0 (empty log)", () => {
-    const b = new SessionBroadcaster("replay-test-empty");
+    const b = new SessionBroadcaster("replay-test-empty", undefined, false);
     writeFileSync(b.logPath, "");
     (b as any).fd = openSync(b.logPath, "r");
     (b as any).offset = 0;
@@ -192,7 +194,7 @@ describe("attachWithReplay replay cap", () => {
   });
 
   test("fallback to plain attach when fd is null", () => {
-    const b = new SessionBroadcaster("replay-test-no-fd");
+    const b = new SessionBroadcaster("replay-test-no-fd", undefined, false);
     // Don't set fd — simulate broadcaster that hasn't started.
     (b as any).fd = null;
 

@@ -4,7 +4,15 @@
 // for spike S1a/S1b analysis.
 import { tmux } from "./tmux-cmd";
 import { RingBuffer } from "./ring-buffer";
-import { RING_BUFFER_BYTES, REPLAY_CAP_BYTES } from "./config";
+import {
+  RING_BUFFER_BYTES,
+  REPLAY_CAP_BYTES,
+  EMULATOR_ENABLED,
+  SNAPSHOT_SCROLLBACK_LINES,
+  WINDOW_COLS,
+  WINDOW_ROWS,
+} from "./config";
+import { SessionEmulator } from "./session-emulator";
 import { mkdirSync, openSync, readSync, closeSync, existsSync, unlinkSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -32,13 +40,21 @@ export class SessionBroadcaster {
   readonly logPath: string;
   private fd: number | null = null;
   private offset = 0;
+  private emulator: SessionEmulator | null = null;
   private subscribers = new Set<Subscriber>();
   private eventListeners = new Set<EventListener>();
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
   private pollChunk = new Uint8Array(65536);
 
-  constructor(public readonly session: string, private run: TmuxRunner = tmux) {
+  // emulatorEnabled defaults to the module-level config flag (production wiring);
+  // it is an explicit constructor seam only so tests can pin the path
+  // deterministically without depending on cross-file env/module-cache ordering.
+  constructor(
+    public readonly session: string,
+    private run: TmuxRunner = tmux,
+    private readonly emulatorEnabled: boolean = EMULATOR_ENABLED,
+  ) {
     this.ring = new RingBuffer(RING_BUFFER_BYTES);
     mkdirSync(LOG_DIR, { recursive: true });
     const safe = session.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -70,11 +86,37 @@ export class SessionBroadcaster {
     logger.info({ session: this.session, logPath: this.logPath }, "broadcaster started");
   }
 
-  async sendInitialSnapshot(send: Subscriber): Promise<void> {
-    const enc = new TextEncoder();
-    send(enc.encode("\x1bc"));
-    const r = await this.run(["capture-pane", "-ep", "-t", `${this.session}:0.0`, "-p"]);
-    if (r.code === 0 && r.stdout) send(enc.encode(r.stdout));
+  // Lazily build the emulator on first attach. Prime it from the current log
+  // tail so the snapshot reflects existing history; xterm keeps only the last
+  // `scrollback` lines. Mid-stream resize tracking lands in P1.
+  private ensureEmulator(): SessionEmulator {
+    if (this.emulator) return this.emulator;
+    const e = new SessionEmulator(WINDOW_COLS, WINDOW_ROWS, SNAPSHOT_SCROLLBACK_LINES);
+    if (this.fd !== null && this.offset > 0) {
+      const cap = REPLAY_CAP_BYTES;
+      const start = Math.max(0, this.offset - cap);
+      const len = this.offset - start;
+      if (len > 0) {
+        const buf = new Uint8Array(len);
+        try {
+          readSync(this.fd, buf, 0, len, start);
+          // Starting at a line boundary avoids mid-line corruption. A residual
+          // mid-escape-sequence risk across the newline is rare and the visible
+          // screen (end of stream) is always correct; a fully clean rebuild from
+          // byte 0 is a possible P1 refinement.
+          if (start > 0) {
+            const nlIdx = buf.indexOf(0x0a);
+            e.write(nlIdx !== -1 ? buf.subarray(nlIdx + 1) : buf);
+          } else {
+            e.write(buf);
+          }
+        } catch (err) {
+          logger.warn({ session: this.session, err }, "emulator prime read failed");
+        }
+      }
+    }
+    this.emulator = e;
+    return e;
   }
 
   attach(send: Subscriber): () => void {
@@ -98,20 +140,29 @@ export class SessionBroadcaster {
 
     const enc = new TextEncoder();
     try {
-      const upTo = this.offset;
-      const start = Math.max(0, upTo - REPLAY_CAP_BYTES);
-      const len = upTo - start;
-      // RIS reset clears the terminal state. If we sliced mid-sequence at
-      // `start`, xterm may briefly mis-render the first cells; acceptable
-      // trade-off vs unbounded replay.
-      send(enc.encode("\x1bc"));
-      if (len > 0) {
-        const buf = new Uint8Array(len);
-        readSync(this.fd, buf, 0, len, start);
-        send(buf);
+      if (this.emulatorEnabled) {
+        // Coherent snapshot bound to the current offset; live bytes after this
+        // point are captured by `tap` and flushed below (no overlap, no gap).
+        // snapshot() and the tap registration are synchronous + single-threaded,
+        // so nothing interleaves between binding and flush.
+        const snap = this.ensureEmulator().snapshot();
+        send(enc.encode(snap));
+      } else {
+        const upTo = this.offset;
+        const start = Math.max(0, upTo - REPLAY_CAP_BYTES);
+        const len = upTo - start;
+        // RIS reset clears the terminal state. If we sliced mid-sequence at
+        // `start`, xterm may briefly mis-render the first cells; acceptable
+        // trade-off vs unbounded replay.
+        send(enc.encode("\x1bc"));
+        if (len > 0) {
+          const buf = new Uint8Array(len);
+          readSync(this.fd, buf, 0, len, start);
+          send(buf);
+        }
       }
     } catch (e) {
-      logger.error({ session: this.session, err: e }, "replay read failed");
+      logger.error({ session: this.session, err: e }, "replay/snapshot read failed");
       for (const l of this.eventListeners) l({ kind: "error", message: `replay: ${String(e)}` });
     } finally {
       this.subscribers.delete(tap);
@@ -139,6 +190,7 @@ export class SessionBroadcaster {
     logger.info({ session: this.session, deleteLog: !!opts.deleteLog }, "broadcaster stopping");
     if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
     if (this.fd !== null) { try { closeSync(this.fd); } catch { /* ignore */ } this.fd = null; }
+    if (this.emulator) { this.emulator.dispose(); this.emulator = null; }
     await this.run(["pipe-pane", "-o", "-t", `${this.session}:0.0`]).catch(() => undefined);
     // Default: KEEP the log file so history persists across hub restarts.
     // Only delete when the underlying tmux session is gone (caller passes
@@ -167,6 +219,7 @@ export class SessionBroadcaster {
         const chunk = new Uint8Array(this.pollChunk.subarray(0, n));
         const wasTruncated = this.ring.truncated();
         this.ring.append(chunk);
+        if (this.emulator) this.emulator.write(chunk);
         if (!wasTruncated && this.ring.truncated()) {
           for (const l of this.eventListeners) l({ kind: "replay_truncated" });
         }
@@ -189,12 +242,12 @@ function shellQuote(s: string): string {
 export class BroadcasterRegistry {
   private map = new Map<string, SessionBroadcaster>();
 
-  constructor(private run: TmuxRunner = tmux) {}
+  constructor(private run: TmuxRunner = tmux, private emulatorEnabled?: boolean) {}
 
   async get(session: string): Promise<SessionBroadcaster> {
     const existing = this.map.get(session);
     if (existing) return existing;
-    const b = new SessionBroadcaster(session, this.run);
+    const b = new SessionBroadcaster(session, this.run, this.emulatorEnabled);
     this.map.set(session, b);
     await b.start();
     return b;

@@ -83,3 +83,16 @@ export const REPLAY_CAP_BYTES = parsePositiveInt(
   256 * 1024,
   "TMUX_HUB_REPLAY_CAP_BYTES",
 );
+
+// Feature flag: when set, attach sends a coherent server-emulator snapshot
+// instead of a raw byte-slice replay. Dual-path so the legacy path stays
+// available for instant rollback (svc restart with the flag unset).
+export const EMULATOR_ENABLED = process.env.TMUX_HUB_EMULATOR === "1";
+
+// Lines of scrollback included in an attach snapshot. Capped because a full
+// 5000-line serialize is ~287KB/41ms; 1000 lines is ~59KB/3.6ms (measured).
+export const SNAPSHOT_SCROLLBACK_LINES = parsePositiveInt(
+  process.env.TMUX_HUB_SNAPSHOT_SCROLLBACK_LINES,
+  1000,
+  "TMUX_HUB_SNAPSHOT_SCROLLBACK_LINES",
+);
