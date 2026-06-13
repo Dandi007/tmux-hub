@@ -8,8 +8,3 @@ export async function bindSecret(page: Page): Promise<void> {
     sessionStorage.setItem("hub.secret", body.secret);
   });
 }
-
-export function uniqSession(prefix: string): string {
-  const ts = new Date().toISOString().replace(/[-:T.Z]/g, "").slice(0, 14);
-  return `${prefix}-${ts}`;
-}
