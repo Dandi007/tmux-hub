@@ -96,3 +96,20 @@ export const SNAPSHOT_SCROLLBACK_LINES = parsePositiveInt(
   1000,
   "TMUX_HUB_SNAPSHOT_SCROLLBACK_LINES",
 );
+
+// === NL→command suggest (flag-gated, default off) ===
+// 整功能开关；关闭时 pane-mode 恒返回 other、suggest 恒 translated:false，前端因此走字面直发。
+export const SUGGEST_ENABLED = process.env.TMUX_HUB_SUGGEST === "1";
+// CC Switch chat/completions 端点（本机统一 LLM 网关，见 cc-switch-proxy 记忆卡）。
+export const SUGGEST_ENDPOINT =
+  process.env.TMUX_HUB_SUGGEST_ENDPOINT ?? "http://127.0.0.1:15721/v1/chat/completions";
+// 小模型名（CC Switch model-prefix 路由）。部署时按灵智实际小模型名覆盖；留空则调用失败→前端降级字面发送。
+export const SUGGEST_MODEL = process.env.TMUX_HUB_SUGGEST_MODEL ?? "";
+// 喂给模型的 capture-pane 尾行数。
+export const SUGGEST_CAPTURE_LINES = parsePositiveInt(
+  process.env.TMUX_HUB_SUGGEST_CAPTURE_LINES, 40, "TMUX_HUB_SUGGEST_CAPTURE_LINES",
+);
+// 模型调用超时（ms）。
+export const SUGGEST_TIMEOUT_MS = parsePositiveInt(
+  process.env.TMUX_HUB_SUGGEST_TIMEOUT_MS, 6000, "TMUX_HUB_SUGGEST_TIMEOUT_MS",
+);
