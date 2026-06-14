@@ -131,5 +131,10 @@ export default defineConfig({
         baseURL: `http://127.0.0.1:${E2E_EMU_PORT}`,
       },
     },
+    {
+      name: "mobile-suggest",
+      testMatch: /mobile-suggest\.e2e\.ts/,
+      use: { ...devices["iPhone 14"] },
+    },
   ],
 });

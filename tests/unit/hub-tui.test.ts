@@ -14,8 +14,8 @@ describe("hub-tui pure functions", () => {
   describe("buildMenu", () => {
     test("merges sessions, templates, and new-shell item", () => {
       const sessions: SessionInfo[] = [
-        { name: "s1", activity: 100, attached: 0, windows: 1, grammar_ok: true },
-        { name: "s2", activity: 200, attached: 1, windows: 2, grammar_ok: true },
+        { name: "s1", activity: 100, attached: 0, windows: 1, grammar_ok: true, cols: 0, rows: 0 },
+        { name: "s2", activity: 200, attached: 1, windows: 2, grammar_ok: true, cols: 0, rows: 0 },
       ];
       const templates = [
         { id: "shell", name: "Shell", cwd_choices: ["~"] },
@@ -32,9 +32,9 @@ describe("hub-tui pure functions", () => {
 
     test("sorts sessions by activity descending", () => {
       const sessions: SessionInfo[] = [
-        { name: "old", activity: 100, attached: 0, windows: 1, grammar_ok: true },
-        { name: "new", activity: 300, attached: 0, windows: 1, grammar_ok: true },
-        { name: "mid", activity: 200, attached: 0, windows: 1, grammar_ok: true },
+        { name: "old", activity: 100, attached: 0, windows: 1, grammar_ok: true, cols: 0, rows: 0 },
+        { name: "new", activity: 300, attached: 0, windows: 1, grammar_ok: true, cols: 0, rows: 0 },
+        { name: "mid", activity: 200, attached: 0, windows: 1, grammar_ok: true, cols: 0, rows: 0 },
       ];
       const menu = buildMenu(sessions, []);
       expect(menu[0]!.kind).toBe("session");
@@ -47,8 +47,8 @@ describe("hub-tui pure functions", () => {
 
     test("marks attached sessions", () => {
       const sessions: SessionInfo[] = [
-        { name: "attached", activity: 100, attached: 1, windows: 1, grammar_ok: true },
-        { name: "detached", activity: 200, attached: 0, windows: 1, grammar_ok: true },
+        { name: "attached", activity: 100, attached: 1, windows: 1, grammar_ok: true, cols: 0, rows: 0 },
+        { name: "detached", activity: 200, attached: 0, windows: 1, grammar_ok: true, cols: 0, rows: 0 },
       ];
       const menu = buildMenu(sessions, []);
       expect((menu[0] as any).attached).toBe(false);
@@ -122,7 +122,7 @@ describe("hub-tui pure functions", () => {
   describe("resolveSelection", () => {
     test("resolves session selection", () => {
       const menu = buildMenu(
-        [{ name: "s1", activity: 100, attached: 0, windows: 1, grammar_ok: true }],
+        [{ name: "s1", activity: 100, attached: 0, windows: 1, grammar_ok: true, cols: 0, rows: 0 }],
         [],
       );
       const action = resolveSelection(menu, 0);
@@ -168,7 +168,7 @@ describe("hub-tui pure functions", () => {
   describe("formatMenuItem", () => {
     test("formats attached session with marker", () => {
       const menu = buildMenu(
-        [{ name: "s1", activity: 100, attached: 1, windows: 1, grammar_ok: true }],
+        [{ name: "s1", activity: 100, attached: 1, windows: 1, grammar_ok: true, cols: 0, rows: 0 }],
         [],
       );
       const formatted = formatMenuItem(menu[0]!);
@@ -178,7 +178,7 @@ describe("hub-tui pure functions", () => {
 
     test("formats detached session without marker", () => {
       const menu = buildMenu(
-        [{ name: "s1", activity: 100, attached: 0, windows: 1, grammar_ok: true }],
+        [{ name: "s1", activity: 100, attached: 0, windows: 1, grammar_ok: true, cols: 0, rows: 0 }],
         [],
       );
       const formatted = formatMenuItem(menu[0]!);
@@ -205,7 +205,7 @@ describe("hub-tui pure functions", () => {
   describe("buildListOutput", () => {
     test("produces JSON-serializable output", () => {
       const sessions: SessionInfo[] = [
-        { name: "s1", activity: 100, attached: 1, windows: 2, grammar_ok: true },
+        { name: "s1", activity: 100, attached: 1, windows: 2, grammar_ok: true, cols: 0, rows: 0 },
       ];
       const templates = [{ id: "shell", name: "Shell", cwd_choices: ["~"] }];
       const output = buildListOutput(sessions, templates);
@@ -259,8 +259,8 @@ describe("hub-tui pure functions", () => {
       // to map user input to actions. This tests that the fallback path works.
       const menu = buildMenu(
         [
-          { name: "s1", activity: 100, attached: 0, windows: 1, grammar_ok: true },
-          { name: "s2", activity: 200, attached: 0, windows: 1, grammar_ok: true },
+          { name: "s1", activity: 100, attached: 0, windows: 1, grammar_ok: true, cols: 0, rows: 0 },
+          { name: "s2", activity: 200, attached: 0, windows: 1, grammar_ok: true, cols: 0, rows: 0 },
         ],
         [{ id: "shell", name: "Shell", cwd_choices: ["~"] }],
       );
