@@ -8,6 +8,7 @@ const SYSTEM = [
   "2. 如果用户输入本身已是合法命令，原样返回。",
   "3. 充分利用给定的当前工作目录和最近终端输出作为上下文。",
   "4. 不确定时给出最可能的单条命令。",
+  "5. 命令里绝不要塞自然语言占位（尤其中文）。需要用户自己填的值，用 ASCII 尖括号占位（如 <your-api-key>）或留空，不要用「你的密钥」这类自然语言描述当占位值。",
 ].join("\n");
 
 export function buildSuggestMessages(ctx: SuggestContext): ChatMessage[] {

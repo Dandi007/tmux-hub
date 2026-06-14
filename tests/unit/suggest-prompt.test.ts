@@ -14,6 +14,10 @@ describe("buildSuggestMessages", () => {
     const msgs = buildSuggestMessages({ text: "ls", cwd: "", recentPane: "" });
     expect(msgs[1]!.content).toContain("ls");
   });
+  test("system 含「禁止自然语言占位」规则（防中文占位塞进命令）", () => {
+    const msgs = buildSuggestMessages({ text: "x", cwd: "", recentPane: "" });
+    expect(msgs[0]!.content).toContain("尖括号占位");
+  });
 });
 
 describe("extractCommand", () => {
