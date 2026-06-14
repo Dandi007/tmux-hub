@@ -56,11 +56,13 @@ export function createSuggestFlow(fx: SuggestFlowEffects): SuggestFlow {
       if ((e as Error).name === "AbortError") return; // 取消：phase 已置 draft
       result = { error: (e as Error).message };
     }
-    if (phase !== "loading") return;                       // 已被取消
+    // Re-read phase via getter since it may have changed during the await (cancel/abort path).
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if ((phase as Phase) !== "loading") return;            // 已被取消
     if (fx.getSession() !== session) { setPhase("draft"); return; } // 串台：丢弃
 
     if ("translated" in result && result.translated) {
-      fx.setText((result as { translated: true; command: string }).command);
+      fx.setText(result.command);
       setPhase("review");
     } else if ("error" in result) {
       fx.toast("推荐失败，可直接编辑发送", "error");

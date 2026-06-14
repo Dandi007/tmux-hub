@@ -15,6 +15,8 @@ import { killSession } from "../shared/kill-controller";
 import { imeGuard } from "../shared/ime-guard";
 import { confirmModal } from "../ui/confirm-modal";
 import { saveLastSession, loadLastSession } from "../shared/last-session";
+import { createSuggestFlow, type Phase } from "./suggest-flow";
+import { getPaneMode, requestSuggestion } from "./suggest-client";
 
 export function renderMobile(root: HTMLElement): void {
   root.replaceChildren();
@@ -37,6 +39,24 @@ export function renderMobile(root: HTMLElement): void {
   let term: TerminalHandle | null = null;
   let sessions: SessionInfo[] = [];
   let openedName: string | null = null;
+
+  // NL→command suggest: mode polling state (fail-safe: default other = today's literal-send behaviour).
+  let currentMode: "shell" | "other" = "other";
+  let suggestEnabled = true;
+  let modeTimer: ReturnType<typeof setInterval> | null = null;
+
+  const pollMode = async (): Promise<void> => {
+    const name = openedName;
+    if (!name) { currentMode = "other"; return; }
+    const res = await getPaneMode(name);
+    currentMode = res.mode;
+    if (!res.enabled) {
+      suggestEnabled = false;
+      if (modeTimer) { clearInterval(modeTimer); modeTimer = null; }
+    }
+  };
+  modeTimer = setInterval(() => { if (suggestEnabled) void pollMode(); }, 4000);
+  void pollMode();
 
   type PendingTarget = { name: string; force: boolean } | null;
   let pendingTarget: PendingTarget = null;
@@ -280,13 +300,42 @@ export function renderMobile(root: HTMLElement): void {
   let editing = false;
   let keysOpen = false;
 
-  const doSend = () => {
-    const text = ta.value;
-    if (text) send({ kind: "keys", literal: text });
-    send({ kind: "key", name: "Enter" });
-    ta.value = "";
-    setEditing(false);
+  // AI 介入提示条（默认隐藏，仅 review 态显示）——golden-order：明确提醒有 AI 介入。
+  const aiBanner = document.createElement("div");
+  aiBanner.className = "input-bar__ai-banner";
+  aiBanner.hidden = true;
+  aiBanner.textContent = "✦ AI 翻译，请核对后再发送";
+
+  // 撤销按钮（默认隐藏，仅 review 态显示）。
+  const undoBtn = document.createElement("button");
+  undoBtn.type = "button";
+  undoBtn.className = "input-bar__undo";
+  undoBtn.textContent = "↩ 撤销";
+  undoBtn.hidden = true;
+
+  const applyPhase = (phase: Phase): void => {
+    inputBar.classList.toggle("is-review", phase === "review");
+    inputBar.classList.toggle("is-loading", phase === "loading");
+    aiBanner.hidden = phase !== "review";
+    undoBtn.hidden = phase !== "review";
+    ta.readOnly = phase === "loading";
+    if (phase === "loading") { rightBtn.textContent = "取消"; }
+    else if (editing) { rightBtn.textContent = "发送"; }
+    else { rightBtn.textContent = "+"; }
   };
+
+  const flow = createSuggestFlow({
+    getText: () => ta.value,
+    setText: (s) => { ta.value = s; },
+    send,
+    getSession: () => openedName,
+    getMode: () => currentMode,
+    requestSuggestion,
+    onPhaseChange: applyPhase,
+    toast: (m, k) => showToast(m, k ?? "info"),
+  });
+
+  const doSend = () => { void flow.primary(); };
 
   const setEditing = (open: boolean) => {
     editing = open;
@@ -320,7 +369,10 @@ export function renderMobile(root: HTMLElement): void {
   });
   attachBtn.className = "input-bar__attach";
 
+  inputBar.appendChild(aiBanner);
   inputBar.appendChild(ta);
+  inputBar.appendChild(undoBtn);
+  undoBtn.addEventListener("click", () => { flow.undo(); ta.focus(); });
 
   rightBtn.addEventListener("click", () => {
     if (editing) {
@@ -334,6 +386,8 @@ export function renderMobile(root: HTMLElement): void {
   ta.addEventListener("focus", () => { if (!editing) setEditing(true); });
   ta.addEventListener("blur", () => {
     setTimeout(() => {
+      const p = flow.phase();
+      if (p === "review" || p === "loading") return; // 复核/思考中不收起
       if (!inputBar.contains(document.activeElement)) setEditing(false);
     }, 150);
   });

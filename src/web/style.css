@@ -815,3 +815,24 @@ button.is-danger:hover { filter: brightness(1.15); }
   cursor: pointer;
 }
 .connection-status__retry:hover { background: oklch(100% 0 0 / 0.1); }
+
+/* === NL→command suggest: review/loading state === */
+.input-bar__ai-banner {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: #b58900;
+  padding: 2px 6px;
+}
+.mobile-input-bar.is-review .input-bar__textarea {
+  border: 1px solid #b58900;
+  background: rgba(181, 137, 0, 0.06);
+}
+.mobile-input-bar.is-loading .input-bar__textarea { opacity: 0.6; }
+.input-bar__undo {
+  background: transparent;
+  border: none;
+  color: var(--muted, #888);
+  font-size: 13px;
+  padding: 0 6px;
+  cursor: pointer;
+}
