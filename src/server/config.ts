@@ -105,6 +105,11 @@ export const SUGGEST_ENDPOINT =
   process.env.TMUX_HUB_SUGGEST_ENDPOINT ?? "http://127.0.0.1:15721/v1/chat/completions";
 // 小模型名（CC Switch model-prefix 路由）。部署时按灵智实际小模型名覆盖；留空则调用失败→前端降级字面发送。
 export const SUGGEST_MODEL = process.env.TMUX_HUB_SUGGEST_MODEL ?? "";
+// 协议：chat（默认，OpenAI /v1/chat/completions，如 lingzhi/*）| responses（Codex /v1/responses SSE，
+// 如 gpt/* GPT-OAuth 反代——它 404 on chat/completions，见 cc-switch-proxy 记忆卡）。
+// 用 gpt/* 时三者须一致：PROTOCOL=responses + ENDPOINT=.../v1/responses + MODEL=gpt/<model>。
+export const SUGGEST_PROTOCOL: "chat" | "responses" =
+  process.env.TMUX_HUB_SUGGEST_PROTOCOL === "responses" ? "responses" : "chat";
 // 喂给模型的 capture-pane 尾行数。
 export const SUGGEST_CAPTURE_LINES = parsePositiveInt(
   process.env.TMUX_HUB_SUGGEST_CAPTURE_LINES, 40, "TMUX_HUB_SUGGEST_CAPTURE_LINES",
