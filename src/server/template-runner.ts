@@ -1,5 +1,5 @@
 import { tmux as defaultTmux } from "./tmux-cmd";
-import { expandHome, type Template } from "./config";
+import { expandHome, SESSION_LANG, type Template } from "./config";
 import { existsSync } from "node:fs";
 import { isGrammarOk } from "../shared/session-name";
 import { createLogger } from "./logger";
@@ -34,7 +34,12 @@ export async function launchSession(opts: {
     throw new TemplateError(`cwd does not exist: ${expanded}`, 400);
   }
 
-  const envArgs = buildEnvArgs(opts.env);
+  // Inject a UTF-8 locale so the launched shell's line editor handles multibyte
+  // input (zsh in C locale garbles 中文). Caller-supplied env wins on conflict.
+  const localeDefaults: Record<string, string> = SESSION_LANG
+    ? { LANG: SESSION_LANG, LC_CTYPE: SESSION_LANG }
+    : {};
+  const envArgs = buildEnvArgs({ ...localeDefaults, ...opts.env });
 
   const has = await run(["has-session", "-t", name]);
   if (has.code === 0) throw new TemplateError(`session already exists: ${name}`, 409);
