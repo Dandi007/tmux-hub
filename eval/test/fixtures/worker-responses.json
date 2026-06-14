@@ -1,0 +1,6 @@
+{
+  "切换模型到千问": "set_claude_ccswitch_qwen",
+  "查看所有服务状态": "svc status all",
+  "启动 Claude Code": "cc -f",
+  "意图": "echo fixture-fallback"
+}
