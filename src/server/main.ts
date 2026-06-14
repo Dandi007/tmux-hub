@@ -10,7 +10,9 @@ import { InputRouter, HubError } from "./input-router";
 import { pinViewport, getNativeAttachCount } from "./viewport-pinner";
 import { tmux } from "./tmux-cmd";
 import { bootstrapTmuxHooks } from "./tmux-bootstrap";
-import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS, IMAGE_DIR, MAX_IMAGE_BYTES, expandHome } from "./config";
+import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS, IMAGE_DIR, MAX_IMAGE_BYTES, expandHome, SUGGEST_ENABLED, SUGGEST_ENDPOINT, SUGGEST_MODEL, SUGGEST_CAPTURE_LINES, SUGGEST_TIMEOUT_MS } from "./config";
+import { buildSuggestRoutes } from "./suggest-routes";
+import { makeCcSwitchCaller } from "./suggest/cc-switch-client";
 import { loadOrCreateSecret, safeEqual } from "./secret";
 import { authGate, adminGate } from "./auth";
 import { isGrammarOk, isManagedSessionName } from "../shared/session-name";
@@ -157,6 +159,15 @@ app.route("/", buildImageUploadRoutes({
   imageDir: IMAGE_DIR,
   maxBytes: MAX_IMAGE_BYTES,
   sessionExists: (name) => registry.snapshot().some((s) => s.name === name),
+}));
+app.route("/", buildSuggestRoutes({
+  enabled: SUGGEST_ENABLED,
+  captureLines: SUGGEST_CAPTURE_LINES,
+  callModel: makeCcSwitchCaller({
+    endpoint: SUGGEST_ENDPOINT,
+    model: SUGGEST_MODEL,
+    timeoutMs: SUGGEST_TIMEOUT_MS,
+  }),
 }));
 app.get("/system/auth-check", async (c) => {
   const devBind = process.env.TMUX_HUB_DEV_BIND_SECRET === "1";
