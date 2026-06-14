@@ -1,0 +1,6 @@
+# Generated eval artifacts (machine-specific; live-run outputs live in the work folder)
+gold.jsonl
+vocab.json
+candidates.json
+candidates-filtered.json
+runs/
