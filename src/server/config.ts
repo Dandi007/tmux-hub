@@ -48,6 +48,12 @@ export const HUB_PORT = Number(process.env.TMUX_HUB_PORT ?? 3101);
 export const HUB_HOST = process.env.TMUX_HUB_HOST ?? "127.0.0.1";
 export const WINDOW_COLS = Number(process.env.TMUX_HUB_COLS ?? 200);
 export const WINDOW_ROWS = Number(process.env.TMUX_HUB_ROWS ?? 50);
+// Locale injected into every launched session's env (LANG + LC_CTYPE). Without a
+// UTF-8 locale the launched shell runs in C locale, where zsh's line editor
+// mangles multibyte UTF-8 input (Chinese pasted/sent to the prompt garbles into
+// U+FFFD + literal <00xx> bytes). Set "" to disable injection. macOS ships
+// en_US.UTF-8; on a Linux deploy without it, override to C.UTF-8.
+export const SESSION_LANG = process.env.TMUX_HUB_SESSION_LANG ?? "en_US.UTF-8";
 export const REGISTRY_INTERVAL_MS = Number(process.env.TMUX_HUB_REGISTRY_INTERVAL_MS ?? 2000);
 export const RING_BUFFER_BYTES = Number(process.env.TMUX_HUB_RING_BUFFER_BYTES ?? 1024 * 1024);
 export const CAPTURE_PANE_LINES = Number(process.env.TMUX_HUB_CAPTURE_LINES ?? 2000);
