@@ -21,28 +21,37 @@ export type VocabEntry = {
 };
 
 const VOCAB_HEADER = "用户的自定义命令（优先使用，胜过通用命令）：";
+const HISTORY_HEADER = "用户最近/常用的真实命令历史。如果其中有能达成当前意图的命令，请优先照搬复用（包括项目专属脚本名与路径），不要自己另造：";
 
+export function buildVocabBlock(vocab: VocabEntry[]): string {
+  return [VOCAB_HEADER, ...vocab.map((e) => `- ${e.name} — ${e.purpose}`)].join("\n");
+}
+
+export function buildHistoryBlock(cmds: string[]): string {
+  return [HISTORY_HEADER, ...cmds.map((c) => `- ${c}`)].join("\n");
+}
+
+// B 变体 = A 的 system 末尾追加增强块。增强块由 vocab（命令词汇字典）和/或
+// historyCmds（历史命令）拼成——三种策略：仅 vocab / 仅 history / 两者(both)。
+// 向后兼容：第 3 参 vocab 数组照旧；第 4 参 historyCmds 新增。
 export function buildVariantMessages(
   ctx: SuggestContext,
   variant: Variant,
   vocab?: VocabEntry[],
+  historyCmds?: string[],
 ): ChatMessage[] {
   const base = buildSuggestMessages(ctx);
-  if (variant === "A" || !vocab || vocab.length === 0) {
-    return base;
-  }
-  // B = A 的 system 末尾追加词汇块
-  const vocabBlock = [
-    VOCAB_HEADER,
-    ...vocab.map((e) => `- ${e.name} — ${e.purpose}`),
-  ].join("\n");
+  if (variant === "A") return base;
 
-  return base.map((msg) => {
-    if (msg.role === "system") {
-      return { ...msg, content: msg.content + "\n\n" + vocabBlock };
-    }
-    return msg;
-  });
+  const blocks: string[] = [];
+  if (vocab && vocab.length > 0) blocks.push(buildVocabBlock(vocab));
+  if (historyCmds && historyCmds.length > 0) blocks.push(buildHistoryBlock(historyCmds));
+  if (blocks.length === 0) return base;
+  const aug = blocks.join("\n\n");
+
+  return base.map((msg) =>
+    msg.role === "system" ? { ...msg, content: msg.content + "\n\n" + aug } : msg,
+  );
 }
 
 // ——— Gold-gen prompt（Opus 生成 gold.jsonl）———

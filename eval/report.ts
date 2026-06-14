@@ -76,7 +76,7 @@ export function buildReport(entries: JudgedEntry[]): string {
   lines.push("");
   lines.push("## BLUF");
   lines.push("");
-  lines.push(`| 指标 | A（baseline）| B（+vocab）| Δ |`);
+  lines.push(`| 指标 | A（baseline）| B（+上下文增强）| Δ |`);
   lines.push(`|------|-------------|-----------|---|`);
   lines.push(`| strict 准确率 | ${pctStr(stats.strict_a)} | ${pctStr(stats.strict_b)} | ${deltaStr(stats.delta_strict)} |`);
   lines.push(`| loose 准确率 | ${pctStr(stats.loose_a)} | ${pctStr(stats.loose_b)} | ${deltaStr(stats.delta_loose)} |`);
@@ -84,7 +84,7 @@ export function buildReport(entries: JudgedEntry[]): string {
   lines.push("");
 
   if (stats.delta_strict > 0.05) {
-    lines.push(`**结论：B（注入词汇字典）显著提升 strict 准确率 ${deltaStr(stats.delta_strict)}，建议纳入线上 suggest。**`);
+    lines.push(`**结论：B（上下文增强）显著提升 strict 准确率 ${deltaStr(stats.delta_strict)}。注意按策略与失败分类综合判断（如 history 注入对历史内命令是复用而非泛化）。**`);
   } else if (stats.delta_strict > 0) {
     lines.push(`**结论：B 有小幅提升（${deltaStr(stats.delta_strict)}），需结合 loose 指标综合判断。**`);
   } else {

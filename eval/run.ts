@@ -65,8 +65,11 @@ export async function runEval(opts: {
   outDir: string;
   limit?: number;
   fixturesDir?: string;
+  strategy?: "vocab" | "history" | "both";
+  historyCmds?: string[];
 }): Promise<string> {
   const { goldPath, vocabPath, outDir, limit, fixturesDir } = opts;
+  const strategy = opts.strategy ?? "vocab";
 
   const entries = loadGold(goldPath);
   const toRun = limit && limit > 0 ? entries.slice(0, limit) : entries;
@@ -75,6 +78,9 @@ export async function runEval(opts: {
   if (vocabPath && existsSync(vocabPath)) {
     vocab = JSON.parse(readFileSync(vocabPath, "utf-8")) as VocabEntry[];
   }
+  // B 变体注入内容按策略选：vocab(默认) / history / both。
+  const bVocab = strategy === "vocab" || strategy === "both" ? vocab : undefined;
+  const bHistory = strategy === "history" || strategy === "both" ? opts.historyCmds : undefined;
 
   const workerCfg: WorkerConfig = {
     endpoint: "http://127.0.0.1:15721/v1/responses",
@@ -95,7 +101,7 @@ export async function runEval(opts: {
     };
 
     const messagesA = buildVariantMessages(ctx, "A");
-    const messagesB = buildVariantMessages(ctx, "B", vocab);
+    const messagesB = buildVariantMessages(ctx, "B", bVocab, bHistory);
 
     const [produced_a, produced_b] = await Promise.all([
       callWorker(workerCfg, messagesA),
