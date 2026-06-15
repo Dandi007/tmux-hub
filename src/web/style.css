@@ -643,6 +643,7 @@ button.is-danger:hover { filter: brightness(1.15); }
 /* Mobile input bar — compact bottom bar: [📎] [text field] [+] */
 .mobile-input-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-2);
@@ -676,15 +677,17 @@ button.is-danger:hover { filter: brightness(1.15); }
   transform: rotate(45deg);
 }
 .input-bar__textarea {
-  flex: 1;
-  height: 5rem;
-  max-height: 5rem;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: var(--tap-min);
+  max-height: 40vh;
   background: var(--color-surface);
   border: none;
   border-radius: calc(var(--tap-min) / 2);
   padding: 10px var(--space-3);
   color: var(--color-text);
   font: 16px var(--font-mono);
+  line-height: 1.5;
   resize: none;
   overflow-y: auto;
   -webkit-tap-highlight-color: transparent;
@@ -818,10 +821,15 @@ button.is-danger:hover { filter: brightness(1.15); }
 
 /* === NL→command suggest: review/loading state === */
 .input-bar__ai-banner {
-  flex-basis: 100%;
+  flex: 0 0 100%;
+  order: -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   font-size: 12px;
   color: #b58900;
-  padding: 2px 6px;
+  padding: 4px 8px;
+  margin-bottom: calc(-1 * var(--space-1));
 }
 .mobile-input-bar.is-review .input-bar__textarea {
   border: 1px solid #b58900;
@@ -831,8 +839,10 @@ button.is-danger:hover { filter: brightness(1.15); }
 .input-bar__undo {
   background: transparent;
   border: none;
-  color: var(--muted, #888);
+  color: #b58900;
   font-size: 13px;
-  padding: 0 6px;
+  padding: 2px 8px;
   cursor: pointer;
+  border-radius: 4px;
 }
+.input-bar__undo:active { background: rgba(181, 137, 0, 0.15); }

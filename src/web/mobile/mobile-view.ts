@@ -304,21 +304,35 @@ export function renderMobile(root: HTMLElement): void {
   const aiBanner = document.createElement("div");
   aiBanner.className = "input-bar__ai-banner";
   aiBanner.hidden = true;
-  aiBanner.textContent = "✦ AI 翻译，请核对后再发送";
 
-  // 撤销按钮（默认隐藏，仅 review 态显示）。
+  const aiLabel = document.createElement("span");
+  aiLabel.textContent = "✦ AI 翻译，请核对后再发送";
+  aiBanner.appendChild(aiLabel);
+
+  // 撤销按钮（放在 banner 内右侧，仅 review 态显示）。
   const undoBtn = document.createElement("button");
   undoBtn.type = "button";
   undoBtn.className = "input-bar__undo";
   undoBtn.textContent = "↩ 撤销";
-  undoBtn.hidden = true;
+  aiBanner.appendChild(undoBtn);
+
+  // textarea 自动撑高：review 态时按内容行数扩展，draft 态恢复单行。
+  const autoResize = (): void => {
+    ta.style.height = "auto";
+    const max = window.innerHeight * 0.4;
+    ta.style.height = Math.min(ta.scrollHeight, max) + "px";
+  };
+  const resetResize = (): void => {
+    ta.style.height = "";
+  };
 
   const applyPhase = (phase: Phase): void => {
     inputBar.classList.toggle("is-review", phase === "review");
     inputBar.classList.toggle("is-loading", phase === "loading");
     aiBanner.hidden = phase !== "review";
-    undoBtn.hidden = phase !== "review";
     ta.readOnly = phase === "loading";
+    if (phase === "review") { autoResize(); }
+    else { resetResize(); }
     if (phase === "loading") { rightBtn.textContent = "取消"; }
     else if (editing) { rightBtn.textContent = "发送"; }
     else { rightBtn.textContent = "+"; }
@@ -371,7 +385,6 @@ export function renderMobile(root: HTMLElement): void {
 
   inputBar.appendChild(aiBanner);
   inputBar.appendChild(ta);
-  inputBar.appendChild(undoBtn);
   undoBtn.addEventListener("click", () => { flow.undo(); ta.focus(); });
 
   rightBtn.addEventListener("click", () => {
