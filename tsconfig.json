@@ -13,5 +13,5 @@
     // Suppress TS5101 deprecation warning for baseUrl (needed for @shared/* path mapping)
     "ignoreDeprecations": "6.0"
   },
-  "include": ["src/**/*", "tests/**/*"]
+  "include": ["src/**/*", "tests/**/*", "eval/**/*"]
 }

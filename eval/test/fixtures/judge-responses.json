@@ -1,0 +1,6 @@
+{
+  "set_claude_ccswitch_qwen": "{\"verdict_a\":\"correct\",\"rationale_a\":\"A 正确命中自定义函数\",\"verdict_b\":\"correct\",\"rationale_b\":\"B 同样正确\"}",
+  "svc status all": "{\"verdict_a\":\"wrong\",\"rationale_a\":\"A 不知道自定义命令 svc\",\"verdict_b\":\"correct\",\"rationale_b\":\"B 有词汇上下文，正确使用 svc\"}",
+  "cc -f": "{\"verdict_a\":\"wrong\",\"rationale_a\":\"A 幻觉，用了 claude 而非 cc -f\",\"verdict_b\":\"correct\",\"rationale_b\":\"B 正确\"}",
+  "fixture-fallback": "{\"verdict_a\":\"correct\",\"rationale_a\":\"fixture\",\"verdict_b\":\"correct\",\"rationale_b\":\"fixture\"}"
+}

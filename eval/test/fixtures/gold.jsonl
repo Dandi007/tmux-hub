@@ -1,0 +1,3 @@
+{"id":"g001","nl":"切换模型到千问","expected_cmd":"set_claude_ccswitch_qwen","tags":["custom-fn","model-switch"],"notes":"通常接着跑 cc -f"}
+{"id":"g002","nl":"查看所有服务状态","expected_cmd":"svc status all","tags":["svc","custom-fn"],"notes":""}
+{"id":"g003","nl":"启动 Claude Code","expected_cmd":"cc -f","tags":["custom-fn"],"notes":""}
