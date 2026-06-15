@@ -11,7 +11,12 @@ const SYSTEM = [
   "5. 命令里绝不要塞自然语言占位（尤其中文）。需要用户自己填的值，用 ASCII 尖括号占位（如 <your-api-key>）或留空，不要用「你的密钥」这类自然语言描述当占位值。",
 ].join("\n");
 
-export function buildSuggestMessages(ctx: SuggestContext): ChatMessage[] {
+export function buildSuggestMessages(
+  ctx: SuggestContext,
+  opts?: { historyBlock?: string },
+): ChatMessage[] {
+  const systemContent =
+    opts?.historyBlock ? `${SYSTEM}\n\n${opts.historyBlock}` : SYSTEM;
   const user = [
     `当前工作目录: ${ctx.cwd || "(未知)"}`,
     "",
@@ -21,7 +26,7 @@ export function buildSuggestMessages(ctx: SuggestContext): ChatMessage[] {
     `我的意图: ${ctx.text}`,
   ].join("\n");
   return [
-    { role: "system", content: SYSTEM },
+    { role: "system", content: systemContent },
     { role: "user", content: user },
   ];
 }

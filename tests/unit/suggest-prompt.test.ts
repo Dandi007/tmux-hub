@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { buildSuggestMessages, extractCommand } from "../../src/server/suggest/prompt";
+import { HISTORY_HEADER } from "../../src/server/suggest/history";
 
 describe("buildSuggestMessages", () => {
   test("system + user, user 含 cwd / 终端输出 / 意图", () => {
@@ -17,6 +18,20 @@ describe("buildSuggestMessages", () => {
   test("system 含「禁止自然语言占位」规则（防中文占位塞进命令）", () => {
     const msgs = buildSuggestMessages({ text: "x", cwd: "", recentPane: "" });
     expect(msgs[0]!.content).toContain("尖括号占位");
+  });
+  test("不传 opts → system 不含 HISTORY_HEADER（向后兼容）", () => {
+    const msgs = buildSuggestMessages({ text: "x", cwd: "", recentPane: "" });
+    expect(msgs[0]!.content).not.toContain(HISTORY_HEADER);
+  });
+  test("opts.historyBlock 为空串 → system 不含 HISTORY_HEADER", () => {
+    const msgs = buildSuggestMessages({ text: "x", cwd: "", recentPane: "" }, { historyBlock: "" });
+    expect(msgs[0]!.content).not.toContain(HISTORY_HEADER);
+  });
+  test("opts.historyBlock 非空 → system 末尾含历史块", () => {
+    const block = `${HISTORY_HEADER}\ngit status`;
+    const msgs = buildSuggestMessages({ text: "x", cwd: "", recentPane: "" }, { historyBlock: block });
+    expect(msgs[0]!.content).toContain(HISTORY_HEADER);
+    expect(msgs[0]!.content).toContain("git status");
   });
 });
 

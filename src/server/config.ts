@@ -124,3 +124,13 @@ export const SUGGEST_CAPTURE_LINES = parsePositiveInt(
 export const SUGGEST_TIMEOUT_MS = parsePositiveInt(
   process.env.TMUX_HUB_SUGGEST_TIMEOUT_MS, 6000, "TMUX_HUB_SUGGEST_TIMEOUT_MS",
 );
+
+// === suggest 命令历史注入（flag-gated，默认关）===
+// 开启后把用户 zsh history 高频命令注入到 suggest system prompt，提升复用率。
+export const SUGGEST_HISTORY_ENABLED = process.env.TMUX_HUB_SUGGEST_HISTORY === "1";
+export const SUGGEST_HISTORY_PATH = expandHome(
+  process.env.TMUX_HUB_SUGGEST_HISTORY_PATH ?? "~/.zsh_history",
+);
+export const SUGGEST_HISTORY_TOP = parsePositiveInt(
+  process.env.TMUX_HUB_SUGGEST_HISTORY_TOP, 80, "TMUX_HUB_SUGGEST_HISTORY_TOP",
+);
