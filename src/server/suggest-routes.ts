@@ -3,6 +3,7 @@ import { tmux as defaultTmux } from "./tmux-cmd";
 import { isGrammarOk } from "../shared/session-name";
 import { classifyPaneCommand } from "./suggest/classify";
 import { buildSuggestMessages, extractCommand } from "./suggest/prompt";
+import { loadHistoryCached, buildHistoryBlock } from "./suggest/history";
 import type { ModelCaller } from "./suggest/cc-switch-client";
 import { createLogger } from "./logger";
 
@@ -15,6 +16,7 @@ export type SuggestDeps = {
   captureLines: number;
   callModel: ModelCaller;
   tmuxRun?: TmuxRun;
+  history?: { enabled: boolean; path: string; topN: number };
 };
 
 async function paneCommand(run: TmuxRun, name: string): Promise<string | null> {
@@ -59,8 +61,21 @@ export function buildSuggestRoutes(deps: SuggestDeps): Hono {
     const capRes = await run(["capture-pane", "-p", "-t", `${name}:0.0`, "-S", `-${deps.captureLines}`]);
     const recentPane = capRes.code === 0 ? capRes.stdout : "";
 
+    // 构建历史注入块（降级：失败不影响 suggest）
+    let historyBlock: string | undefined;
+    if (deps.history?.enabled) {
+      try {
+        const cmds = loadHistoryCached(deps.history.path, deps.history.topN);
+        if (cmds !== null && cmds.length > 0) {
+          historyBlock = buildHistoryBlock(cmds);
+        }
+      } catch (e) {
+        logger.warn({ err: (e as Error).message }, "history load failed; skipping injection");
+      }
+    }
+
     try {
-      const raw = await deps.callModel(buildSuggestMessages({ text, cwd, recentPane }));
+      const raw = await deps.callModel(buildSuggestMessages({ text, cwd, recentPane }, { historyBlock }));
       const command = extractCommand(raw);
       if (command === "") return c.json({ error: "empty suggestion" }, 502);
       return c.json({ translated: true, command });

@@ -10,7 +10,7 @@ import { InputRouter, HubError } from "./input-router";
 import { pinViewport, getNativeAttachCount } from "./viewport-pinner";
 import { tmux } from "./tmux-cmd";
 import { bootstrapTmuxHooks } from "./tmux-bootstrap";
-import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS, IMAGE_DIR, MAX_IMAGE_BYTES, expandHome, SUGGEST_ENABLED, SUGGEST_ENDPOINT, SUGGEST_MODEL, SUGGEST_CAPTURE_LINES, SUGGEST_TIMEOUT_MS, SUGGEST_PROTOCOL } from "./config";
+import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS, IMAGE_DIR, MAX_IMAGE_BYTES, expandHome, SUGGEST_ENABLED, SUGGEST_ENDPOINT, SUGGEST_MODEL, SUGGEST_CAPTURE_LINES, SUGGEST_TIMEOUT_MS, SUGGEST_PROTOCOL, SUGGEST_HISTORY_ENABLED, SUGGEST_HISTORY_PATH, SUGGEST_HISTORY_TOP } from "./config";
 import { buildSuggestRoutes } from "./suggest-routes";
 import { makeCcSwitchCaller } from "./suggest/cc-switch-client";
 import { loadOrCreateSecret, safeEqual } from "./secret";
@@ -169,6 +169,11 @@ app.route("/", buildSuggestRoutes({
     timeoutMs: SUGGEST_TIMEOUT_MS,
     protocol: SUGGEST_PROTOCOL,
   }),
+  history: {
+    enabled: SUGGEST_HISTORY_ENABLED,
+    path: SUGGEST_HISTORY_PATH,
+    topN: SUGGEST_HISTORY_TOP,
+  },
 }));
 app.get("/system/auth-check", async (c) => {
   const devBind = process.env.TMUX_HUB_DEV_BIND_SECRET === "1";
