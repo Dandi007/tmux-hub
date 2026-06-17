@@ -209,6 +209,30 @@ test.describe("mobile view", () => {
     ctx.tmuxE2E(["kill-session", "-t", name]);
   });
 
+  test("image attach: multi-select uploads every file and drops all paths", async ({ page, ctx }) => {
+    const name = await ctx.createSession();
+
+    await openApp(page);
+    await selectSession(page, name);
+
+    const hiddenInput = page.locator(".mobile-toolbar__image-attach-input");
+    await hiddenInput.setInputFiles([
+      join(process.cwd(), "tests/e2e/fixtures/red.png"),
+      join(process.cwd(), "tests/e2e/fixtures/blue.png"),
+    ]);
+
+    await expect(page.locator(".mobile-input-bar")).toHaveClass(/is-editing/, { timeout: 5_000 });
+    const ta = page.locator(".input-bar__textarea");
+    // Both files land as distinct UUID-named paths → two .png tokens in order.
+    await expect
+      .poll(async () => ((await ta.inputValue()).match(/\.png(?=\s)/g) ?? []).length, {
+        timeout: 5_000,
+      })
+      .toBe(2);
+
+    ctx.tmuxE2E(["kill-session", "-t", name]);
+  });
+
   test("switching sessions reattaches the selected session", async ({ page, ctx }) => {
     const a = await ctx.createSession("kb-cc");
     const b = await ctx.createSession("kb-cc");
