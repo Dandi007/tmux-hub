@@ -136,7 +136,32 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   let detachMomentum: (() => void) | null = null;
   if ("ontouchstart" in window) {
     const viewport = el.querySelector<HTMLElement>(".xterm-viewport");
-    if (viewport) detachMomentum = attachMomentumScroll(el, viewport);
+    if (viewport) {
+      detachMomentum = attachMomentumScroll(el, viewport, {
+        // Forward when the app is in mouse mode. Such apps (claude code, vim,
+        // less) run on the alternate screen with no local scrollback to drag,
+        // so we hand the gesture to the app as wheel ticks. Plain shells stay
+        // in mouse-off mode → keep scrolling local scrollback.
+        shouldForwardWheel: () => {
+          try { return term.modes.mouseTrackingMode !== "none"; }
+          catch { return false; }
+        },
+        onWheel: (direction, notches, clientX, clientY) => {
+          const rect = el.getBoundingClientRect();
+          const cols = term.cols > 0 ? term.cols : 1;
+          const rows = term.rows > 0 ? term.rows : 1;
+          const cellW = rect.width / cols;
+          const cellH = rect.height / rows;
+          const col = cellW > 0
+            ? Math.max(1, Math.min(cols, Math.floor((clientX - rect.left) / cellW) + 1))
+            : 1;
+          const row = cellH > 0
+            ? Math.max(1, Math.min(rows, Math.floor((clientY - rect.top) / cellH) + 1))
+            : 1;
+          queuedSend({ kind: "wheel", direction, notches, col, row });
+        },
+      });
+    }
   }
 
   // Once `close()` is called we MUST stop touching `term`. Any write into a

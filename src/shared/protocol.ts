@@ -21,6 +21,11 @@ export type ClientWsMessage =
   | { kind: "keys"; literal: string }
   | { kind: "key"; name: string }
   | { kind: "resize"; cols: number; rows: number }
+  // Mouse-wheel forwarding: alternate-screen TUI apps (claude code, vim, less)
+  // own their off-screen content and run in mouse mode, so a mobile touch-drag
+  // is translated into wheel reports the app scrolls itself. col/row are 1-based
+  // cell coords of the touch point; notches is the number of wheel ticks.
+  | { kind: "wheel"; direction: "up" | "down"; notches: number; col: number; row: number }
   | { kind: "ping"; ts: number };
 
 export type ServerWsMessage =

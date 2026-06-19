@@ -2,9 +2,14 @@ import { tmux as defaultTmux } from "./tmux-cmd";
 import { getNativeAttachCount } from "./viewport-pinner";
 import type { ClientWsMessage } from "../shared/protocol";
 import { assertGrammar } from "../shared/session-name";
+import { encodeWheel } from "./mouse-encode";
 import { createLogger } from "./logger";
 
 const logger = createLogger("input");
+
+// Cap wheel ticks per message so a fast fling can't spawn a huge send-keys
+// payload (each tick is one SGR report forwarded to the app).
+const WHEEL_MAX_NOTCHES = 20;
 
 export type TmuxRun = (args: string[]) => Promise<{ stdout: string; stderr: string; code: number }>;
 
@@ -76,6 +81,17 @@ export class InputRouter {
       const r = await this.run(["send-keys", "-t", `${session}:0.0`, msg.name]);
       if (r.code !== 0) {
         logger.error({ session, key: msg.name, stderr: r.stderr }, "send-keys (named) failed");
+        throw classifyTmuxError(session, r.stderr);
+      }
+    } else if (msg.kind === "wheel") {
+      const notches = Math.min(WHEEL_MAX_NOTCHES, Math.floor(msg.notches));
+      if (notches <= 0) return {};
+      const col = Math.max(1, Math.floor(msg.col));
+      const row = Math.max(1, Math.floor(msg.row));
+      const literal = encodeWheel(msg.direction, notches, col, row);
+      const r = await this.run(["send-keys", "-t", `${session}:0.0`, "-l", literal]);
+      if (r.code !== 0) {
+        logger.error({ session, stderr: r.stderr }, "send-keys (wheel) failed");
         throw classifyTmuxError(session, r.stderr);
       }
     } else if (msg.kind === "resize") {

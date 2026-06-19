@@ -12,6 +12,8 @@
 // gesture inside the viewport, but long-press without movement still
 // works (we don't intercept touchstart's default behavior).
 
+export type WheelDirection = "up" | "down";
+
 export type MomentumOptions = {
   // px/ms — minimum velocity to trigger inertia animation
   minVelocity?: number;
@@ -19,13 +21,42 @@ export type MomentumOptions = {
   friction?: number;
   // ms — half-life for the exponential moving average of velocity
   velocitySmoothingMs?: number;
+  // When this returns true at the start of a gesture, vertical drags are
+  // forwarded as mouse-wheel ticks (via onWheel) instead of scrolling local
+  // scrollback. Used for alternate-screen TUI apps (claude code, vim, less)
+  // that own their off-screen content and run in mouse mode — there is no
+  // local scrollback to move, so we let the app scroll itself.
+  shouldForwardWheel?: () => boolean;
+  // Emit `notches` wheel ticks in `direction` at the touch point.
+  onWheel?: (direction: WheelDirection, notches: number, clientX: number, clientY: number) => void;
+  // px of drag that equals one wheel tick when forwarding.
+  wheelPxPerNotch?: number;
 };
 
-const DEFAULTS: Required<MomentumOptions> = {
+const DEFAULTS: Required<Omit<MomentumOptions, "shouldForwardWheel" | "onWheel">> = {
   minVelocity: 0.04,
   friction: 0.94,
   velocitySmoothingMs: 30,
+  wheelPxPerNotch: 24,
 };
+
+/**
+ * Pure helper: convert accumulated drag pixels into discrete wheel ticks.
+ * Positive `accPx` (finger moved up → content scrolls toward newer) maps to
+ * "down"; negative maps to "up". Returns whole `notches` plus the leftover
+ * `remainderPx` to carry into the next move so sub-tick drags aren't lost.
+ */
+export function dragToWheel(
+  accPx: number,
+  pxPerNotch: number,
+): { notches: number; direction: WheelDirection; remainderPx: number } {
+  const direction: WheelDirection = accPx >= 0 ? "down" : "up";
+  if (pxPerNotch <= 0) return { notches: 0, direction, remainderPx: accPx };
+  const notches = Math.floor(Math.abs(accPx) / pxPerNotch);
+  const sign = accPx >= 0 ? 1 : -1;
+  const remainderPx = accPx - sign * notches * pxPerNotch;
+  return { notches, direction, remainderPx };
+}
 
 export function attachMomentumScroll(
   listenEl: HTMLElement,
@@ -46,6 +77,11 @@ export function attachMomentumScroll(
   // fractional part across frames and only commit when |acc| >= 1.
   let scrollAcc = 0;
   let lastFrameTs = 0;
+  // Wheel-forwarding state. Decided once per gesture at touchstart so a drag
+  // can't flip modes mid-stroke. wheelAcc carries sub-tick drag pixels across
+  // moves so slow drags still accumulate into ticks.
+  let forwarding = false;
+  let wheelAcc = 0;
 
   const cancelAnim = () => {
     if (raf !== null) {
@@ -70,6 +106,8 @@ export function attachMomentumScroll(
     lastTs = performance.now();
     velocity = 0;
     tracking = true;
+    forwarding = !!opt.shouldForwardWheel?.();
+    wheelAcc = 0;
   };
 
   const onTouchMove = (e: TouchEvent): void => {
@@ -80,6 +118,21 @@ export function attachMomentumScroll(
     const t = e.touches[0]!;
     const now = performance.now();
     const dy = lastY - t.clientY; // positive = scroll down
+
+    if (forwarding) {
+      // App owns the content (alt-screen + mouse mode): translate the drag
+      // into wheel ticks and let the app scroll itself. No local scrollTop.
+      wheelAcc += dy;
+      const { notches, direction, remainderPx } = dragToWheel(wheelAcc, opt.wheelPxPerNotch);
+      if (notches > 0) {
+        opt.onWheel?.(direction, notches, t.clientX, t.clientY);
+        wheelAcc = remainderPx;
+      }
+      lastY = t.clientY;
+      lastTs = now;
+      return;
+    }
+
     const dt = now - lastTs;
 
     if (dy !== 0) scrollEl.scrollTop = clampScroll(scrollEl.scrollTop + dy);
@@ -99,6 +152,13 @@ export function attachMomentumScroll(
   const onTouchEnd = (): void => {
     if (!tracking) return;
     tracking = false;
+    if (forwarding) {
+      // Forwarded scroll is 1:1 with the drag — no inertia fling (it would
+      // spam send-keys to the app). Stop cleanly here.
+      forwarding = false;
+      wheelAcc = 0;
+      return;
+    }
     if (Math.abs(velocity) < opt.minVelocity) {
       velocity = 0;
       return;
