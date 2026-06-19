@@ -239,4 +239,66 @@ test.describe("desktop tab-bar", () => {
 
     ctx.tmuxE2E(["kill-session", "-t", name]);
   });
+
+  test("force-selection drag over a mouse-capturing app copies to the browser clipboard", async ({ page, ctx }) => {
+    const name = await ctx.createSession();
+
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await openApp(page);
+
+    await expect(tab(page, name)).toBeVisible({ timeout: 10_000 });
+    await tab(page, name).click();
+    await page.waitForTimeout(500);
+
+    // Fill the screen with full-width marker rows so a drag anywhere over the
+    // terminal body is guaranteed to cross real (non-blank) cells — otherwise
+    // xterm's getSelection() trims to "" and nothing is copied.
+    ctx.tmuxE2E(["send-keys", "-t", name, "yes XXXXXXXXXXXXXXXXXXXXXXXXXXXX | head -40", "Enter"]);
+    await page.waitForTimeout(1000);
+
+    // Reproduce the real scenario: a TUI (claude code, vim) has CAPTURED the
+    // mouse. A bare shell resets DEC private modes on every prompt redraw, so
+    // we hold mouse tracking on with a sleep — during the sleep, mouse mode
+    // stays active exactly as it would inside a real TUI. With mouse tracking
+    // on, a plain drag is forwarded to the app; only the force-selection
+    // modifier yields a local browser-side selection — the gesture this
+    // feature documents.
+    ctx.tmuxE2E(["send-keys", "-t", name, "printf '\\033[?1000h\\033[?1006h'; sleep 30", "Enter"]);
+    await page.waitForTimeout(800);
+
+    const screen = page.locator(".term-slot.is-active .xterm-screen");
+    const box = await screen.boundingBox();
+    if (!box) throw new Error("xterm screen has no bounding box");
+
+    // Force-selection modifier is platform-fixed in xterm: Option(⌥)=Alt on
+    // macOS (where Playwright's Desktop Chrome reports as Mac), Shift elsewhere.
+    // Playwright merges the held modifier into the mouse events, so xterm sees
+    // it on mousedown and bypasses mouse-reporting to do a local selection.
+    const isMac = await page.evaluate(() => navigator.platform.toUpperCase().includes("MAC"));
+    const forceKey = isMac ? "Alt" : "Shift";
+    await page.keyboard.down(forceKey);
+    await page.mouse.move(box.x + 10, box.y + 8);
+    await page.mouse.down();
+    await page.waitForTimeout(50);
+    // Drag in two legs with a pause so xterm commits the growing selection
+    // between our mid-drag samples (we sample the live selection on mousemove
+    // because the app's mouse capture makes xterm clear it on mouseup).
+    await page.mouse.move(box.x + 90, box.y + 70, { steps: 15 });
+    await page.waitForTimeout(80);
+    await page.mouse.move(box.x + 150, box.y + 120, { steps: 15 });
+    await page.waitForTimeout(80);
+    await page.mouse.up();
+    await page.keyboard.up(forceKey);
+
+    // Our own toast (not the remote app's) confirms the browser-side copy.
+    await expect(page.getByText(/已复制 \d+ 字符到剪贴板/)).toBeVisible({ timeout: 5_000 });
+
+    // And the text actually landed in THIS browser's clipboard — the X-filled
+    // rows we just selected, not whatever the host's pbcopy held.
+    const clip = await page.evaluate(() => navigator.clipboard.readText());
+    expect(clip.length).toBeGreaterThan(0);
+    expect(clip).toMatch(/X/);
+
+    ctx.tmuxE2E(["kill-session", "-t", name]);
+  });
 });
