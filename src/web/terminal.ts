@@ -2,6 +2,7 @@ import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
 import { CanvasAddon } from "xterm-addon-canvas";
 import { attachMomentumScroll } from "./momentum-scroll";
+import { showToast } from "./ui/toast";
 import "xterm/css/xterm.css";
 import type { ClientWsMessage, ServerWsMessage } from "@shared/protocol";
 import { hubWsUrl, refreshSecret } from "./hub-fetch";
@@ -74,6 +75,14 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     disableStdin: opts.readOnly ?? false,
     scrollback: 5000,
     smoothScrollDuration: 0,
+    // Let the user force a LOCAL (browser-side) selection even when a TUI app
+    // (claude code, vim) has captured the mouse. xterm's force-selection
+    // modifier is platform-fixed: Option(⌥) on macOS — and only when this opt
+    // is on — vs Shift on Windows/Linux. Without this, a Mac user's drag is
+    // always forwarded to the app, which copies into the HOST clipboard
+    // (pbcopy) — unreachable from the browser. See the mouseup→clipboard wiring
+    // below for the second half (actually copying the selection locally).
+    macOptionClickForcesSelection: true,
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
@@ -163,6 +172,69 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       });
     }
   }
+
+  // ── Drag selection → browser clipboard ─────────────────────────────
+  // A TUI (claude code, vim, less) captures the mouse, so a plain drag is
+  // forwarded to the app and the app copies into the SERVER's clipboard
+  // (pbcopy on the host) — unreachable from the user's browser. To select
+  // locally while an app holds the mouse the user uses xterm's force-selection
+  // modifier (Option/⌥ on macOS — enabled via macOptionClickForcesSelection
+  // above — Shift on Windows/Linux); in a plain shell with no mouse capture a
+  // bare drag selects directly. Either way we copy that LOCAL selection into
+  // the browser clipboard so the text lands where the user actually is. The
+  // canvas renderer paints the selection itself (no real DOM text selection),
+  // so the native Cmd/Ctrl+C path can't see it — we copy explicitly.
+  //
+  // Critical: when an app has captured the mouse, xterm CLEARS the selection
+  // on mouseup, so re-reading getSelection() in the mouseup handler returns "".
+  // We instead capture the live selection as it changes during the drag and
+  // copy that captured value on mouseup. mousedown resets the buffer so a plain
+  // click (no drag, no selection-change) never re-copies a stale selection.
+  let pendingSelection = "";
+  const trackSelection = (): void => {
+    if (disposed) return;
+    try { const s = term.getSelection(); if (s) pendingSelection = s; } catch { /* disposed */ }
+  };
+  const selectionDisposable = term.onSelectionChange(trackSelection);
+  // onSelectionChange can be deferred a frame, so also sample the live
+  // selection synchronously on every drag move — by mouseup the selection is
+  // already gone, but a mid-drag read still has it.
+  const onMouseMove = (e: MouseEvent): void => { if (e.buttons & 1) trackSelection(); };
+  const onMouseDown = (): void => { pendingSelection = ""; };
+  const copyToClipboard = async (text: string): Promise<void> => {
+    const count = [...text].length;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // Fallback for non-secure contexts / older browsers.
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }
+      showToast(`已复制 ${count} 字符到剪贴板`, "info");
+    } catch (e) {
+      console.warn("[tmux-hub] clipboard write failed:", e);
+      showToast("复制失败：浏览器拒绝写入剪贴板", "error");
+    }
+  };
+  const onMouseUp = (): void => {
+    if (disposed) return;
+    let text = pendingSelection;
+    if (!text) {
+      try { text = term.hasSelection() ? term.getSelection() : ""; } catch { text = ""; }
+    }
+    pendingSelection = "";
+    if (text) void copyToClipboard(text);
+  };
+  el.addEventListener("mousedown", onMouseDown);
+  el.addEventListener("mousemove", onMouseMove);
+  el.addEventListener("mouseup", onMouseUp);
 
   // Once `close()` is called we MUST stop touching `term`. Any write into a
   // disposed xterm tunnels into `_renderService.onRequestRedraw` and throws
@@ -595,6 +667,10 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       window.removeEventListener("resize", onResize);
       if (resizeTimer) { clearTimeout(resizeTimer); resizeTimer = null; }
+      try { el.removeEventListener("mousedown", onMouseDown); } catch {}
+      try { el.removeEventListener("mousemove", onMouseMove); } catch {}
+      try { el.removeEventListener("mouseup", onMouseUp); } catch {}
+      try { selectionDisposable.dispose(); } catch {}
       try { detachMomentum?.(); } catch {}
       ws.onmessage = null;
       ws.onclose = null;
