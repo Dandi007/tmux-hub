@@ -410,6 +410,7 @@ export function renderMobile(root: HTMLElement): void {
     onStatus: (s, detail) => {
       if (s === "recording") showToast(detail ? `🎤 ${detail}` : "🎤 录音中", "info");
       else if (s === "transcribing") showToast("📝 转写整理中…", "info");
+      else if (s === "idle" && detail) showToast(detail, "info"); // 端到端耗时
       else if (s === "error" && detail) showToast(detail, "error");
     },
   });
