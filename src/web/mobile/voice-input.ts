@@ -1,5 +1,7 @@
 // src/web/mobile/voice-input.ts
 // 按住 🎤 录音 → POST /api/voice（转写+整理）→ 文本回调落输入框（不自动发送）。
+import { hubFetch } from "../hub-fetch";
+
 export type VoiceStatus = "idle" | "recording" | "transcribing" | "error";
 
 export function pickMime(): string {
@@ -35,7 +37,8 @@ export function renderVoiceButton(deps: VoiceDeps): HTMLButtonElement {
     if (blob.size < 1000 || Date.now() - recStart < 300) { setStatus("idle"); return; }
     setStatus("transcribing");
     try {
-      const res = await fetch("/api/voice", { method: "POST", headers: { "Content-Type": blob.type }, body: blob });
+      // 必须走 hubFetch：/api/voice 是 authed POST，缺 X-Hub-Secret 会 401（裸 fetch 是之前转写失败的根因）。
+      const res = await hubFetch("/api/voice", { method: "POST", headers: { "Content-Type": blob.type }, body: blob });
       if (!res.ok) throw new Error(res.status === 501 ? "语音未启用" : "转写失败");
       const { text } = (await res.json()) as { text?: string };
       if (text && text.trim()) { deps.onText(text.trim()); setStatus("idle"); }
