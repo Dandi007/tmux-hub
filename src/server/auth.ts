@@ -1,6 +1,8 @@
 import type { MiddlewareHandler } from "hono";
 import { loadOrCreateSecret, safeEqual } from "./secret";
 import { verifyCfAccessJwt } from "./cf-access";
+import { gateIdentityFromHeaders } from "./identity";
+import { gateInjectKey } from "./config";
 import { createLogger } from "./logger";
 
 const logger = createLogger("auth");
@@ -61,12 +63,24 @@ export const authGate: MiddlewareHandler = async (c, next) => {
   const cfJwt = c.req.header("cf-access-jwt-assertion");
   const localSecret = c.req.header("x-hub-secret");
 
+  // gate-id 注入身份：edge 的 gated 片段经 forward_auth /verify 注入 X-Auth-User-Id +
+  // X-Auth-Sig。验签过即可信 uid 为已鉴权用户。key 未配置时 gateUid 恒为 null（惰化），
+  // 行为回退到既有的 cf-access / hub.secret，向后兼容。
+  const gateUid = gateIdentityFromHeaders(
+    { uid: c.req.header("x-auth-user-id"), sig: c.req.header("x-auth-sig") },
+    gateInjectKey(),
+    Math.floor(Date.now() / 1000),
+  );
+
   const cfOk = cfJwt ? await verifyCfAccessJwt(cfJwt).catch(() => null) : null;
   const localOk = !!localSecret && safeEqual(localSecret, hubSecret());
-  const authed = !!cfOk || localOk;
+  const authed = !!gateUid || !!cfOk || localOk;
+
+  // 身份优先级：gate-id 真实 uid > CF email > 本地 secret 占位。
+  const identity = gateUid ?? cfOk?.email ?? "local-secret";
 
   if (isReadOnly(c.req.method, path)) {
-    if (authed) c.set("identity", cfOk?.email ?? "local-secret");
+    if (authed) c.set("identity", identity);
     return next();
   }
 
@@ -74,7 +88,7 @@ export const authGate: MiddlewareHandler = async (c, next) => {
     logger.warn({ method: c.req.method, path }, "auth rejected: unauthorized write");
     return c.json({ error: "unauthorized" }, 401);
   }
-  c.set("identity", cfOk?.email ?? "local-secret");
+  c.set("identity", identity);
   return next();
 };
 
