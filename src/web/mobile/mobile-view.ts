@@ -383,7 +383,14 @@ export function renderMobile(root: HTMLElement): void {
   sendBtn.addEventListener("click", () => { doSend(); });
   keysBtn.addEventListener("click", () => { setKeysPanel(!keysOpen); });
 
-  // 🎤 语音：转写+整理后落框，聚焦待复核（不发送）
+  // 组装顺序：📎(已 append) → aiBanner → textarea → 🎤 → ↑ → ⌨
+  // 先 append aiBanner 和 ta，再调 renderVoiceButton，使其内部 deps.parent.appendChild(btn)
+  // 恰好落在 ta 之后——单次 append，无需在调用后再手动插入。
+  inputBar.appendChild(aiBanner);
+  inputBar.appendChild(ta);
+
+  // 🎤 语音：转写+整理后落框，聚焦待复核（不发送）。
+  // renderVoiceButton 内部已执行 deps.parent.appendChild(btn)，此处不再重复 append。
   const micBtn = renderVoiceButton({
     parent: inputBar,
     onText: (text) => { ta.value = text; setEditing(true); autoResize(); },
@@ -393,12 +400,7 @@ export function renderMobile(root: HTMLElement): void {
       else if (s === "error" && detail) showToast(detail, "error");
     },
   });
-  micBtn.className = "input-bar__mic";
 
-  // 组装顺序：📎(已 append) → aiBanner → textarea → 🎤 → ↑ ；⌨ 在最外
-  inputBar.appendChild(aiBanner);
-  inputBar.appendChild(ta);
-  inputBar.appendChild(micBtn);
   inputBar.appendChild(sendBtn);
   inputBar.appendChild(keysBtn);
   undoBtn.addEventListener("click", () => { flow.undo(); ta.focus(); });
