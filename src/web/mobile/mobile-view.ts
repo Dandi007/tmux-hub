@@ -421,6 +421,9 @@ export function renderMobile(root: HTMLElement): void {
   inputBar.appendChild(keysBtn);
   undoBtn.addEventListener("click", () => { flow.undo(); ta.focus(); });
 
+  // 输入时实时重算高度：autoResize 先置 auto 再取 scrollHeight，所以既能撑高也能在删字时缩回。
+  // 缺这条会导致语音/复核把框撑高后，手动编辑/清空不缩回（变长缩不回去的根因）。
+  ta.addEventListener("input", autoResize);
   ta.addEventListener("focus", () => { if (!editing) setEditing(true); });
   ta.addEventListener("blur", () => {
     setTimeout(() => {
