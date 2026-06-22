@@ -651,7 +651,9 @@ button.is-danger:hover { filter: brightness(1.15); }
   background: var(--color-bg);
 }
 .input-bar__attach,
-.input-bar__expand {
+.input-bar__expand,
+.input-bar__mic,
+.input-bar__keys {
   flex: 0 0 auto;
   width: var(--tap-min);
   height: var(--tap-min);
@@ -670,12 +672,16 @@ button.is-danger:hover { filter: brightness(1.15); }
               transform var(--duration-fast) var(--ease-out-expo);
 }
 .input-bar__attach:active,
-.input-bar__expand:active { background: var(--color-surface-hi); }
+.input-bar__expand:active,
+.input-bar__mic:active,
+.input-bar__keys:active { background: var(--color-surface-hi); }
 .input-bar__expand.is-active {
   background: var(--color-accent);
   color: var(--color-bg);
   transform: rotate(45deg);
 }
+.input-bar__keys.is-active { background: var(--color-accent); color: var(--color-bg); }
+.input-bar__mic.rec { background: var(--color-accent); color: var(--color-bg); }
 .input-bar__textarea {
   flex: 1 1 0;
   min-width: 0;

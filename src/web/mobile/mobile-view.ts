@@ -17,6 +17,7 @@ import { confirmModal } from "../ui/confirm-modal";
 import { saveLastSession, loadLastSession } from "../shared/last-session";
 import { createSuggestFlow, type Phase } from "./suggest-flow";
 import { getPaneMode, requestSuggestion } from "./suggest-client";
+import { renderVoiceButton } from "./voice-input";
 
 export function renderMobile(root: HTMLElement): void {
   root.replaceChildren();
@@ -289,13 +290,22 @@ export function renderMobile(root: HTMLElement): void {
   const ta = document.createElement("textarea");
   ta.className = "input-bar__textarea";
   ta.rows = 1;
-  ta.placeholder = "输入...";
+  ta.placeholder = "说点什么，或按住 🎤 说话…";
 
-  const rightBtn = document.createElement("button");
-  rightBtn.type = "button";
-  rightBtn.className = "input-bar__expand";
-  rightBtn.setAttribute("aria-label", "展开键盘");
-  rightBtn.textContent = "+";
+  // ⌨ 特殊键面板开关（永远开关，不再兼发送）
+  const keysBtn = document.createElement("button");
+  keysBtn.type = "button";
+  keysBtn.className = "input-bar__keys";
+  keysBtn.setAttribute("aria-label", "特殊键");
+  keysBtn.setAttribute("aria-expanded", "false");
+  keysBtn.textContent = "⌨";
+
+  // ↑ 专用发送（常驻）
+  const sendBtn = document.createElement("button");
+  sendBtn.type = "button";
+  sendBtn.className = "input-bar__send";
+  sendBtn.setAttribute("aria-label", "发送");
+  sendBtn.textContent = "↑";
 
   let editing = false;
   let keysOpen = false;
@@ -331,11 +341,8 @@ export function renderMobile(root: HTMLElement): void {
     inputBar.classList.toggle("is-loading", phase === "loading");
     aiBanner.hidden = phase !== "review";
     ta.readOnly = phase === "loading";
-    if (phase === "review") { autoResize(); }
-    else { resetResize(); }
-    if (phase === "loading") { rightBtn.textContent = "取消"; }
-    else if (editing) { rightBtn.textContent = "发送"; }
-    else { rightBtn.textContent = "+"; }
+    if (phase === "review") { autoResize(); } else { resetResize(); }
+    sendBtn.textContent = phase === "loading" ? "取消" : "↑";
   };
 
   const flow = createSuggestFlow({
@@ -354,25 +361,15 @@ export function renderMobile(root: HTMLElement): void {
   const setEditing = (open: boolean) => {
     editing = open;
     inputBar.classList.toggle("is-editing", open);
-    if (open) {
-      if (keysOpen) setKeysPanel(false);
-      rightBtn.textContent = "发送";
-      rightBtn.className = "input-bar__send";
-      rightBtn.setAttribute("aria-label", "发送");
-      ta.focus();
-    } else {
-      ta.blur();
-      rightBtn.textContent = "+";
-      rightBtn.className = "input-bar__expand";
-      rightBtn.setAttribute("aria-label", "展开键盘");
-    }
+    if (open) { if (keysOpen) setKeysPanel(false); ta.focus(); }
+    else { ta.blur(); }
   };
 
   const setKeysPanel = (open: boolean) => {
     keysOpen = open;
     keysPanel.classList.toggle("is-open", open);
-    rightBtn.classList.toggle("is-active", open);
-    rightBtn.setAttribute("aria-expanded", String(open));
+    keysBtn.classList.toggle("is-active", open);
+    keysBtn.setAttribute("aria-expanded", String(open));
   };
 
   const attachBtn = renderImageAttachButton({
@@ -383,18 +380,28 @@ export function renderMobile(root: HTMLElement): void {
   });
   attachBtn.className = "input-bar__attach";
 
+  sendBtn.addEventListener("click", () => { doSend(); });
+  keysBtn.addEventListener("click", () => { setKeysPanel(!keysOpen); });
+
+  // 🎤 语音：转写+整理后落框，聚焦待复核（不发送）
+  const micBtn = renderVoiceButton({
+    parent: inputBar,
+    onText: (text) => { ta.value = text; setEditing(true); autoResize(); },
+    onStatus: (s, detail) => {
+      if (s === "recording") showToast(detail ? `🎤 ${detail}` : "🎤 录音中", "info");
+      else if (s === "transcribing") showToast("📝 转写整理中…", "info");
+      else if (s === "error" && detail) showToast(detail, "error");
+    },
+  });
+  micBtn.className = "input-bar__mic";
+
+  // 组装顺序：📎(已 append) → aiBanner → textarea → 🎤 → ↑ ；⌨ 在最外
   inputBar.appendChild(aiBanner);
   inputBar.appendChild(ta);
+  inputBar.appendChild(micBtn);
+  inputBar.appendChild(sendBtn);
+  inputBar.appendChild(keysBtn);
   undoBtn.addEventListener("click", () => { flow.undo(); ta.focus(); });
-
-  rightBtn.addEventListener("click", () => {
-    if (editing) {
-      doSend();
-    } else {
-      setKeysPanel(!keysOpen);
-    }
-  });
-  inputBar.appendChild(rightBtn);
 
   ta.addEventListener("focus", () => { if (!editing) setEditing(true); });
   ta.addEventListener("blur", () => {
