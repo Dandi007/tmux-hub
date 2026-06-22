@@ -13,6 +13,7 @@ import { bootstrapTmuxHooks } from "./tmux-bootstrap";
 import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS, IMAGE_DIR, MAX_IMAGE_BYTES, expandHome, SUGGEST_ENABLED, SUGGEST_ENDPOINT, SUGGEST_MODEL, SUGGEST_CAPTURE_LINES, SUGGEST_TIMEOUT_MS, SUGGEST_PROTOCOL, SUGGEST_HISTORY_ENABLED, SUGGEST_HISTORY_PATH, SUGGEST_HISTORY_TOP, VOICE_ENABLED, BLOB_BASE, ASR_BASE, CLEAN_ENDPOINT, CLEAN_TIMEOUT_MS } from "./config";
 import { buildSuggestRoutes } from "./suggest-routes";
 import { buildVoiceRoutes } from "./voice-routes";
+import { VoiceStore } from "./voice-store";
 import { transcribeAudio } from "./voice/transcribe";
 import { cleanViaService } from "./voice/clean-client";
 import { makeCcSwitchCaller } from "./suggest/cc-switch-client";
@@ -178,10 +179,14 @@ app.route("/", buildSuggestRoutes({
     topN: SUGGEST_HISTORY_TOP,
   },
 }));
+// 语音库：仅在语音启用时开（避免无谓建 db）。按账号保存文本+原始音频引用。
+const voiceStore = VOICE_ENABLED ? new VoiceStore() : null;
 app.route("/", buildVoiceRoutes({
   enabled: VOICE_ENABLED,
   transcribe: (bytes) => transcribeAudio(bytes, { blobBase: BLOB_BASE, asrBase: ASR_BASE, fetchFn: fetch }),
   clean: (text) => cleanViaService(text, { endpoint: CLEAN_ENDPOINT, timeoutMs: CLEAN_TIMEOUT_MS }),
+  store: voiceStore,
+  fetchBlob: (blobId) => fetch(`${BLOB_BASE}/blob/${encodeURIComponent(blobId)}`),
 }));
 app.get("/system/auth-check", async (c) => {
   const devBind = process.env.TMUX_HUB_DEV_BIND_SECRET === "1";

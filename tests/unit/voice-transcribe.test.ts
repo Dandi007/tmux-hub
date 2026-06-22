@@ -10,6 +10,7 @@ describe("transcribeAudio", () => {
     });
     const out = await transcribeAudio(new Uint8Array([1, 2, 3]), { blobBase: "http://b", asrBase: "http://a", fetchFn });
     expect(out.text).toBe("你好世界");
+    expect(out.audioBlobId).toBe("B1"); // 复用上传的 blob_id
   });
   test("blob 非 2xx 抛错", async () => {
     const fetchFn = mock(async () => new Response("nope", { status: 500 }));
