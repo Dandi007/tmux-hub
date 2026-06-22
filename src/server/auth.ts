@@ -80,6 +80,11 @@ export const authGate: MiddlewareHandler = async (c, next) => {
   const identity = gateUid ?? cfOk?.email ?? "local-secret";
 
   if (isReadOnly(c.req.method, path)) {
+    // NOTE: read-only paths pass through even when unauthenticated; identity is
+    // only set when authed. Downstream read handlers MUST NOT treat the presence
+    // of c.get("identity") as proof of auth, nor its absence as a hard gate —
+    // this branch is intentionally anonymous-readable. Per-user authorization
+    // (e.g. owner-scoped data) must re-check auth explicitly, not infer it here.
     if (authed) c.set("identity", identity);
     return next();
   }

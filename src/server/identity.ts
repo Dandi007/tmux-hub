@@ -27,7 +27,9 @@ export function verifyGateIdentity(
   now: number,
   skew: number,
 ): boolean {
-  if (!uid || !sig || !key) return false;
+  // !app guard: an empty app would sign `uid||ts` (no app binding) — reject it so
+  // the app-scoping (hub vs todo) can never be silently weakened by a bad caller.
+  if (!uid || !app || !sig || !key) return false;
   const [tsStr] = sig.split(".", 2);
   const ts = Number(tsStr);
   if (!Number.isFinite(ts) || Math.abs(now - ts) > skew) return false;

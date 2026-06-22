@@ -52,8 +52,9 @@ describe("verifyGateIdentity", () => {
     expect(verifyGateIdentity("u1", GATE_APP, `abc.${"0".repeat(64)}`, KEY, now, 300)).toBe(false);
   });
 
-  test("empty uid / sig / key → false", () => {
+  test("empty uid / app / sig / key → false", () => {
     expect(verifyGateIdentity("", GATE_APP, sign("", GATE_APP, now), KEY, now, 300)).toBe(false);
+    expect(verifyGateIdentity("u1", "", sign("u1", "", now), KEY, now, 300)).toBe(false);
     expect(verifyGateIdentity("u1", GATE_APP, "", KEY, now, 300)).toBe(false);
     expect(verifyGateIdentity("u1", GATE_APP, sign("u1", GATE_APP, now), "", now, 300)).toBe(false);
   });
