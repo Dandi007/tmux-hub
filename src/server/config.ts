@@ -147,3 +147,9 @@ export const CLEAN_ENDPOINT = process.env.TMUX_HUB_CLEAN_ENDPOINT ?? "http://127
 export const CLEAN_TIMEOUT_MS = parsePositiveInt(
   process.env.TMUX_HUB_CLEAN_TIMEOUT_MS, 18000, "TMUX_HUB_CLEAN_TIMEOUT_MS",
 );
+
+// === gate-id 身份验签 ===
+// 与 gate-auth 共享的注入签名密钥（edge 经 forward_auth 注入 X-Auth-Sig）。
+// 函数而非 eager const：测试可动态设 env；生产 svc 启动前已由 hub.env 注入。
+// 空（未配置）时 authGate 的 gate-id 路径自动惰化，回退 hub.secret/cf-access。
+export const gateInjectKey = (): string => process.env.GATE_INJECT_KEY ?? "";
