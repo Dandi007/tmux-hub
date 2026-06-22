@@ -27,6 +27,9 @@ for await (const file of glob.scan(".")) {
   src.split("\n").forEach((line, idx) => {
     if (!CALL_PATTERNS.some((re) => re.test(line))) return;
     if (line.includes("-L")) return;
+    // `tmux -V` (version) and `-h`/`-V` info flags never connect to a server,
+    // so they touch no socket — exempt them (was a false positive on env probes).
+    if (/["']-V["']/.test(line) || /["']-h["']/.test(line)) return;
     offenders.push(`${file}:${idx + 1}: ${line.trim()}`);
   });
 }
