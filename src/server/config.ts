@@ -134,3 +134,16 @@ export const SUGGEST_HISTORY_PATH = expandHome(
 export const SUGGEST_HISTORY_TOP = parsePositiveInt(
   process.env.TMUX_HUB_SUGGEST_HISTORY_TOP, 80, "TMUX_HUB_SUGGEST_HISTORY_TOP",
 );
+
+// === 语音转写（flag-gated，默认关）===
+// 整功能开关；关闭时 /api/voice 返回 501，前端据此不显示 🎤。
+export const VOICE_ENABLED = process.env.TMUX_HUB_VOICE === "1";
+// media-pipeline blob/asr 服务（todo-pwa 已在用同一对）。
+export const BLOB_BASE = process.env.TMUX_HUB_BLOB_BASE ?? "http://127.0.0.1:8097";
+export const ASR_BASE = process.env.TMUX_HUB_ASR_BASE ?? "http://127.0.0.1:8095";
+// sub-clean 订阅整理服务；不可达/超时时 /api/voice 降级返回原始转写。
+export const CLEAN_ENDPOINT = process.env.TMUX_HUB_CLEAN_ENDPOINT ?? "http://127.0.0.1:8110";
+// 整理 client 超时；sub-clean warm 整理实测 5~14s，给 18s 余量，超时则回退原文。
+export const CLEAN_TIMEOUT_MS = parsePositiveInt(
+  process.env.TMUX_HUB_CLEAN_TIMEOUT_MS, 18000, "TMUX_HUB_CLEAN_TIMEOUT_MS",
+);
