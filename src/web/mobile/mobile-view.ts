@@ -393,7 +393,20 @@ export function renderMobile(root: HTMLElement): void {
   // 🎤 语音：转写+整理后落框，聚焦待复核（不发送）。renderVoiceButton 内部 append 到 parent。
   renderVoiceButton({
     parent: pill,
-    onText: (text) => { ta.value = text; setEditing(true); autoResize(); },
+    onText: (text) => {
+      // 在光标处插入而非覆盖：连续说多段会累加，不会冲掉前一段（沿用 📎 上传的插入写法）。
+      const start = ta.selectionStart ?? ta.value.length;
+      const end = ta.selectionEnd ?? ta.value.length;
+      const before = ta.value.slice(0, start);
+      const after = ta.value.slice(end);
+      const sep = before && !/\s$/.test(before) ? " " : "";
+      const ins = sep + text;
+      ta.value = before + ins + after;
+      setEditing(true);
+      const caret = before.length + ins.length;
+      ta.setSelectionRange(caret, caret);
+      autoResize();
+    },
     onStatus: (s, detail) => {
       if (s === "recording") showToast(detail ? `🎤 ${detail}` : "🎤 录音中", "info");
       else if (s === "transcribing") showToast("📝 转写整理中…", "info");
