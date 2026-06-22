@@ -151,11 +151,13 @@ function assertLoopbackBase(name: string, base: string): string {
 }
 export const BLOB_BASE = assertLoopbackBase("TMUX_HUB_BLOB_BASE", process.env.TMUX_HUB_BLOB_BASE ?? "http://127.0.0.1:8097");
 export const ASR_BASE = assertLoopbackBase("TMUX_HUB_ASR_BASE", process.env.TMUX_HUB_ASR_BASE ?? "http://127.0.0.1:8095");
-// sub-clean 订阅整理服务；不可达/超时时 /api/voice 降级返回原始转写。
-export const CLEAN_ENDPOINT = process.env.TMUX_HUB_CLEAN_ENDPOINT ?? "http://127.0.0.1:8110";
-// 整理 client 超时；sub-clean warm 整理实测 5~14s，给 18s 余量，超时则回退原文。
+// 整理走 cc-switch（OpenAI 兼容网关，无状态 HTTP）；不可达/超时时 /api/voice 降级返回原始转写。
+// 实测 lingzhi/kimi-k2.6 ~0.8s（比旧 sub-clean 订阅暖会话 5~13s 快一个数量级、无冷启动尖峰）。
+export const CLEAN_CC_ENDPOINT = process.env.TMUX_HUB_CLEAN_CC_ENDPOINT ?? "http://127.0.0.1:15721";
+export const CLEAN_MODEL = process.env.TMUX_HUB_CLEAN_MODEL ?? "lingzhi/kimi-k2.6";
+// 整理 client 超时；kimi 亚秒级，给 12s 余量兜住网关偶发抖动，超时则回退原文。
 export const CLEAN_TIMEOUT_MS = parsePositiveInt(
-  process.env.TMUX_HUB_CLEAN_TIMEOUT_MS, 18000, "TMUX_HUB_CLEAN_TIMEOUT_MS",
+  process.env.TMUX_HUB_CLEAN_TIMEOUT_MS, 12000, "TMUX_HUB_CLEAN_TIMEOUT_MS",
 );
 
 // === gate-id 身份验签 ===
