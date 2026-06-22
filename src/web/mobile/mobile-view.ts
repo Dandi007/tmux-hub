@@ -357,7 +357,9 @@ export function renderMobile(root: HTMLElement): void {
 
   const flow = createSuggestFlow({
     getText: () => ta.value,
-    setText: (s) => { ta.value = s; },
+    // 程序化改值不触发 input 事件 → autoResize 不会自动跑；这里显式复位高度，
+    // 否则 "other" 模式发送后 setText("") 清空但框还撑着（空框卡高 bug）。
+    setText: (s) => { ta.value = s; if (s) autoResize(); else resetResize(); },
     send,
     getSession: () => openedName,
     getMode: () => currentMode,
