@@ -1,7 +1,8 @@
 export interface VoiceDeps { blobBase: string; asrBase: string; fetchFn?: (url: string, init?: RequestInit) => Promise<Response>; }
 
 // 音频字节 → mp-blob 拿 blob_id → mp-asr 拿整段 text。任一上游非 2xx 抛错（由端点转 502）。
-export async function transcribeAudio(bytes: Uint8Array, deps: VoiceDeps): Promise<{ text: string }> {
+// 返回 audioBlobId 复用同一次上传的 blob（语音按账号保存时无需二次上传原始音频）。
+export async function transcribeAudio(bytes: Uint8Array, deps: VoiceDeps): Promise<{ text: string; audioBlobId: string }> {
   const doFetch = deps.fetchFn ?? fetch;
   const put = await doFetch(`${deps.blobBase}/blob`, { method: "PUT", body: bytes as BodyInit });
   if (!put.ok) throw new Error(`blob upload failed: ${put.status}`);
@@ -12,5 +13,5 @@ export async function transcribeAudio(bytes: Uint8Array, deps: VoiceDeps): Promi
   });
   if (!asr.ok) throw new Error(`asr failed: ${asr.status}`);
   const data = (await asr.json()) as { text?: string };
-  return { text: data.text ?? "" };
+  return { text: data.text ?? "", audioBlobId: blob_id };
 }
