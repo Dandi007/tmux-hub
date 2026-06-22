@@ -290,7 +290,7 @@ export function renderMobile(root: HTMLElement): void {
   const ta = document.createElement("textarea");
   ta.className = "input-bar__textarea";
   ta.rows = 1;
-  ta.placeholder = "说点什么，或按住 🎤 说话…";
+  ta.placeholder = "说点什么…";
 
   // ⌨ 特殊键面板开关（永远开关，不再兼发送）
   const keysBtn = document.createElement("button");
