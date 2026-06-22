@@ -14,7 +14,7 @@ import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS, IMAGE_DIR,
 import { buildSuggestRoutes } from "./suggest-routes";
 import { buildVoiceRoutes } from "./voice-routes";
 import { VoiceStore } from "./voice-store";
-import { transcribeAudio } from "./voice/transcribe";
+import { transcribeAudio, blobIdToHex } from "./voice/transcribe";
 import { cleanViaService } from "./voice/clean-client";
 import { makeCcSwitchCaller } from "./suggest/cc-switch-client";
 import { loadOrCreateSecret, safeEqual } from "./secret";
@@ -186,7 +186,7 @@ app.route("/", buildVoiceRoutes({
   transcribe: (bytes) => transcribeAudio(bytes, { blobBase: BLOB_BASE, asrBase: ASR_BASE, fetchFn: fetch }),
   clean: (text) => cleanViaService(text, { endpoint: CLEAN_ENDPOINT, timeoutMs: CLEAN_TIMEOUT_MS }),
   store: voiceStore,
-  fetchBlob: (blobId) => fetch(`${BLOB_BASE}/blob/${encodeURIComponent(blobId)}`),
+  fetchBlob: (blobId) => fetch(`${BLOB_BASE}/blob/${encodeURIComponent(blobIdToHex(blobId))}`),
 }));
 app.get("/system/auth-check", async (c) => {
   const devBind = process.env.TMUX_HUB_DEV_BIND_SECRET === "1";
