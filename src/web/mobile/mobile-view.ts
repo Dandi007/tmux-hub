@@ -17,6 +17,7 @@ import { confirmModal } from "../ui/confirm-modal";
 import { saveLastSession, loadLastSession } from "../shared/last-session";
 import { createSuggestFlow, type Phase } from "./suggest-flow";
 import { getPaneMode, requestSuggestion } from "./suggest-client";
+import { renderVoiceButton } from "./voice-input";
 
 export function renderMobile(root: HTMLElement): void {
   root.replaceChildren();
@@ -289,13 +290,22 @@ export function renderMobile(root: HTMLElement): void {
   const ta = document.createElement("textarea");
   ta.className = "input-bar__textarea";
   ta.rows = 1;
-  ta.placeholder = "输入...";
+  ta.placeholder = "说点什么…";
 
-  const rightBtn = document.createElement("button");
-  rightBtn.type = "button";
-  rightBtn.className = "input-bar__expand";
-  rightBtn.setAttribute("aria-label", "展开键盘");
-  rightBtn.textContent = "+";
+  // ⌨ 特殊键面板开关（永远开关，不再兼发送）
+  const keysBtn = document.createElement("button");
+  keysBtn.type = "button";
+  keysBtn.className = "input-bar__keys";
+  keysBtn.setAttribute("aria-label", "特殊键");
+  keysBtn.setAttribute("aria-expanded", "false");
+  keysBtn.textContent = "⌨";
+
+  // ↑ 专用发送（常驻）
+  const sendBtn = document.createElement("button");
+  sendBtn.type = "button";
+  sendBtn.className = "input-bar__send";
+  sendBtn.setAttribute("aria-label", "发送");
+  sendBtn.textContent = "↑";
 
   let editing = false;
   let keysOpen = false;
@@ -331,11 +341,8 @@ export function renderMobile(root: HTMLElement): void {
     inputBar.classList.toggle("is-loading", phase === "loading");
     aiBanner.hidden = phase !== "review";
     ta.readOnly = phase === "loading";
-    if (phase === "review") { autoResize(); }
-    else { resetResize(); }
-    if (phase === "loading") { rightBtn.textContent = "取消"; }
-    else if (editing) { rightBtn.textContent = "发送"; }
-    else { rightBtn.textContent = "+"; }
+    if (phase === "review") { autoResize(); } else { resetResize(); }
+    sendBtn.textContent = phase === "loading" ? "取消" : "↑";
   };
 
   const flow = createSuggestFlow({
@@ -354,48 +361,70 @@ export function renderMobile(root: HTMLElement): void {
   const setEditing = (open: boolean) => {
     editing = open;
     inputBar.classList.toggle("is-editing", open);
-    if (open) {
-      if (keysOpen) setKeysPanel(false);
-      rightBtn.textContent = "发送";
-      rightBtn.className = "input-bar__send";
-      rightBtn.setAttribute("aria-label", "发送");
-      ta.focus();
-    } else {
-      ta.blur();
-      rightBtn.textContent = "+";
-      rightBtn.className = "input-bar__expand";
-      rightBtn.setAttribute("aria-label", "展开键盘");
-    }
+    if (open) { if (keysOpen) setKeysPanel(false); ta.focus(); }
+    else { ta.blur(); }
   };
 
   const setKeysPanel = (open: boolean) => {
     keysOpen = open;
     keysPanel.classList.toggle("is-open", open);
-    rightBtn.classList.toggle("is-active", open);
-    rightBtn.setAttribute("aria-expanded", String(open));
+    keysBtn.classList.toggle("is-active", open);
+    keysBtn.setAttribute("aria-expanded", String(open));
   };
 
+  // pill 容器：暗色圆角，把 📎 / textarea / 🎤 / ↑ 包成一个整体（对齐 todo 结构）。
+  const pill = document.createElement("div");
+  pill.className = "input-bar__pill";
+
   const attachBtn = renderImageAttachButton({
-    parent: inputBar,
+    parent: pill,
     getSession: () => openedName,
     getTextarea: () => ta,
     openDrawer: () => setEditing(true),
   });
   attachBtn.className = "input-bar__attach";
 
+  sendBtn.addEventListener("click", () => { doSend(); });
+  keysBtn.addEventListener("click", () => { setKeysPanel(!keysOpen); });
+
+  // pill 内顺序：📎(renderImageAttachButton 已 append) → textarea → 🎤 → ↑
+  pill.appendChild(ta);
+
+  // 🎤 语音：转写+整理后落框，聚焦待复核（不发送）。renderVoiceButton 内部 append 到 parent。
+  renderVoiceButton({
+    parent: pill,
+    onText: (text) => {
+      // 在光标处插入而非覆盖：连续说多段会累加，不会冲掉前一段（沿用 📎 上传的插入写法）。
+      const start = ta.selectionStart ?? ta.value.length;
+      const end = ta.selectionEnd ?? ta.value.length;
+      const before = ta.value.slice(0, start);
+      const after = ta.value.slice(end);
+      const sep = before && !/\s$/.test(before) ? " " : "";
+      const ins = sep + text;
+      ta.value = before + ins + after;
+      setEditing(true);
+      const caret = before.length + ins.length;
+      ta.setSelectionRange(caret, caret);
+      autoResize();
+    },
+    onStatus: (s, detail) => {
+      if (s === "recording") showToast(detail ? `🎤 ${detail}` : "🎤 录音中", "info");
+      else if (s === "transcribing") showToast("📝 转写整理中…", "info");
+      else if (s === "idle" && detail) showToast(detail, "info"); // 端到端耗时
+      else if (s === "error" && detail) showToast(detail, "error");
+    },
+  });
+  pill.appendChild(sendBtn);
+
+  // input bar：AI banner（仅 review 态显示，在 pill 上方）+ pill + 外侧 ⌨。
   inputBar.appendChild(aiBanner);
-  inputBar.appendChild(ta);
+  inputBar.appendChild(pill);
+  inputBar.appendChild(keysBtn);
   undoBtn.addEventListener("click", () => { flow.undo(); ta.focus(); });
 
-  rightBtn.addEventListener("click", () => {
-    if (editing) {
-      doSend();
-    } else {
-      setKeysPanel(!keysOpen);
-    }
-  });
-  inputBar.appendChild(rightBtn);
-
+  // 输入时实时重算高度：autoResize 先置 auto 再取 scrollHeight，所以既能撑高也能在删字时缩回。
+  // 缺这条会导致语音/复核把框撑高后，手动编辑/清空不缩回（变长缩不回去的根因）。
+  ta.addEventListener("input", autoResize);
   ta.addEventListener("focus", () => { if (!editing) setEditing(true); });
   ta.addEventListener("blur", () => {
     setTimeout(() => {

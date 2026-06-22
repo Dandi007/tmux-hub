@@ -10,8 +10,11 @@ import { InputRouter, HubError } from "./input-router";
 import { pinViewport, getNativeAttachCount } from "./viewport-pinner";
 import { tmux } from "./tmux-cmd";
 import { bootstrapTmuxHooks } from "./tmux-bootstrap";
-import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS, IMAGE_DIR, MAX_IMAGE_BYTES, expandHome, SUGGEST_ENABLED, SUGGEST_ENDPOINT, SUGGEST_MODEL, SUGGEST_CAPTURE_LINES, SUGGEST_TIMEOUT_MS, SUGGEST_PROTOCOL, SUGGEST_HISTORY_ENABLED, SUGGEST_HISTORY_PATH, SUGGEST_HISTORY_TOP } from "./config";
+import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS, IMAGE_DIR, MAX_IMAGE_BYTES, expandHome, SUGGEST_ENABLED, SUGGEST_ENDPOINT, SUGGEST_MODEL, SUGGEST_CAPTURE_LINES, SUGGEST_TIMEOUT_MS, SUGGEST_PROTOCOL, SUGGEST_HISTORY_ENABLED, SUGGEST_HISTORY_PATH, SUGGEST_HISTORY_TOP, VOICE_ENABLED, BLOB_BASE, ASR_BASE, CLEAN_ENDPOINT, CLEAN_TIMEOUT_MS } from "./config";
 import { buildSuggestRoutes } from "./suggest-routes";
+import { buildVoiceRoutes } from "./voice-routes";
+import { transcribeAudio } from "./voice/transcribe";
+import { cleanViaService } from "./voice/clean-client";
 import { makeCcSwitchCaller } from "./suggest/cc-switch-client";
 import { loadOrCreateSecret, safeEqual } from "./secret";
 import { authGate, adminGate } from "./auth";
@@ -174,6 +177,11 @@ app.route("/", buildSuggestRoutes({
     path: SUGGEST_HISTORY_PATH,
     topN: SUGGEST_HISTORY_TOP,
   },
+}));
+app.route("/", buildVoiceRoutes({
+  enabled: VOICE_ENABLED,
+  transcribe: (bytes) => transcribeAudio(bytes, { blobBase: BLOB_BASE, asrBase: ASR_BASE, fetchFn: fetch }),
+  clean: (text) => cleanViaService(text, { endpoint: CLEAN_ENDPOINT, timeoutMs: CLEAN_TIMEOUT_MS }),
 }));
 app.get("/system/auth-check", async (c) => {
   const devBind = process.env.TMUX_HUB_DEV_BIND_SECRET === "1";

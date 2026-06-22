@@ -46,9 +46,18 @@ export function registerPwaServiceWorker(): void {
     try {
       const updateSW = registerSW({
         immediate: false,
+        onRegisteredSW(_swUrl, registration) {
+          // 定时探测新 sw.js：PWA 常驻不刷新（尤其 iOS standalone 切后台再回来不重载），
+          // 不轮询就一直跑旧 bundle。每 60s update() 一次，发现新版触发 onNeedRefresh。
+          if (registration) {
+            setInterval(() => { void registration.update().catch(() => {}); }, 60_000);
+          }
+        },
         onNeedRefresh() {
-          showToast("新版本已准备好，刷新即可生效", "info");
-          void updateSW(false);
+          // 自动刷新到新版本（updateSW(true) = skipWaiting + reload）。
+          // 之前用 updateSW(false) 只换 SW 不重载 → 页面一直跑旧 JS（陈旧缓存根因）。
+          showToast("检测到新版本，正在刷新…", "info");
+          void updateSW(true);
         },
         onOfflineReady() {
           showToast("已可离线使用 tmux-hub 壳", "info");
