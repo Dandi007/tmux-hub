@@ -372,8 +372,12 @@ export function renderMobile(root: HTMLElement): void {
     keysBtn.setAttribute("aria-expanded", String(open));
   };
 
+  // pill 容器：暗色圆角，把 📎 / textarea / 🎤 / ↑ 包成一个整体（对齐 todo 结构）。
+  const pill = document.createElement("div");
+  pill.className = "input-bar__pill";
+
   const attachBtn = renderImageAttachButton({
-    parent: inputBar,
+    parent: pill,
     getSession: () => openedName,
     getTextarea: () => ta,
     openDrawer: () => setEditing(true),
@@ -383,16 +387,12 @@ export function renderMobile(root: HTMLElement): void {
   sendBtn.addEventListener("click", () => { doSend(); });
   keysBtn.addEventListener("click", () => { setKeysPanel(!keysOpen); });
 
-  // 组装顺序：📎(已 append) → aiBanner → textarea → 🎤 → ↑ → ⌨
-  // 先 append aiBanner 和 ta，再调 renderVoiceButton，使其内部 deps.parent.appendChild(btn)
-  // 恰好落在 ta 之后——单次 append，无需在调用后再手动插入。
-  inputBar.appendChild(aiBanner);
-  inputBar.appendChild(ta);
+  // pill 内顺序：📎(renderImageAttachButton 已 append) → textarea → 🎤 → ↑
+  pill.appendChild(ta);
 
-  // 🎤 语音：转写+整理后落框，聚焦待复核（不发送）。
-  // renderVoiceButton 内部已执行 deps.parent.appendChild(btn)，此处不再重复 append。
-  const micBtn = renderVoiceButton({
-    parent: inputBar,
+  // 🎤 语音：转写+整理后落框，聚焦待复核（不发送）。renderVoiceButton 内部 append 到 parent。
+  renderVoiceButton({
+    parent: pill,
     onText: (text) => { ta.value = text; setEditing(true); autoResize(); },
     onStatus: (s, detail) => {
       if (s === "recording") showToast(detail ? `🎤 ${detail}` : "🎤 录音中", "info");
@@ -400,8 +400,11 @@ export function renderMobile(root: HTMLElement): void {
       else if (s === "error" && detail) showToast(detail, "error");
     },
   });
+  pill.appendChild(sendBtn);
 
-  inputBar.appendChild(sendBtn);
+  // input bar：AI banner（仅 review 态显示，在 pill 上方）+ pill + 外侧 ⌨。
+  inputBar.appendChild(aiBanner);
+  inputBar.appendChild(pill);
   inputBar.appendChild(keysBtn);
   undoBtn.addEventListener("click", () => { flow.undo(); ta.focus(); });
 

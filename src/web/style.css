@@ -650,10 +650,23 @@ button.is-danger:hover { filter: brightness(1.15); }
   padding-bottom: calc(var(--space-1) + var(--safe-bottom));
   background: var(--color-bg);
 }
-.input-bar__attach,
-.input-bar__expand,
-.input-bar__mic,
-.input-bar__keys {
+/* 暗色 pill：把 📎 / textarea / 🎤 / ↑ 包成一个圆角整体（对齐 todo #composer 结构） */
+.input-bar__pill {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-1);
+  background: var(--color-surface);
+  border: 1px solid transparent;
+  border-radius: 20px;
+  padding: 3px 4px 3px 8px;
+  transition: border-color var(--duration-fast) var(--ease-out-expo);
+}
+
+/* pill 外的圆形按钮：⌨ 特殊键（与 legacy expand 共用） */
+.input-bar__keys,
+.input-bar__expand {
   flex: 0 0 auto;
   width: var(--tap-min);
   height: var(--tap-min);
@@ -671,53 +684,70 @@ button.is-danger:hover { filter: brightness(1.15); }
   transition: background var(--duration-fast) var(--ease-out-expo),
               transform var(--duration-fast) var(--ease-out-expo);
 }
-.input-bar__attach:active,
-.input-bar__expand:active,
-.input-bar__mic:active,
-.input-bar__keys:active { background: var(--color-surface-hi); }
-.input-bar__expand.is-active {
-  background: var(--color-accent);
-  color: var(--color-bg);
-  transform: rotate(45deg);
+.input-bar__keys:active,
+.input-bar__expand:active { background: var(--color-surface-hi); }
+.input-bar__keys.is-active,
+.input-bar__expand.is-active { background: var(--color-accent); color: var(--color-bg); }
+
+/* pill 内的圆形小按钮：📎 / 🎤（透明底，与 pill 融为一体） */
+.input-bar__attach,
+.input-bar__mic {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  font-size: 18px;
+  color: var(--color-text-mute);
+  transition: background var(--duration-fast) var(--ease-out-expo);
 }
-.input-bar__keys.is-active { background: var(--color-accent); color: var(--color-bg); }
-.input-bar__mic.rec { background: var(--color-accent); color: var(--color-bg); }
+.input-bar__attach:active,
+.input-bar__mic:active { background: var(--color-surface-hi); }
+.input-bar__mic.rec { background: #e5484d; color: #fff; }
+
+/* textarea：pill 内透明，不再自带 surface 底/圆角 */
 .input-bar__textarea {
   flex: 1 1 0;
   min-width: 0;
   min-height: var(--tap-min);
   max-height: 40vh;
-  background: var(--color-surface);
+  background: transparent;
   border: none;
-  border-radius: calc(var(--tap-min) / 2);
-  padding: 10px var(--space-3);
+  border-radius: 0;
+  padding: 9px 4px;
   color: var(--color-text);
   font: 16px var(--font-mono);
-  line-height: 1.5;
+  line-height: 1.4;
   resize: none;
   overflow-y: auto;
   -webkit-tap-highlight-color: transparent;
-  transition: background var(--duration-fast) var(--ease-out-expo);
 }
 .input-bar__textarea::placeholder { color: var(--color-text-mute); }
-.input-bar__textarea:focus { background: var(--color-surface-hi); outline: none; }
+.input-bar__textarea:focus { outline: none; }
+
+/* ↑ 蓝色发送（pill 内右侧），对齐 todo #send */
 .input-bar__send {
   flex: 0 0 auto;
-  min-width: var(--tap-min);
-  height: var(--tap-min);
-  padding: 0 var(--space-3);
+  width: 38px;
+  height: 38px;
+  padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--color-accent);
+  background: #2563eb;
   border: none;
-  border-radius: calc(var(--tap-min) / 2);
-  font: 14px var(--font-mono);
-  color: var(--color-bg);
+  border-radius: 50%;
+  font-size: 18px;
+  color: #fff;
   cursor: pointer;
   transition: background var(--duration-fast) var(--ease-out-expo);
 }
-.input-bar__send:active { background: var(--color-accent-mute); }
+.input-bar__send:active { background: #1d4ed8; }
 .desktop-input-bar { padding-bottom: var(--space-1); }
 
 /* Collapsible keys panel */
@@ -837,8 +867,10 @@ button.is-danger:hover { filter: brightness(1.15); }
   padding: 4px 8px;
   margin-bottom: calc(-1 * var(--space-1));
 }
-.mobile-input-bar.is-review .input-bar__textarea {
-  border: 1px solid #b58900;
+/* [hidden] 默认被 display:flex 盖过 → 显式隐藏，避免 idle 态常驻露出 "AI 翻译" banner */
+.input-bar__ai-banner[hidden] { display: none; }
+.mobile-input-bar.is-review .input-bar__pill {
+  border-color: #b58900;
   background: rgba(181, 137, 0, 0.06);
 }
 .mobile-input-bar.is-loading .input-bar__textarea { opacity: 0.6; }
