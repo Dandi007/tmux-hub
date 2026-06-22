@@ -421,6 +421,82 @@ button.is-danger:hover { filter: brightness(1.15); }
   position: sticky;
   top: 0;
   z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* 「我的语音历史」入口按钮（header 左侧紧凑图标）。 */
+.mobile-history-btn {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: var(--space-1) var(--space-2);
+  min-height: var(--tap-min);
+}
+.mobile-history-btn:hover { background: var(--color-surface-hi); }
+
+/* 语音历史 overlay */
+.voice-history {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: oklch(0% 0 0 / 0.5);
+}
+.voice-history__panel {
+  width: 100%;
+  max-width: 640px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  border: 1px solid var(--color-surface-hi);
+  padding-bottom: var(--safe-bottom);
+}
+.voice-history__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-surface-hi);
+  font-weight: 600;
+}
+.voice-history__close {
+  background: transparent;
+  border: none;
+  color: var(--color-text-mute);
+  font-size: 1.1rem;
+  min-height: var(--tap-min);
+  padding: 0 var(--space-2);
+}
+.voice-history__list {
+  overflow-y: auto;
+  padding: var(--space-2);
+  color: var(--color-text-mute);
+}
+.voice-history__item {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.voice-history__meta { font-size: 0.75rem; color: var(--color-text-mute); }
+.voice-history__text { color: var(--color-text); white-space: pre-wrap; word-break: break-word; }
+.voice-history__play {
+  align-self: flex-start;
+  background: var(--color-surface-hi);
+  border: none;
+  border-radius: 14px;
+  font-size: 0.85rem;
+  padding: var(--space-1) var(--space-3);
 }
 
 /* Custom session picker — replaces native <select>. */

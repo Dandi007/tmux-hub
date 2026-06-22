@@ -18,6 +18,7 @@ import { saveLastSession, loadLastSession } from "../shared/last-session";
 import { createSuggestFlow, type Phase } from "./suggest-flow";
 import { getPaneMode, requestSuggestion } from "./suggest-client";
 import { renderVoiceButton } from "./voice-input";
+import { openVoiceHistory } from "./voice-history";
 
 export function renderMobile(root: HTMLElement): void {
   root.replaceChildren();
@@ -28,6 +29,15 @@ export function renderMobile(root: HTMLElement): void {
   const header = document.createElement("header");
   header.className = "mobile-shell__header";
   root.appendChild(header);
+
+  // 「我的语音历史」入口（账号绑定的语音记录 + 回放）。
+  const historyBtn = document.createElement("button");
+  historyBtn.type = "button";
+  historyBtn.className = "mobile-history-btn";
+  historyBtn.setAttribute("aria-label", "我的语音历史");
+  historyBtn.textContent = "🎙";
+  historyBtn.addEventListener("click", () => openVoiceHistory());
+  header.appendChild(historyBtn);
 
   const termHost = document.createElement("div");
   termHost.className = "mobile-shell__term-host";
