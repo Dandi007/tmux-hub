@@ -139,8 +139,18 @@ export const SUGGEST_HISTORY_TOP = parsePositiveInt(
 // 整功能开关；关闭时 /api/voice 返回 501，前端据此不显示 🎤。
 export const VOICE_ENABLED = process.env.TMUX_HUB_VOICE === "1";
 // media-pipeline blob/asr 服务（todo-pwa 已在用同一对）。
-export const BLOB_BASE = process.env.TMUX_HUB_BLOB_BASE ?? "http://127.0.0.1:8097";
-export const ASR_BASE = process.env.TMUX_HUB_ASR_BASE ?? "http://127.0.0.1:8095";
+// loopback 校验：/api/voice/audio 把 blobId 拼到 BLOB_BASE 上代理取回——若 BLOB_BASE 被
+// 改成外部地址（如 IMDS 169.254.169.254），代理就成了 SSRF gadget。启动期断言仅指向本机。
+function assertLoopbackBase(name: string, base: string): string {
+  let u: URL;
+  try { u = new URL(base); } catch { throw new Error(`${name} 不是合法 URL: ${base}`); }
+  const okProto = u.protocol === "http:" || u.protocol === "https:";
+  const okHost = u.hostname === "127.0.0.1" || u.hostname === "::1" || u.hostname === "[::1]" || u.hostname === "localhost";
+  if (!okProto || !okHost) throw new Error(`${name} 必须指向 loopback(http(s)://127.0.0.1)，实际: ${base}`);
+  return base;
+}
+export const BLOB_BASE = assertLoopbackBase("TMUX_HUB_BLOB_BASE", process.env.TMUX_HUB_BLOB_BASE ?? "http://127.0.0.1:8097");
+export const ASR_BASE = assertLoopbackBase("TMUX_HUB_ASR_BASE", process.env.TMUX_HUB_ASR_BASE ?? "http://127.0.0.1:8095");
 // sub-clean 订阅整理服务；不可达/超时时 /api/voice 降级返回原始转写。
 export const CLEAN_ENDPOINT = process.env.TMUX_HUB_CLEAN_ENDPOINT ?? "http://127.0.0.1:8110";
 // 整理 client 超时；sub-clean warm 整理实测 5~14s，给 18s 余量，超时则回退原文。

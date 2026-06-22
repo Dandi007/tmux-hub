@@ -84,6 +84,16 @@ describe("buildVoiceRoutes · POST /api/voice persistence", () => {
     expect(r.status).toBe(400);
   });
 
+  test("oversized declared content-length → 413 (before buffering)", async () => {
+    const app = makeApp(baseDeps(), "user-1");
+    const r = await app.fetch(new Request("http://x/api/voice", {
+      method: "POST",
+      headers: { "content-type": "audio/mp4", "content-length": String(30 * 1024 * 1024) },
+      body: audioBytes(),
+    }));
+    expect(r.status).toBe(413);
+  });
+
   test("persist failure does not break response (best-effort)", async () => {
     const store = { add() { throw new Error("db down"); }, listByUid: () => [], findOwnedBlob: () => null };
     const app = makeApp(baseDeps({ store }), "user-1");
@@ -126,14 +136,17 @@ describe("buildVoiceRoutes · GET /api/voice/audio/:id", () => {
     return store;
   };
 
-  test("owned blob → proxies bytes with stored mime", async () => {
+  test("owned blob → proxies bytes with stored mime, passes blobId verbatim", async () => {
     const store = withAudio();
-    const fetchBlob = async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    let seen = "";
+    const fetchBlob = async (id: string) => { seen = id; return new Response(new Uint8Array([1, 2, 3]), { status: 200 }); };
     const app = makeApp(baseDeps({ store, fetchBlob }), "user-1");
     const r = await app.fetch(new Request("http://x/api/voice/audio/MINE"));
     expect(r.status).toBe(200);
     expect(r.headers.get("content-type")).toBe("audio/mp4");
     expect(new Uint8Array(await r.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+    // 路由把 blobId 原样交给 fetchBlob；URL 编码在 wiring 层（main.ts encodeURIComponent）。
+    expect(seen).toBe("MINE");
   });
 
   test("blob owned by another user → 404 (no cross-user fetch)", async () => {

@@ -3,6 +3,9 @@ import { createLogger } from "./logger";
 
 const logger = createLogger("voice");
 
+// 音频上限：手机录音几十秒也就几百 KB，25MB 足够且挡住超大 body OOM。
+const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+
 export interface VoiceRecordRow {
   id: number;
   text: string;
@@ -38,7 +41,11 @@ export function buildVoiceRoutes(deps: VoiceRouteDeps): Hono {
   r.post("/api/voice", async (c) => {
     if (!deps.enabled) return c.json({ error: "voice disabled" }, 501);
     const mime = c.req.header("content-type") ?? null;
+    // Content-Length 早挡超大 body（可被 chunked 绕过，故下面再按实际字节数兜底）。
+    const declared = Number(c.req.header("content-length") ?? 0);
+    if (declared > MAX_AUDIO_BYTES) return c.json({ error: "audio too large" }, 413);
     const bytes = new Uint8Array(await c.req.arrayBuffer());
+    if (bytes.byteLength > MAX_AUDIO_BYTES) return c.json({ error: "audio too large" }, 413);
     if (bytes.byteLength < 1000) return c.json({ error: "audio too short" }, 400);
     const t0 = Date.now();
     let text: string;
@@ -51,6 +58,8 @@ export function buildVoiceRoutes(deps: VoiceRouteDeps): Hono {
     const t = { transcribeMs: tAsr - t0, cleanMs: tEnd - tAsr, totalMs: tEnd - t0 };
 
     // 按账号保存（best-effort，失败不影响返回）。无 identity 或空文本不存。
+    // 注意：经 gate 的请求 identity=真实 uid（隔离）；本地 hub.secret 直连统一为 "local-secret"
+    // 共享桶——这是单主自用部署的设定（hub.secret 即个人凭据）；若 secret 给了第二人则其记录会混。
     const uid = c.var.identity;
     if (deps.store && uid && cleaned.trim()) {
       try { deps.store.add({ uid, text: cleaned, audioBlobId, mime, bytes: bytes.byteLength }); }
