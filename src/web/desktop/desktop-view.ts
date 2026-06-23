@@ -12,7 +12,7 @@ import { createConnectionStatus } from "../ui/connection-status";
 import { imeGuard } from "../shared/ime-guard";
 import { killSession } from "../shared/kill-controller";
 import { saveLastSession, loadLastSession } from "../shared/last-session";
-import { requestNewZshSession } from "../pwa/shortcuts";
+import { openTemplatePicker } from "../shared/template-picker";
 
 export function renderDesktop(root: HTMLElement): void {
   root.replaceChildren();
@@ -62,7 +62,15 @@ export function renderDesktop(root: HTMLElement): void {
 
   tabBar.onSelect((name) => openSession(name));
   tabBar.onClose((name) => closeSession(name));
-  tabBar.onNew(() => void requestNewZshSession());
+  tabBar.onNew(() => openTemplatePicker({
+    onStarted: (name) => {
+      if (sessions.some((s) => s.name === name)) {
+        openSession(name);
+        return;
+      }
+      pendingOpen = name;
+    },
+  }));
 
   let hasRestoredSession = false;
   let pendingOpen: string | null = null;
@@ -204,7 +212,15 @@ export function renderDesktop(root: HTMLElement): void {
 
     if (e.key === "t") {
       e.preventDefault();
-      void requestNewZshSession();
+      openTemplatePicker({
+        onStarted: (name) => {
+          if (sessions.some((s) => s.name === name)) {
+            openSession(name);
+            return;
+          }
+          pendingOpen = name;
+        },
+      });
     } else if (e.key === "w") {
       e.preventDefault();
       if (openedName) closeSession(openedName);
