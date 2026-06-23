@@ -10,12 +10,12 @@ import { InputRouter, HubError } from "./input-router";
 import { pinViewport, getNativeAttachCount } from "./viewport-pinner";
 import { tmux } from "./tmux-cmd";
 import { bootstrapTmuxHooks } from "./tmux-bootstrap";
-import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS, IMAGE_DIR, MAX_IMAGE_BYTES, expandHome, SUGGEST_ENABLED, SUGGEST_ENDPOINT, SUGGEST_MODEL, SUGGEST_CAPTURE_LINES, SUGGEST_TIMEOUT_MS, SUGGEST_PROTOCOL, SUGGEST_HISTORY_ENABLED, SUGGEST_HISTORY_PATH, SUGGEST_HISTORY_TOP, VOICE_ENABLED, BLOB_BASE, ASR_BASE, CLEAN_CC_ENDPOINT, CLEAN_MODEL, CLEAN_TIMEOUT_MS } from "./config";
+import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS, IMAGE_DIR, MAX_IMAGE_BYTES, expandHome, SUGGEST_ENABLED, SUGGEST_ENDPOINT, SUGGEST_MODEL, SUGGEST_CAPTURE_LINES, SUGGEST_TIMEOUT_MS, SUGGEST_PROTOCOL, SUGGEST_HISTORY_ENABLED, SUGGEST_HISTORY_PATH, SUGGEST_HISTORY_TOP, VOICE_ENABLED, BLOB_BASE, INTAKE_BASE } from "./config";
 import { buildSuggestRoutes } from "./suggest-routes";
 import { buildVoiceRoutes } from "./voice-routes";
 import { VoiceStore } from "./voice-store";
-import { transcribeAudio, blobIdToHex } from "./voice/transcribe";
-import { cleanViaCcSwitch } from "./voice/clean-client";
+import { blobIdToHex } from "./voice/transcribe";
+import { fetchIntakeSse } from "./voice/intake-client";
 import { makeCcSwitchCaller } from "./suggest/cc-switch-client";
 import { loadOrCreateSecret, safeEqual } from "./secret";
 import { authGate, adminGate } from "./auth";
@@ -183,8 +183,7 @@ app.route("/", buildSuggestRoutes({
 const voiceStore = VOICE_ENABLED ? new VoiceStore() : null;
 app.route("/", buildVoiceRoutes({
   enabled: VOICE_ENABLED,
-  transcribe: (bytes) => transcribeAudio(bytes, { blobBase: BLOB_BASE, asrBase: ASR_BASE, fetchFn: fetch }),
-  clean: (text) => cleanViaCcSwitch(text, { endpoint: CLEAN_CC_ENDPOINT, model: CLEAN_MODEL, timeoutMs: CLEAN_TIMEOUT_MS }),
+  intake: (bytes) => fetchIntakeSse(bytes, "hub-polish", { intakeBase: INTAKE_BASE }),
   store: voiceStore,
   fetchBlob: (blobId) => fetch(`${BLOB_BASE}/blob/${encodeURIComponent(blobIdToHex(blobId))}`),
 }));

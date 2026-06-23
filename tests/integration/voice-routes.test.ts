@@ -21,6 +21,13 @@ function fakeStore() {
   };
 }
 
+// /api/voice 现转发 voice-intake 的 SSE；持久化在 done 事件（流被读完时）旁路触发。
+function sse(events: string): Response {
+  return new Response(new TextEncoder().encode(events), { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+const doneEvent = (text: string, blob = "blob://B1") =>
+  `event: done\ndata: ${JSON.stringify({ text, raw_text: text, audio_blob_id: blob, t: { transcribeMs: 1, cleanMs: 1, totalMs: 2 } })}\n\n`;
+
 // identity required (no default — passing explicit `undefined` must NOT be
 // swallowed by a default value; that's the "anonymous" case under test).
 function makeApp(deps: VoiceRouteDeps, identity: string | undefined) {
@@ -32,43 +39,48 @@ function makeApp(deps: VoiceRouteDeps, identity: string | undefined) {
 
 const baseDeps = (over: Partial<VoiceRouteDeps> = {}): VoiceRouteDeps => ({
   enabled: true,
-  transcribe: async () => ({ text: "raw", audioBlobId: "BLOB1" }),
-  clean: async () => "整理后的文本",
+  intake: async () => sse(doneEvent("整理后的文本")),
   ...over,
 });
 
 const audioBytes = () => new Uint8Array(2000); // > 1000 min
 
+// 触发持久化必须读完转发的 SSE 流（onDone 在 pull 解析 done 时调用）。
+async function drain(r: Response): Promise<void> { await r.text(); }
+
 describe("buildVoiceRoutes · POST /api/voice persistence", () => {
-  test("with store + identity → persists one row and returns cleaned text", async () => {
+  test("with store + identity → persists one row (done.text) and转发 SSE", async () => {
     const store = fakeStore();
     const app = makeApp(baseDeps({ store }), "user-1");
     const r = await app.fetch(new Request("http://x/api/voice", { method: "POST", headers: { "content-type": "audio/mp4" }, body: audioBytes() }));
     expect(r.status).toBe(200);
-    expect(await r.json()).toMatchObject({ text: "整理后的文本" });
+    expect(r.headers.get("content-type")).toContain("text/event-stream");
+    await drain(r);
     expect(store.rows.length).toBe(1);
-    expect(store.rows[0]).toMatchObject({ uid: "user-1", text: "整理后的文本", audio_blob_id: "BLOB1", mime: "audio/mp4", bytes: 2000 });
+    expect(store.rows[0]).toMatchObject({ uid: "user-1", text: "整理后的文本", audio_blob_id: "blob://B1", mime: "audio/mp4", bytes: 2000 });
   });
 
-  test("no store → returns text, no crash", async () => {
+  test("no store → 转发 SSE，no crash", async () => {
     const app = makeApp(baseDeps({ store: null }), "user-1");
     const r = await app.fetch(new Request("http://x/api/voice", { method: "POST", headers: { "content-type": "audio/mp4" }, body: audioBytes() }));
     expect(r.status).toBe(200);
-    expect(await r.json()).toMatchObject({ text: "整理后的文本" });
+    await drain(r);
   });
 
-  test("no identity → does NOT persist (but still returns text)", async () => {
+  test("no identity → does NOT persist (but still 转发)", async () => {
     const store = fakeStore();
     const app = makeApp(baseDeps({ store }), undefined);
     const r = await app.fetch(new Request("http://x/api/voice", { method: "POST", headers: { "content-type": "audio/mp4" }, body: audioBytes() }));
     expect(r.status).toBe(200);
+    await drain(r);
     expect(store.rows.length).toBe(0);
   });
 
-  test("empty cleaned text → not persisted", async () => {
+  test("empty done.text → not persisted", async () => {
     const store = fakeStore();
-    const app = makeApp(baseDeps({ store, clean: async () => "   " }), "user-1");
-    await app.fetch(new Request("http://x/api/voice", { method: "POST", headers: { "content-type": "audio/mp4" }, body: audioBytes() }));
+    const app = makeApp(baseDeps({ store, intake: async () => sse(doneEvent("   ")) }), "user-1");
+    const r = await app.fetch(new Request("http://x/api/voice", { method: "POST", headers: { "content-type": "audio/mp4" }, body: audioBytes() }));
+    await drain(r);
     expect(store.rows.length).toBe(0);
   });
 
@@ -94,11 +106,18 @@ describe("buildVoiceRoutes · POST /api/voice persistence", () => {
     expect(r.status).toBe(413);
   });
 
-  test("persist failure does not break response (best-effort)", async () => {
+  test("intake 上游 502 → 502（不转发空流）", async () => {
+    const app = makeApp(baseDeps({ intake: async () => new Response("no", { status: 502 }) }), "user-1");
+    const r = await app.fetch(new Request("http://x/api/voice", { method: "POST", headers: { "content-type": "audio/mp4" }, body: audioBytes() }));
+    expect(r.status).toBe(502);
+  });
+
+  test("persist failure does not break转发 (best-effort)", async () => {
     const store = { add() { throw new Error("db down"); }, listByUid: () => [], findOwnedBlob: () => null };
     const app = makeApp(baseDeps({ store }), "user-1");
     const r = await app.fetch(new Request("http://x/api/voice", { method: "POST", headers: { "content-type": "audio/mp4" }, body: audioBytes() }));
     expect(r.status).toBe(200);
+    await drain(r); // onDone 内 store.add 抛错被吞，转发不受影响
   });
 });
 
@@ -145,7 +164,6 @@ describe("buildVoiceRoutes · GET /api/voice/audio/:id", () => {
     expect(r.status).toBe(200);
     expect(r.headers.get("content-type")).toBe("audio/mp4");
     expect(new Uint8Array(await r.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
-    // 路由把 blobId 原样交给 fetchBlob；URL 编码在 wiring 层（main.ts encodeURIComponent）。
     expect(seen).toBe("MINE");
   });
 
