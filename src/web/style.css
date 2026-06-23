@@ -556,6 +556,18 @@ button.is-danger:hover { filter: brightness(1.15); }
 }
 .template-picker__item:disabled { opacity: 0.5; }
 
+/* 桌面端：模板选择器居中弹窗（移动端保持底部 sheet）。 */
+@media (min-width: 768px) and (pointer: fine) {
+  .template-picker {
+    align-items: center;
+  }
+  .template-picker__panel {
+    max-width: 400px;
+    border-radius: 16px;
+    padding-bottom: 0;
+  }
+}
+
 /* Custom session picker — replaces native <select>. */
 .session-picker { position: relative; flex: 1; min-width: 0; }
 .session-picker__trigger-row {

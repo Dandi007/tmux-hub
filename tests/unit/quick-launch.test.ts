@@ -1,5 +1,5 @@
 import { describe, test, expect, mock } from "bun:test";
-import { runQuickLaunch } from "../../src/web/mobile/quick-launch";
+import { runQuickLaunch } from "../../src/web/shared/quick-launch";
 
 describe("runQuickLaunch", () => {
   test("200 OK → onStarted called with returned name; no error callback", async () => {

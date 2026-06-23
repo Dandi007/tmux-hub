@@ -3,7 +3,7 @@ import { subscribeEvents } from "../sse-client";
 import type { SessionInfo, ServerEvent, ClientWsMessage } from "@shared/protocol";
 import { isGrammarOk } from "@shared/session-name";
 import { renderToolbarKeys } from "./special-keys-bar";
-import { renderQuickLaunchButton } from "./template-picker";
+import { renderQuickLaunchButton } from "../shared/template-picker";
 import { renderImageAttachButton } from "./image-attach";
 import { renderSessionPicker } from "./session-picker";
 import { enableWakeLock } from "./wake-lock";

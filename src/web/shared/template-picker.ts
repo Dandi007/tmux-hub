@@ -1,5 +1,5 @@
-// 移动端「新建会话」底部 sheet：列出 server 全部模板,点选即启动。
-// overlay/panel 单例模式镜像 voice-history.ts。
+// 「新建会话」模板选择器：列出 server 全部模板,点选即启动。
+// overlay/panel 单例模式，移动端底部 sheet / 桌面端居中弹窗共用。
 import { hubFetch } from "../hub-fetch";
 import { showToast } from "../ui/toast";
 import { runQuickLaunch } from "./quick-launch";
