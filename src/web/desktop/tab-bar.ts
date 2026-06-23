@@ -120,6 +120,14 @@ export function createTabBar(parent: HTMLElement): TabBarHandle {
     nameSpan.className = "tab-bar__name";
     nameSpan.textContent = s.name;
 
+    // Show pane_title (Claude Code's dynamic task description) if available
+    if (s.pane_title) {
+      const paneTitle = document.createElement("span");
+      paneTitle.className = "tab-bar__pane-title";
+      paneTitle.textContent = s.pane_title;
+      nameSpan.appendChild(paneTitle);
+    }
+
     tab.append(closeBtn, nameSpan);
 
     if (index < 9) {
