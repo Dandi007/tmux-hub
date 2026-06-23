@@ -1,45 +1,81 @@
-// 「新建会话」模板选择器：列出 server 全部模板,点选即启动。
-// overlay/panel 单例模式，移动端底部 sheet / 桌面端居中弹窗共用。
+// 「新建会话」模板选择器：锚定在触发按钮旁的轻量 dropdown。
+// 单例模式：同时只开一个，点外部自动关闭。
 import { hubFetch } from "../hub-fetch";
 import { showToast } from "../ui/toast";
 import { runQuickLaunch } from "./quick-launch";
 
 type TemplateListItem = { id: string; name: string; cwd_choices: string[] };
 
-export function openTemplatePicker(opts: { onStarted: (name: string) => void }): void {
-  // 单例：已开则不重复。
-  if (document.getElementById("template-picker-overlay")) return;
+export function openTemplatePicker(opts: {
+  anchor: HTMLElement;
+  onStarted: (name: string) => void;
+}): void {
+  // 单例：已开则关闭旧的。
+  const existing = document.getElementById("template-picker-popover");
+  if (existing) { existing.remove(); return; }
 
-  const overlay = document.createElement("div");
-  overlay.id = "template-picker-overlay";
-  overlay.className = "template-picker";
+  const popover = document.createElement("div");
+  popover.id = "template-picker-popover";
+  popover.className = "template-picker";
 
   const panel = document.createElement("div");
   panel.className = "template-picker__panel";
-  overlay.appendChild(panel);
-
-  const head = document.createElement("div");
-  head.className = "template-picker__head";
-  const title = document.createElement("span");
-  title.textContent = "新建会话";
-  const closeBtn = document.createElement("button");
-  closeBtn.type = "button";
-  closeBtn.className = "template-picker__close";
-  closeBtn.setAttribute("aria-label", "关闭");
-  closeBtn.textContent = "✕";
-  head.append(title, closeBtn);
-  panel.appendChild(head);
+  popover.appendChild(panel);
 
   const list = document.createElement("div");
   list.className = "template-picker__list";
   list.textContent = "加载中…";
   panel.appendChild(list);
 
-  const close = (): void => { overlay.remove(); };
-  closeBtn.addEventListener("click", close);
-  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  // 定位：锚定在按钮下方，右对齐（不超出视口）。
+  const place = (): void => {
+    const rect = opts.anchor.getBoundingClientRect();
+    const pw = 220; // 面板固定宽度
+    let top = rect.bottom + 6;
+    let left = rect.right - pw;
+    // 下溢 → 翻到按钮上方。
+    if (top + 260 > window.innerHeight) top = rect.top - 6; // 260 ≈ max-height
+    // 左溢 → 贴左边。
+    if (left < 8) left = 8;
+    popover.style.top = `${top}px`;
+    popover.style.left = `${left}px`;
+    popover.style.width = `${pw}px`;
+  };
+  place();
 
-  document.body.appendChild(overlay);
+  const close = (): void => { popover.remove(); };
+
+  // 点外部关闭（下一 tick 挂，避免当前 click 冒泡触发立即关闭）。
+  const onDocClick = (e: MouseEvent): void => {
+    if (!popover.contains(e.target as Node) && e.target !== opts.anchor) {
+      close();
+      document.removeEventListener("click", onDocClick, true);
+    }
+  };
+  setTimeout(() => document.addEventListener("click", onDocClick, true), 0);
+
+  // Escape 关闭。
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key === "Escape") { close(); document.removeEventListener("keydown", onKey); }
+  };
+  document.addEventListener("keydown", onKey);
+
+  // resize / scroll 时重新定位。
+  const reposition = (): void => { if (popover.isConnected) place(); };
+  window.addEventListener("resize", reposition);
+  window.addEventListener("scroll", reposition, true);
+
+  // remove 时清理 listeners。
+  const origRemove = popover.remove.bind(popover);
+  popover.remove = () => {
+    document.removeEventListener("click", onDocClick, true);
+    document.removeEventListener("keydown", onKey);
+    window.removeEventListener("resize", reposition);
+    window.removeEventListener("scroll", reposition, true);
+    origRemove();
+  };
+
+  document.body.appendChild(popover);
 
   void loadTemplates(list, opts.onStarted, close);
 }
@@ -61,7 +97,7 @@ async function loadTemplates(
 
   list.replaceChildren();
   if (!templates.length) {
-    list.textContent = "未配置模板，见 ~/.config/tmux-hub/templates.yaml";
+    list.textContent = "未配置模板";
     return;
   }
 
@@ -89,7 +125,7 @@ async function loadTemplates(
 }
 
 /**
- * 移动端工具栏的「+」按钮。点击打开模板选择器 sheet。
+ * 「+」按钮：点击打开锚定模板选择器。移动端 / 桌面端共用。
  */
 export function renderQuickLaunchButton(opts: {
   parent: HTMLElement;
@@ -102,6 +138,6 @@ export function renderQuickLaunchButton(opts: {
   btn.setAttribute("aria-label", "新建会话");
   btn.title = "新建会话";
   opts.parent.appendChild(btn);
-  btn.addEventListener("click", () => openTemplatePicker({ onStarted: opts.onStarted }));
+  btn.addEventListener("click", () => openTemplatePicker({ anchor: btn, onStarted: opts.onStarted }));
   return btn;
 }

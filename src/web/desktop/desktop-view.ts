@@ -63,6 +63,7 @@ export function renderDesktop(root: HTMLElement): void {
   tabBar.onSelect((name) => openSession(name));
   tabBar.onClose((name) => closeSession(name));
   tabBar.onNew(() => openTemplatePicker({
+    anchor: tabBar.newBtn,
     onStarted: (name) => {
       if (sessions.some((s) => s.name === name)) {
         openSession(name);
@@ -213,6 +214,7 @@ export function renderDesktop(root: HTMLElement): void {
     if (e.key === "t") {
       e.preventDefault();
       openTemplatePicker({
+        anchor: tabBar.newBtn,
         onStarted: (name) => {
           if (sessions.some((s) => s.name === name)) {
             openSession(name);
