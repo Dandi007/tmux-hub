@@ -64,6 +64,7 @@ export function renderSessionPicker(
 
   let isOpen = false;
   let activeName: string | null = null;
+  let sessions: SessionInfo[] = [];
   let onRenameCb: ((current: string) => void) | null = null;
   let onKillCb: ((current: string) => void) | null = null;
 
@@ -84,7 +85,8 @@ export function renderSessionPicker(
   trigger.addEventListener("click", () => setOpen(!isOpen));
   backdrop.addEventListener("click", () => setOpen(false));
 
-  const refresh = (sessions: SessionInfo[], active: string | null) => {
+  const refresh = (newSessions: SessionInfo[], active: string | null) => {
+    sessions = newSessions;
     activeName = active;
     const sorted = sessions.slice().sort((a, b) => b.activity - a.activity);
 
