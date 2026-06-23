@@ -499,74 +499,48 @@ button.is-danger:hover { filter: brightness(1.15); }
   padding: var(--space-1) var(--space-3);
 }
 
-/* 模板选择器底部 sheet —— 结构镜像 voice-history overlay。 */
+/* 模板选择器 —— 锚定在 + 按钮旁的轻量 dropdown。 */
 .template-picker {
   position: fixed;
-  inset: 0;
   z-index: 50;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  background: oklch(0% 0 0 / 0.5);
+  animation: template-picker-in 0.15s ease-out;
+}
+@keyframes template-picker-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 .template-picker__panel {
-  width: 100%;
-  max-width: 640px;
-  max-height: 80vh;
   display: flex;
   flex-direction: column;
   background: var(--color-bg);
-  border-top-left-radius: 16px;
-  border-top-right-radius: 16px;
   border: 1px solid var(--color-surface-hi);
-  padding-bottom: var(--safe-bottom);
-}
-.template-picker__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-3);
-  border-bottom: 1px solid var(--color-surface-hi);
-  font-weight: 600;
-}
-.template-picker__close {
-  background: transparent;
-  border: none;
-  color: var(--color-text-mute);
-  font-size: 1.1rem;
-  min-height: var(--tap-min);
-  padding: 0 var(--space-2);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px oklch(0% 0 0 / 0.3);
+  overflow: hidden;
 }
 .template-picker__list {
   overflow-y: auto;
-  padding: var(--space-2);
+  max-height: 260px;
+  padding: var(--space-1);
 }
 .template-picker__item {
   display: block;
   width: 100%;
   text-align: left;
-  background: var(--color-surface);
+  background: transparent;
   color: var(--color-text);
-  border: 1px solid var(--color-surface-hi);
-  border-radius: 12px;
-  padding: var(--space-3);
-  margin-bottom: var(--space-2);
+  border: none;
+  border-radius: 8px;
+  padding: var(--space-2) var(--space-3);
   min-height: var(--tap-min);
-  font-size: 0.95rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.1s;
 }
-.template-picker__item:disabled { opacity: 0.5; }
-
-/* 桌面端：模板选择器居中弹窗（移动端保持底部 sheet）。 */
-@media (min-width: 768px) and (pointer: fine) {
-  .template-picker {
-    align-items: center;
-  }
-  .template-picker__panel {
-    max-width: 400px;
-    border-radius: 16px;
-    padding-bottom: 0;
-  }
+.template-picker__item:hover {
+  background: var(--color-surface);
 }
+.template-picker__item:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Custom session picker — replaces native <select>. */
 .session-picker { position: relative; flex: 1; min-width: 0; }

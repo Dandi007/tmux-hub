@@ -7,6 +7,7 @@ import { imeGuard } from "../shared/ime-guard";
 
 export type TabBarHandle = {
   el: HTMLElement;
+  newBtn: HTMLElement;
   refresh: (sessions: SessionInfo[], activeName: string | null) => void;
   setActive: (name: string) => void;
   onSelect: (fn: (name: string) => void) => void;
@@ -181,6 +182,7 @@ export function createTabBar(parent: HTMLElement): TabBarHandle {
 
   return {
     el,
+    newBtn,
     refresh,
     setActive,
     onSelect: (fn) => { selectFn = fn; },
