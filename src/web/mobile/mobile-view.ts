@@ -7,7 +7,7 @@ import { renderQuickLaunchButton } from "./template-picker";
 import { renderImageAttachButton } from "./image-attach";
 import { renderSessionPicker } from "./session-picker";
 import { enableWakeLock } from "./wake-lock";
-import { showToast } from "../ui/toast";
+import { showToast, showStickyToast, updateToast, dismissToast } from "../ui/toast";
 import { onForegroundAfterIdle } from "../visibility-recovery";
 import { createConnectionStatus } from "../ui/connection-status";
 import { renameSession } from "../shared/rename-controller";
@@ -17,7 +17,7 @@ import { confirmModal } from "../ui/confirm-modal";
 import { saveLastSession, loadLastSession } from "../shared/last-session";
 import { createSuggestFlow, type Phase } from "./suggest-flow";
 import { getPaneMode, requestSuggestion } from "./suggest-client";
-import { renderVoiceButton } from "./voice-input";
+import { renderVoiceButton, type VoiceStatus } from "./voice-input";
 import { openVoiceHistory } from "./voice-history";
 
 export function renderMobile(root: HTMLElement): void {
@@ -419,13 +419,34 @@ export function renderMobile(root: HTMLElement): void {
       ta.setSelectionRange(caret, caret);
       autoResize();
     },
-    onStatus: (s, detail) => {
-      if (s === "recording") showToast(detail ? `🎤 ${detail}` : "🎤 录音中", "info");
-      else if (s === "transcribing") showToast("📝 转写中…", "info");
-      else if (s === "cleaning") showToast("✨ 整理中…", "info");
-      else if (s === "idle" && detail) showToast(detail, "info"); // 端到端耗时
-      else if (s === "error" && detail) showToast(detail, "error");
-    },
+    // 语音状态贯穿录音→转写→整理→完成全程，用单个持久 toast 原地更新文字（不反复弹新窗）。
+    // recording/transcribing/cleaning 为进行态，持久显示；idle/error 为终态，更新后淡出。
+    onStatus: (() => {
+      let voiceToastId: string | null = null;
+      // 进行态：有 toast 则原地更新，没有则新建一个持久 toast。
+      const live = (msg: string) => {
+        if (voiceToastId) updateToast(voiceToastId, msg, "info");
+        else voiceToastId = showStickyToast(msg, "info");
+      };
+      // 终态：更新成最终文案后延时淡出；无 toast 时退化为普通一次性 toast。
+      const settle = (msg: string, level: "info" | "error", lingerMs: number) => {
+        if (voiceToastId) {
+          updateToast(voiceToastId, msg, level);
+          const id = voiceToastId;
+          voiceToastId = null;
+          window.setTimeout(() => dismissToast(id), lingerMs);
+        } else showToast(msg, level);
+      };
+      return (s: VoiceStatus, detail?: string) => {
+        if (s === "recording") live(detail ? `🎤 ${detail}` : "🎤 录音中");
+        else if (s === "transcribing") live("📝 转写中…");
+        else if (s === "cleaning") live("✨ 整理中…");
+        else if (s === "idle") {
+          if (detail) settle(detail, "info", 2600); // 端到端耗时，看一眼即淡出
+          else if (voiceToastId) { dismissToast(voiceToastId); voiceToastId = null; } // 取消（太短）立即收
+        } else if (s === "error") settle(detail ?? "⚠️ 出错了", "error", 3200);
+      };
+    })(),
   });
   pill.appendChild(sendBtn);
 
