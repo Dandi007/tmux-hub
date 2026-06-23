@@ -46,6 +46,22 @@ export function showToast(message: string, level: ToastLevel = "info"): string {
   return id;
 }
 
+// 持久 toast：不自动消失，由调用方负责 updateToast/dismissToast。
+// 用于贯穿一段操作（如语音录音→转写→整理）的单一状态指示，原地更新而非反复弹新窗。
+export function showStickyToast(message: string, level: ToastLevel = "info"): string {
+  return buildToast(message, level).id;
+}
+
+// 原地更新一个已存在 toast 的文字（可选切换 level），不重建元素、不重新动画 → 平滑的状态变化。
+// id 不存在（已 dismiss）时静默忽略。
+export function updateToast(id: string, message: string, level?: ToastLevel): void {
+  const entry = active.get(id);
+  if (!entry) return;
+  const body = entry.el.querySelector(".toast__body");
+  if (body) body.textContent = message;
+  if (level) entry.el.className = `toast toast--${level}`;
+}
+
 export type ToastAction = { label: string; onClick: () => void };
 
 export type ShowActionToastOptions = {
