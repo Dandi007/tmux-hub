@@ -7,7 +7,7 @@ import { renderQuickLaunchButton } from "../shared/template-picker";
 import { renderImageAttachButton } from "./image-attach";
 import { renderSessionPicker } from "./session-picker";
 import { enableWakeLock } from "./wake-lock";
-import { showToast, showStickyToast, updateToast, dismissToast } from "../ui/toast";
+import { showToast } from "../ui/toast";
 import { onForegroundAfterIdle } from "../visibility-recovery";
 import { createConnectionStatus } from "../ui/connection-status";
 import { killSession } from "../shared/kill-controller";
@@ -117,6 +117,67 @@ export function renderMobile(root: HTMLElement): void {
   const picker = renderSessionPicker(header, (name) => {
     void openSession(name);
   });
+
+  const voiceStatusRow = document.createElement("div");
+  voiceStatusRow.className = "mobile-shell__voice-status";
+  voiceStatusRow.hidden = true;
+  header.appendChild(voiceStatusRow);
+
+  let voiceStatusTimer: number | null = null;
+
+  const clearVoiceStatusTimer = (): void => {
+    if (voiceStatusTimer !== null) {
+      window.clearTimeout(voiceStatusTimer);
+      voiceStatusTimer = null;
+    }
+  };
+
+  const setVoiceStatus = (s: VoiceStatus, detail = ""): void => {
+    clearVoiceStatusTimer();
+    voiceStatusRow.classList.remove("is-error", "is-live");
+
+    if (s === "recording") {
+      voiceStatusRow.hidden = false;
+      voiceStatusRow.classList.add("is-live");
+      voiceStatusRow.textContent = detail ? `🎤 ${detail}` : "🎤 录音中";
+      return;
+    }
+    if (s === "transcribing") {
+      voiceStatusRow.hidden = false;
+      voiceStatusRow.classList.add("is-live");
+      voiceStatusRow.textContent = "📝 转写中…";
+      return;
+    }
+    if (s === "cleaning") {
+      voiceStatusRow.hidden = false;
+      voiceStatusRow.classList.add("is-live");
+      voiceStatusRow.textContent = "✨ 整理中…";
+      return;
+    }
+    if (s === "idle") {
+      if (!detail) {
+        voiceStatusRow.hidden = true;
+        voiceStatusRow.textContent = "";
+        return;
+      }
+      voiceStatusRow.hidden = false;
+      voiceStatusRow.textContent = detail;
+      voiceStatusTimer = window.setTimeout(() => {
+        voiceStatusRow.hidden = true;
+        voiceStatusRow.textContent = "";
+        voiceStatusTimer = null;
+      }, 2600);
+      return;
+    }
+    voiceStatusRow.hidden = false;
+    voiceStatusRow.classList.add("is-error");
+    voiceStatusRow.textContent = detail || "⚠️ 出错了";
+    voiceStatusTimer = window.setTimeout(() => {
+      voiceStatusRow.hidden = true;
+      voiceStatusRow.textContent = "";
+      voiceStatusTimer = null;
+    }, 3200);
+  };
 
   let hasRestoredSession = false;
 
@@ -353,34 +414,7 @@ export function renderMobile(root: HTMLElement): void {
       ta.setSelectionRange(caret, caret);
       autoResize();
     },
-    // 语音状态贯穿录音→转写→整理→完成全程，用单个持久 toast 原地更新文字（不反复弹新窗）。
-    // recording/transcribing/cleaning 为进行态，持久显示；idle/error 为终态，更新后淡出。
-    onStatus: (() => {
-      let voiceToastId: string | null = null;
-      // 进行态：有 toast 则原地更新，没有则新建一个持久 toast。
-      const live = (msg: string) => {
-        if (voiceToastId) updateToast(voiceToastId, msg, "info");
-        else voiceToastId = showStickyToast(msg, "info");
-      };
-      // 终态：更新成最终文案后延时淡出；无 toast 时退化为普通一次性 toast。
-      const settle = (msg: string, level: "info" | "error", lingerMs: number) => {
-        if (voiceToastId) {
-          updateToast(voiceToastId, msg, level);
-          const id = voiceToastId;
-          voiceToastId = null;
-          window.setTimeout(() => dismissToast(id), lingerMs);
-        } else showToast(msg, level);
-      };
-      return (s: VoiceStatus, detail?: string) => {
-        if (s === "recording") live(detail ? `🎤 ${detail}` : "🎤 录音中");
-        else if (s === "transcribing") live("📝 转写中…");
-        else if (s === "cleaning") live("✨ 整理中…");
-        else if (s === "idle") {
-          if (detail) settle(detail, "info", 2600); // 端到端耗时，看一眼即淡出
-          else if (voiceToastId) { dismissToast(voiceToastId); voiceToastId = null; } // 取消（太短）立即收
-        } else if (s === "error") settle(detail ?? "⚠️ 出错了", "error", 3200);
-      };
-    })(),
+    onStatus: setVoiceStatus,
   });
   pill.appendChild(sendBtn);
 
@@ -408,5 +442,6 @@ export function renderMobile(root: HTMLElement): void {
       picker.focus();
     },
     openSession: (name: string) => { void openSession(name); },
+    __setVoiceHeaderStatus: setVoiceStatus,
   };
 }

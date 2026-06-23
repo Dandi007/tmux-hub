@@ -48,6 +48,29 @@ test.describe("mobile view", () => {
     ctx.tmuxE2E(["kill-session", "-t", name]);
   });
 
+  test("voice runtime status is rendered in header secondary row", async ({ page }) => {
+    await openApp(page);
+
+    await page.evaluate(() => {
+      const hub = window.__tmuxHub as typeof window.__tmuxHub & {
+        __setVoiceHeaderStatus?: (status: "recording" | "transcribing" | "cleaning" | "idle" | "error", detail?: string) => void;
+      };
+      hub.__setVoiceHeaderStatus?.("recording");
+    });
+
+    const row = page.locator(".mobile-shell__voice-status");
+    await expect(row).toBeVisible();
+    await expect(row).toHaveText(/录音中/);
+
+    await page.evaluate(() => {
+      const hub = window.__tmuxHub as typeof window.__tmuxHub & {
+        __setVoiceHeaderStatus?: (status: "recording" | "transcribing" | "cleaning" | "idle" | "error", detail?: string) => void;
+      };
+      hub.__setVoiceHeaderStatus?.("cleaning");
+    });
+    await expect(row).toHaveText(/整理中/);
+  });
+
   test("input bar submit reaches the pane", async ({ page, ctx }) => {
     await openApp(page);
     const name = await ctx.createSession("kb-cc"); // plain sh — deterministic echo

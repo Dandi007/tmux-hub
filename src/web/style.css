@@ -473,8 +473,9 @@ button.is-danger:hover { filter: brightness(1.15); }
   top: 0;
   z-index: 10;
   display: flex;
-  align-items: center;
-  gap: var(--space-1);
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
 }
 
 /* 「我的语音历史」入口按钮（header 左侧紧凑图标）。 */
@@ -598,6 +599,27 @@ button.is-danger:hover { filter: brightness(1.15); }
 .session-picker__trigger-row {
   display: flex;
   align-items: center;
+}
+
+.mobile-shell__voice-status {
+  min-height: 28px;
+  padding: 0 var(--space-3) var(--space-2);
+  font-size: 12px;
+  color: var(--color-text-mute);
+  display: flex;
+  align-items: center;
+}
+
+.mobile-shell__voice-status[hidden] {
+  display: none;
+}
+
+.mobile-shell__voice-status.is-live {
+  color: var(--color-text);
+}
+
+.mobile-shell__voice-status.is-error {
+  color: var(--color-danger);
 }
 .session-picker__trigger {
   flex: 1 1 auto;
