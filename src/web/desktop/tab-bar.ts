@@ -4,19 +4,7 @@ import { showContextMenu } from "../ui/context-menu";
 import { showToast } from "../ui/toast";
 import { renameSession } from "../shared/rename-controller";
 import { imeGuard } from "../shared/ime-guard";
-
-/**
- * Detect if pane_title is a Claude Code dynamic task title (not a default hostname).
- * Claude Code titles typically start with spinner characters (⠐, ⠂, ✳, etc.) or contain task descriptions.
- */
-function isClaudeCodeTitle(title: string): boolean {
-  if (!title) return false;
-  // Claude Code uses spinner characters at the start
-  if (/^[⠐⠂✳⠈⠐⠠⠄⠁]/.test(title)) return true;
-  // Or contains Chinese/English task descriptions (not just hostname)
-  if (/[一-龥]/.test(title) && title.length > 10) return true;
-  return false;
-}
+import { getClaudeCodeStatus, getCCStatusIcon } from "../shared/cc-status";
 
 export type TabBarHandle = {
   el: HTMLElement;
@@ -131,8 +119,24 @@ export function createTabBar(parent: HTMLElement): TabBarHandle {
 
     const nameSpan = document.createElement("span");
     nameSpan.className = "tab-bar__name";
-    // When pane_title is a Claude Code dynamic title, show it instead of session name
-    nameSpan.textContent = isClaudeCodeTitle(s.pane_title) ? s.pane_title : s.name;
+
+    // Check if this is a Claude Code session and get its status
+    const ccStatus = getClaudeCodeStatus(s.pane_title);
+    if (ccStatus !== 'unknown') {
+      // Claude Code session: show status icon + task title
+      const statusIcon = document.createElement("span");
+      statusIcon.className = `tab-bar__cc-status cc-status--${ccStatus}`;
+      statusIcon.textContent = getCCStatusIcon(ccStatus);
+      nameSpan.appendChild(statusIcon);
+
+      const titleText = document.createElement("span");
+      titleText.className = "tab-bar__cc-title";
+      titleText.textContent = s.pane_title.substring(1).trim(); // Remove spinner char
+      nameSpan.appendChild(titleText);
+    } else {
+      // Regular session: show session name
+      nameSpan.textContent = s.name;
+    }
 
     tab.append(closeBtn, nameSpan);
 
