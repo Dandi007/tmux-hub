@@ -9,7 +9,6 @@ export type SessionPickerHandle = {
   setActive: (name: string) => void;
   getValue: () => string | null;
   focus: () => void;
-  onRename: ((current: string) => void) | null;
   onKill: ((current: string) => void) | null;
 };
 
@@ -34,12 +33,6 @@ export function renderSessionPicker(
   chevron.className = "session-picker__chevron";
   chevron.textContent = "▾";
 
-  const renameBtn = document.createElement("button");
-  renameBtn.type = "button";
-  renameBtn.className = "header-action";
-  renameBtn.setAttribute("aria-label", "重命名当前 session");
-  renameBtn.textContent = "✎";
-
   const killBtn = document.createElement("button");
   killBtn.type = "button";
   killBtn.className = "header-action is-danger";
@@ -49,7 +42,7 @@ export function renderSessionPicker(
   const triggerRow = document.createElement("div");
   triggerRow.className = "session-picker__trigger-row";
   trigger.append(nameSpan, chevron);
-  triggerRow.append(trigger, renameBtn, killBtn);
+  triggerRow.append(trigger, killBtn);
   root.appendChild(triggerRow);
 
   const backdrop = document.createElement("div");
@@ -65,12 +58,7 @@ export function renderSessionPicker(
   let isOpen = false;
   let activeName: string | null = null;
   let sessions: SessionInfo[] = [];
-  let onRenameCb: ((current: string) => void) | null = null;
   let onKillCb: ((current: string) => void) | null = null;
-
-  renameBtn.addEventListener("click", () => {
-    if (activeName && onRenameCb) onRenameCb(activeName);
-  });
 
   killBtn.addEventListener("click", () => {
     if (activeName && onKillCb) onKillCb(activeName);
@@ -173,8 +161,6 @@ export function renderSessionPicker(
     setActive,
     getValue: () => activeName,
     focus: () => trigger.focus(),
-    get onRename() { return onRenameCb; },
-    set onRename(fn: ((current: string) => void) | null) { onRenameCb = fn; },
     get onKill() { return onKillCb; },
     set onKill(fn: ((current: string) => void) | null) { onKillCb = fn; },
   };

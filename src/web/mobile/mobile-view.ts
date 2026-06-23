@@ -10,7 +10,6 @@ import { enableWakeLock } from "./wake-lock";
 import { showToast, showStickyToast, updateToast, dismissToast } from "../ui/toast";
 import { onForegroundAfterIdle } from "../visibility-recovery";
 import { createConnectionStatus } from "../ui/connection-status";
-import { renameSession } from "../shared/rename-controller";
 import { killSession } from "../shared/kill-controller";
 import { imeGuard } from "../shared/ime-guard";
 import { confirmModal } from "../ui/confirm-modal";
@@ -18,7 +17,6 @@ import { saveLastSession, loadLastSession } from "../shared/last-session";
 import { createSuggestFlow, type Phase } from "./suggest-flow";
 import { getPaneMode, requestSuggestion } from "./suggest-client";
 import { renderVoiceButton, type VoiceStatus } from "./voice-input";
-import { openVoiceHistory } from "./voice-history";
 
 export function renderMobile(root: HTMLElement): void {
   root.replaceChildren();
@@ -29,15 +27,6 @@ export function renderMobile(root: HTMLElement): void {
   const header = document.createElement("header");
   header.className = "mobile-shell__header";
   root.appendChild(header);
-
-  // 「我的语音历史」入口（账号绑定的语音记录 + 回放）。
-  const historyBtn = document.createElement("button");
-  historyBtn.type = "button";
-  historyBtn.className = "mobile-history-btn";
-  historyBtn.setAttribute("aria-label", "我的语音历史");
-  historyBtn.textContent = "🎙";
-  historyBtn.addEventListener("click", () => openVoiceHistory());
-  header.appendChild(historyBtn);
 
   const termHost = document.createElement("div");
   termHost.className = "mobile-shell__term-host";
@@ -147,61 +136,6 @@ export function renderMobile(root: HTMLElement): void {
         void openSession(target.name);
       }
     }
-  };
-
-  const enterRenameMode = (current: string): void => {
-    const input = document.createElement("input");
-    input.type = "text";
-    input.className = "mobile-shell__rename-input";
-    input.value = current;
-    input.spellcheck = false;
-    input.autocapitalize = "off";
-    input.autocomplete = "off";
-
-    const saveBtn = document.createElement("button");
-    saveBtn.type = "button";
-    saveBtn.className = "mobile-shell__rename-save";
-    saveBtn.textContent = "保存";
-
-    const cancelBtn = document.createElement("button");
-    cancelBtn.type = "button";
-    cancelBtn.className = "mobile-shell__rename-cancel";
-    cancelBtn.textContent = "取消";
-
-    header.replaceChildren(input, saveBtn, cancelBtn);
-
-    const exitRenameMode = (): void => {
-      header.replaceChildren(picker.root);
-    };
-
-    const commit = async (): Promise<void> => {
-      const next = input.value.trim();
-      if (next === "" || next === current) { exitRenameMode(); return; }
-      if (!isGrammarOk(next)) {
-        showToast(`新名字不合法：${next}（只允许 [a-zA-Z0-9_-]，1-64 字符）`, "error");
-        return;
-      }
-      try {
-        await renameSession(current, next);
-        exitRenameMode();
-      } catch (e) {
-        showToast(`重命名失败：${(e as Error).message}`, "error");
-      }
-    };
-
-    const ime = imeGuard(input);
-    saveBtn.addEventListener("click", () => { void commit(); });
-    cancelBtn.addEventListener("click", exitRenameMode);
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !ime.isComposing()) { e.preventDefault(); void commit(); }
-      else if (e.key === "Escape") { e.preventDefault(); exitRenameMode(); }
-    });
-
-    setTimeout(() => { input.focus(); input.select(); }, 0);
-  };
-
-  picker.onRename = (current: string) => {
-    enterRenameMode(current);
   };
 
   picker.onKill = (current: string) => {
