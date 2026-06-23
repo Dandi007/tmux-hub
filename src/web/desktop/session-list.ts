@@ -45,6 +45,14 @@ export function renderSessionList(parent: HTMLElement): SessionListHandle {
     name.className = "session-list__name";
     name.textContent = s.name;
 
+    // Show pane_title (Claude Code's dynamic task description) if available
+    if (s.pane_title) {
+      const paneTitle = document.createElement("div");
+      paneTitle.className = "session-list__pane-title";
+      paneTitle.textContent = s.pane_title;
+      name.appendChild(paneTitle);
+    }
+
     const meta = document.createElement("div");
     meta.className = "session-list__meta";
     meta.textContent = formatSessionMeta(s);

@@ -265,6 +265,16 @@ button.is-danger:hover { filter: brightness(1.15); }
   font: 12px/1 var(--font-mono);
   color: var(--color-text-mute);
 }
+.tab-bar__pane-title {
+  display: block;
+  font-size: 10px;
+  color: var(--color-text-mute);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.8;
+}
 
 .tab-bar__shortcut {
   flex: 0 0 auto;
@@ -367,6 +377,16 @@ button.is-danger:hover { filter: brightness(1.15); }
 .session-list__item.is-active .session-list__meta { color: var(--color-text); }
 .session-list__item.is-external { opacity: 0.5; cursor: not-allowed; }
 .session-list__name { font: 13px var(--font-mono); flex: 1; word-break: break-all; }
+.session-list__pane-title {
+  display: block;
+  font-size: 11px;
+  color: var(--color-text-mute);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+}
 .session-list__meta { color: var(--color-text-mute); font-size: 12px; }
 .session-list__rename {
   background: transparent;

@@ -6,6 +6,8 @@ export type SessionInfo = {
   cols: number;
   rows: number;
   grammar_ok: boolean;
+  /** Active pane's terminal title — Claude Code sets this dynamically via OSC sequences. */
+  pane_title: string;
 };
 
 export type ServerEvent =

@@ -7,7 +7,7 @@ import { createLogger } from "./logger";
 
 const logger = createLogger("registry");
 
-const FORMAT = "#{session_name}|#{session_activity}|#{session_attached}|#{session_windows}|#{window_width}|#{window_height}";
+const FORMAT = "#{session_name}|#{session_activity}|#{session_attached}|#{session_windows}|#{window_width}|#{window_height}|#{pane_title}";
 
 /**
  * Filter the full tmux session list down to the tmux-hub-managed subset.
@@ -33,7 +33,8 @@ export function diffSessions(prev: SessionInfo[], next: SessionInfo[]): ServerEv
       p.attached !== info.attached ||
       p.windows !== info.windows ||
       p.cols !== info.cols ||
-      p.rows !== info.rows
+      p.rows !== info.rows ||
+      p.pane_title !== info.pane_title
     ) {
       events.push({ event: "session_activity", payload: info });
     }
@@ -54,7 +55,7 @@ export async function listSessions(): Promise<SessionInfo[] | null> {
   }
   if (!r.stdout) return [];
   return r.stdout.split("\n").map((line) => {
-    const [name, activity, attached, windows, cols, rows] = line.split("|");
+    const [name, activity, attached, windows, cols, rows, pane_title] = line.split("|");
     return {
       name: name!,
       activity: Number(activity),
@@ -63,6 +64,7 @@ export async function listSessions(): Promise<SessionInfo[] | null> {
       cols: Number(cols),
       rows: Number(rows),
       grammar_ok: isGrammarOk(name!),
+      pane_title: pane_title || "",
     };
   });
 }
