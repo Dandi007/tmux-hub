@@ -499,6 +499,63 @@ button.is-danger:hover { filter: brightness(1.15); }
   padding: var(--space-1) var(--space-3);
 }
 
+/* 模板选择器底部 sheet —— 结构镜像 voice-history overlay。 */
+.template-picker {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: oklch(0% 0 0 / 0.5);
+}
+.template-picker__panel {
+  width: 100%;
+  max-width: 640px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  border: 1px solid var(--color-surface-hi);
+  padding-bottom: var(--safe-bottom);
+}
+.template-picker__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-surface-hi);
+  font-weight: 600;
+}
+.template-picker__close {
+  background: transparent;
+  border: none;
+  color: var(--color-text-mute);
+  font-size: 1.1rem;
+  min-height: var(--tap-min);
+  padding: 0 var(--space-2);
+}
+.template-picker__list {
+  overflow-y: auto;
+  padding: var(--space-2);
+}
+.template-picker__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-surface-hi);
+  border-radius: 12px;
+  padding: var(--space-3);
+  margin-bottom: var(--space-2);
+  min-height: var(--tap-min);
+  font-size: 0.95rem;
+}
+.template-picker__item:disabled { opacity: 0.5; }
+
 /* Custom session picker — replaces native <select>. */
 .session-picker { position: relative; flex: 1; min-width: 0; }
 .session-picker__trigger-row {
