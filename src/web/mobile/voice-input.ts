@@ -71,19 +71,34 @@ export function renderVoiceButton(deps: VoiceDeps): HTMLButtonElement {
   };
 
   const startRec = async (): Promise<void> => {
-    if (status !== "idle") return;
+    // 只在真正占用麦克风期间拦截重按；error/idle 都允许重试（否则一次失败就永久卡死）。
+    if (status === "recording" || status === "transcribing") return;
+    let stream: MediaStream | null = null;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mime = pickMime();
       mediaRec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
       chunks = [];
       mediaRec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-      mediaRec.onstop = () => { stream.getTracks().forEach((t) => t.stop()); void onRecorded(); };
+      mediaRec.onstop = () => { stream?.getTracks().forEach((t) => t.stop()); void onRecorded(); };
       mediaRec.start();
       recStart = Date.now();
       tRed = performance.now();   // 麦克风变红、开始录音
       setStatus("recording");
-    } catch { setStatus("error", "🎤 麦克风不可用"); }
+    } catch (e) {
+      // 关键修复：若已拿到麦克风流但后续（MediaRecorder 构造等）失败，必须停掉流，
+      // 否则麦克风被泄漏的流占住 → 之后每次 getUserMedia 都 NotReadableError「不可用」。
+      stream?.getTracks().forEach((t) => t.stop());
+      const err = e as Error;
+      console.error("[voice] mic failed:", err.name, err.message);
+      const reason = typeof navigator === "undefined" || !navigator.mediaDevices ? "需 HTTPS 环境"
+        : err.name === "NotAllowedError" ? "权限被拒，请在浏览器/系统设置里允许麦克风"
+        : err.name === "NotFoundError" ? "未找到麦克风设备"
+        : err.name === "NotReadableError" ? "麦克风被占用，请关掉其它占用它的 App/标签页后重试"
+        : err.name === "SecurityError" ? "安全限制（需 HTTPS）"
+        : (err.message || err.name || "未知错误");
+      setStatus("error", `🎤 麦克风不可用：${reason}`);
+    }
   };
   const stopRec = (): void => {
     tRelease = performance.now(); // 松手
