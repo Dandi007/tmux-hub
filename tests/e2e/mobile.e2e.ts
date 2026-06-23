@@ -145,6 +145,7 @@ test.describe("mobile view", () => {
     expect(created).toBeTruthy();
 
     await expect(page.locator(`.session-picker__item[data-session="${created!}"]`)).toHaveCount(1, { timeout: 10_000 });
+    await expect(page.locator(".session-picker__name")).toHaveText(created!, { timeout: 10_000 });
     await page.getByRole("button", { name: "关闭当前 session" }).click();
     await expect(page.locator(".modal-dialog")).toBeVisible();
     await page.locator(".modal-dialog__actions button.is-danger").click();
