@@ -6,25 +6,19 @@ export type QuickLaunchFetcher = (input: string, init?: RequestInit) => Promise<
 
 export type RunQuickLaunchOpts = {
   fetcher: QuickLaunchFetcher;
+  templateId: string;
   cwd: string;
   onStarted: (name: string) => void;
   onError: (kind: "not-configured" | "runtime", message: string) => void;
 };
 
 /**
- * Pure async helper: POST /templates/{kb-cc}/run with the cached cwd.
- *
- * The render layer is responsible for:
- *   - resolving cwd at mount time from GET /templates
- *   - guarding button disabled state during the in-flight POST
- *
- * Splitting the responsibilities like this keeps the network-shape testable
- * without bringing a DOM into bun:test (the repo intentionally does not pull
- * in happy-dom / jsdom — the e2e suite covers the wiring).
+ * Pure async helper: POST /templates/{templateId}/run with the given cwd.
+ * 渲染层(template-picker / 按钮)负责解析 templateId + cwd 与并发禁用态。
  */
 export async function runQuickLaunch(opts: RunQuickLaunchOpts): Promise<void> {
-  const { fetcher, cwd, onStarted, onError } = opts;
-  const path = `/templates/${encodeURIComponent(MOBILE_QUICK_LAUNCH_TEMPLATE_ID)}/run`;
+  const { fetcher, templateId, cwd, onStarted, onError } = opts;
+  const path = `/templates/${encodeURIComponent(templateId)}/run`;
   let res: Response;
   try {
     res = await fetcher(path, {
@@ -37,7 +31,7 @@ export async function runQuickLaunch(opts: RunQuickLaunchOpts): Promise<void> {
     return;
   }
   if (res.status === 404) {
-    onError("not-configured", `template '${MOBILE_QUICK_LAUNCH_TEMPLATE_ID}' not configured`);
+    onError("not-configured", `template '${templateId}' not configured`);
     return;
   }
   if (!res.ok) {
@@ -100,6 +94,7 @@ export function renderQuickLaunchButton(opts: QuickLaunchButtonOpts): HTMLButton
     btn.disabled = true;
     void runQuickLaunch({
       fetcher: hubFetch,
+      templateId: MOBILE_QUICK_LAUNCH_TEMPLATE_ID,
       cwd: cachedCwd,
       onStarted: (name) => {
         btn.disabled = false;

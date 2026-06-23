@@ -10,7 +10,7 @@ describe("runQuickLaunch", () => {
     const onStarted = mock((_name: string) => {});
     const onError = mock((_kind: "not-configured" | "runtime", _message: string) => {});
 
-    await runQuickLaunch({ fetcher, cwd: "~", onStarted, onError });
+    await runQuickLaunch({ fetcher, templateId: "kb-cc", cwd: "~", onStarted, onError });
 
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(fetcher.mock.calls[0]?.[0]).toBe("/templates/kb-cc/run");
@@ -27,7 +27,7 @@ describe("runQuickLaunch", () => {
     const onStarted = mock((_name: string) => {});
     const onError = mock((_kind: "not-configured" | "runtime", _message: string) => {});
 
-    await runQuickLaunch({ fetcher, cwd: "~", onStarted, onError });
+    await runQuickLaunch({ fetcher, templateId: "kb-cc", cwd: "~", onStarted, onError });
 
     expect(onStarted).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledTimes(1);
@@ -40,7 +40,7 @@ describe("runQuickLaunch", () => {
     const onStarted = mock((_name: string) => {});
     const onError = mock((_kind: "not-configured" | "runtime", _message: string) => {});
 
-    await runQuickLaunch({ fetcher, cwd: "~", onStarted, onError });
+    await runQuickLaunch({ fetcher, templateId: "kb-cc", cwd: "~", onStarted, onError });
 
     expect(onStarted).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledTimes(1);
@@ -53,7 +53,7 @@ describe("runQuickLaunch", () => {
     const onStarted = mock((_name: string) => {});
     const onError = mock((_kind: "not-configured" | "runtime", _message: string) => {});
 
-    await runQuickLaunch({ fetcher, cwd: "~", onStarted, onError });
+    await runQuickLaunch({ fetcher, templateId: "kb-cc", cwd: "~", onStarted, onError });
 
     expect(onStarted).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledTimes(1);
@@ -69,11 +69,25 @@ describe("runQuickLaunch", () => {
     const onStarted = mock((_name: string) => {});
     const onError = mock((_kind: "not-configured" | "runtime", _message: string) => {});
 
-    await runQuickLaunch({ fetcher, cwd: "~", onStarted, onError });
+    await runQuickLaunch({ fetcher, templateId: "kb-cc", cwd: "~", onStarted, onError });
 
     expect(onStarted).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledTimes(1);
     expect(onError.mock.calls[0]?.[0]).toBe("runtime");
     expect(onError.mock.calls[0]?.[1]).toBe("malformed response");
+  });
+
+  test("templateId is reflected in the POST path", async () => {
+    const fetcher = mock(async (_input: string, _init?: RequestInit) => new Response(JSON.stringify({ name: "shell-20260623010000" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    const onStarted = mock((_name: string) => {});
+    const onError = mock((_kind: "not-configured" | "runtime", _message: string) => {});
+
+    await runQuickLaunch({ fetcher, templateId: "shell", cwd: "~", onStarted, onError });
+
+    expect(fetcher.mock.calls[0]?.[0]).toBe("/templates/shell/run");
+    expect(onStarted).toHaveBeenCalledTimes(1);
   });
 });
