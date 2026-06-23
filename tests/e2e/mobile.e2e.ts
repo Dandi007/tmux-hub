@@ -89,6 +89,10 @@ test.describe("mobile view", () => {
   test("+ opens template picker; selecting a template starts a session and switches to it", async ({ page, ctx }) => {
     await openApp(page);
 
+    const beforeNames = new Set(
+      ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n").filter(Boolean),
+    );
+
     const btn = page.getByRole("button", { name: "新建会话" });
     await expect(btn).toBeVisible({ timeout: 10_000 });
     await btn.click();
@@ -101,14 +105,14 @@ test.describe("mobile view", () => {
     // 按 name 选「知识库 cc」
     await sheet.getByRole("button", { name: "知识库 cc" }).click();
 
-    let names: string[] = [];
+    let newName: string | undefined;
     for (let i = 0; i < 40; i++) {
-      names = ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n").filter(Boolean);
-      if (names.some((n) => n.startsWith("kb-cc-"))) break;
+      const names = ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n").filter(Boolean);
+      newName = names.find((n) => n.startsWith("kb-cc-") && !beforeNames.has(n));
+      if (newName) break;
       await page.waitForTimeout(200);
     }
-    const newName = names.find((n) => n.startsWith("kb-cc-"));
-    expect(newName, `expected a kb-cc-* session in ${JSON.stringify(names)}`).toBeTruthy();
+    expect(newName, "expected a newly created kb-cc-* session").toBeTruthy();
 
     // sheet 选完即关
     await expect(page.locator(".template-picker")).toHaveCount(0, { timeout: 10_000 });
@@ -116,6 +120,36 @@ test.describe("mobile view", () => {
     await expect(page.locator(".session-picker__name")).toHaveText(newName!, { timeout: 10_000 });
 
     ctx.tmuxE2E(["kill-session", "-t", newName!]);
+  });
+
+  test("mobile header after cleanup still supports create and kill", async ({ page, ctx }) => {
+    await openApp(page);
+
+    const beforeNames = new Set(
+      ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n").filter(Boolean),
+    );
+
+    const createBtn = page.getByRole("button", { name: "新建会话" });
+    await expect(createBtn).toBeVisible({ timeout: 10_000 });
+    await createBtn.click();
+    await expect(page.locator(".template-picker")).toBeVisible();
+    await page.locator(".template-picker").getByRole("button", { name: "知识库 cc" }).click();
+
+    let created: string | undefined;
+    for (let i = 0; i < 40; i++) {
+      const names = ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n").filter(Boolean);
+      created = names.find((n) => n.startsWith("kb-cc-") && !beforeNames.has(n));
+      if (created) break;
+      await page.waitForTimeout(200);
+    }
+    expect(created).toBeTruthy();
+
+    await expect(page.locator(`.session-picker__item[data-session="${created!}"]`)).toHaveCount(1, { timeout: 10_000 });
+    await page.getByRole("button", { name: "关闭当前 session" }).click();
+    await expect(page.locator(".modal-dialog")).toBeVisible();
+    await page.locator(".modal-dialog__actions button.is-danger").click();
+    await expect(page.locator(`.session-picker__item[data-session="${created!}"]`)).toHaveCount(0, { timeout: 10_000 });
+    expect(ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n")).not.toContain(created!);
   });
 
   test("empty input bar submit sends a bare Enter to the pane", async ({ page, ctx }) => {
