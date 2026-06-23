@@ -5,6 +5,19 @@ import { showToast } from "../ui/toast";
 import { renameSession } from "../shared/rename-controller";
 import { imeGuard } from "../shared/ime-guard";
 
+/**
+ * Detect if pane_title is a Claude Code dynamic task title (not a default hostname).
+ * Claude Code titles typically start with spinner characters (⠐, ⠂, ✳, etc.) or contain task descriptions.
+ */
+function isClaudeCodeTitle(title: string): boolean {
+  if (!title) return false;
+  // Claude Code uses spinner characters at the start
+  if (/^[⠐⠂✳⠈⠐⠠⠄⠁]/.test(title)) return true;
+  // Or contains Chinese/English task descriptions (not just hostname)
+  if (/[一-龥]/.test(title) && title.length > 10) return true;
+  return false;
+}
+
 export type TabBarHandle = {
   el: HTMLElement;
   newBtn: HTMLElement;
@@ -118,15 +131,8 @@ export function createTabBar(parent: HTMLElement): TabBarHandle {
 
     const nameSpan = document.createElement("span");
     nameSpan.className = "tab-bar__name";
-    nameSpan.textContent = s.name;
-
-    // Show pane_title (Claude Code's dynamic task description) if available
-    if (s.pane_title) {
-      const paneTitle = document.createElement("span");
-      paneTitle.className = "tab-bar__pane-title";
-      paneTitle.textContent = s.pane_title;
-      nameSpan.appendChild(paneTitle);
-    }
+    // When pane_title is a Claude Code dynamic title, show it instead of session name
+    nameSpan.textContent = isClaudeCodeTitle(s.pane_title) ? s.pane_title : s.name;
 
     tab.append(closeBtn, nameSpan);
 
