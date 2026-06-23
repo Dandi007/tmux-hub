@@ -680,6 +680,11 @@ button.is-danger:hover { filter: brightness(1.15); }
 .session-picker__item.is-external { opacity: 0.5; }
 .session-picker__item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-picker__item-meta { flex: 0 0 auto; color: var(--color-text-mute); font-size: 12px; }
+.session-picker__cc-status {
+  display: inline-block;
+  margin-right: 4px;
+  font-size: 12px;
+}
 .mobile-shell__term-host { flex: 1; min-height: 0; padding: 0; overflow: hidden; }
 /* Collapsible composer drawer. Default closed: max-height collapses to 0,
    transition keeps the open/close motion smooth without layout thrash. */

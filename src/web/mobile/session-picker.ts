@@ -1,5 +1,6 @@
 import type { SessionInfo } from "@shared/protocol";
 import { isGrammarOk, formatSessionMeta } from "@shared/session-name";
+import { getClaudeCodeStatus, getCCStatusIcon } from "../shared/cc-status";
 
 export type SessionPickerHandle = {
   root: HTMLElement;
@@ -104,7 +105,20 @@ export function renderSessionPicker(
 
         const n = document.createElement("span");
         n.className = "session-picker__item-name";
-        n.textContent = ok ? s.name : `${s.name} (external)`;
+
+        const ccStatus = getClaudeCodeStatus(s.pane_title);
+        if (ccStatus !== 'unknown') {
+          const statusIcon = document.createElement("span");
+          statusIcon.className = `session-picker__cc-status cc-status--${ccStatus}`;
+          statusIcon.textContent = getCCStatusIcon(ccStatus);
+          n.appendChild(statusIcon);
+
+          const titleText = document.createElement("span");
+          titleText.textContent = s.pane_title.substring(1).trim();
+          n.appendChild(titleText);
+        } else {
+          n.textContent = ok ? s.name : `${s.name} (external)`;
+        }
 
         const m = document.createElement("span");
         m.className = "session-picker__item-meta";
@@ -122,12 +136,26 @@ export function renderSessionPicker(
       }),
     );
 
-    if (active) nameSpan.textContent = active;
+    if (active) {
+      const activeSession = sessions.find((s) => s.name === active);
+      const ccStatus = activeSession ? getClaudeCodeStatus(activeSession.pane_title) : 'unknown';
+      if (ccStatus !== 'unknown' && activeSession) {
+        nameSpan.textContent = `${getCCStatusIcon(ccStatus)} ${activeSession.pane_title.substring(1).trim()}`;
+      } else {
+        nameSpan.textContent = active;
+      }
+    }
   };
 
   const setActive = (name: string) => {
     activeName = name;
-    nameSpan.textContent = name;
+    const activeSession = sessions.find((s) => s.name === name);
+    const ccStatus = activeSession ? getClaudeCodeStatus(activeSession.pane_title) : 'unknown';
+    if (ccStatus !== 'unknown' && activeSession) {
+      nameSpan.textContent = `${getCCStatusIcon(ccStatus)} ${activeSession.pane_title.substring(1).trim()}`;
+    } else {
+      nameSpan.textContent = name;
+    }
     for (const item of dropdown.children) {
       const el = item as HTMLElement;
       const isMatch = el.dataset.session === name;
