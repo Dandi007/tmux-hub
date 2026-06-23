@@ -265,6 +265,16 @@ button.is-danger:hover { filter: brightness(1.15); }
   font: 12px/1 var(--font-mono);
   color: var(--color-text-mute);
 }
+.tab-bar__cc-status {
+  display: inline-block;
+  margin-right: 4px;
+  font-size: 11px;
+}
+.tab-bar__cc-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .tab-bar__pane-title {
   display: block;
   font-size: 10px;
@@ -377,6 +387,27 @@ button.is-danger:hover { filter: brightness(1.15); }
 .session-list__item.is-active .session-list__meta { color: var(--color-text); }
 .session-list__item.is-external { opacity: 0.5; cursor: not-allowed; }
 .session-list__name { font: 13px var(--font-mono); flex: 1; word-break: break-all; }
+.session-list__cc-status {
+  display: inline-block;
+  margin-right: 4px;
+  font-size: 12px;
+}
+.session-list__cc-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-status--idle {
+  color: #10b981; /* green */
+}
+.cc-status--working {
+  color: #3b82f6; /* blue */
+  animation: cc-pulse 1.5s ease-in-out infinite;
+}
+@keyframes cc-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
 .session-list__pane-title {
   display: block;
   font-size: 11px;
