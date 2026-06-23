@@ -151,14 +151,11 @@ function assertLoopbackBase(name: string, base: string): string {
 }
 export const BLOB_BASE = assertLoopbackBase("TMUX_HUB_BLOB_BASE", process.env.TMUX_HUB_BLOB_BASE ?? "http://127.0.0.1:8097");
 export const ASR_BASE = assertLoopbackBase("TMUX_HUB_ASR_BASE", process.env.TMUX_HUB_ASR_BASE ?? "http://127.0.0.1:8095");
-// 整理走 cc-switch（OpenAI 兼容网关，无状态 HTTP）；不可达/超时时 /api/voice 降级返回原始转写。
-// 实测 lingzhi/kimi-k2.6 ~0.8s（比旧 sub-clean 订阅暖会话 5~13s 快一个数量级、无冷启动尖峰）。
-export const CLEAN_CC_ENDPOINT = process.env.TMUX_HUB_CLEAN_CC_ENDPOINT ?? "http://127.0.0.1:15721";
-export const CLEAN_MODEL = process.env.TMUX_HUB_CLEAN_MODEL ?? "lingzhi/kimi-k2.6";
-// 整理 client 超时；kimi 亚秒级，给 12s 余量兜住网关偶发抖动，超时则回退原文。
-export const CLEAN_TIMEOUT_MS = parsePositiveInt(
-  process.env.TMUX_HUB_CLEAN_TIMEOUT_MS, 12000, "TMUX_HUB_CLEAN_TIMEOUT_MS",
-);
+// voice-intake 编排服务（blob→asr→card 润色 + SSE 进度）。/api/voice 改为转发其 SSE。
+// blob/asr 的 base 仍保留：/api/voice/audio 回放仍直接代理 mp-blob 取字节。
+// 转写+整理的编排（含 cc-switch 调用与降级）已下沉到 voice-intake，hub 不再自己调 cc-switch。
+// loopback 断言同 BLOB/ASR：防被改成外部地址成 SSRF gadget。
+export const INTAKE_BASE = assertLoopbackBase("TMUX_HUB_INTAKE_BASE", process.env.TMUX_HUB_INTAKE_BASE ?? "http://127.0.0.1:8099");
 
 // === gate-id 身份验签 ===
 // 与 gate-auth 共享的注入签名密钥（edge 经 forward_auth 注入 X-Auth-Sig）。

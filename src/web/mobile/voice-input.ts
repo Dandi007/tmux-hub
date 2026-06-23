@@ -1,8 +1,9 @@
 // src/web/mobile/voice-input.ts
 // 按住 🎤 录音 → POST /api/voice（转写+整理）→ 文本回调落输入框（不自动发送）。
 import { hubFetch } from "../hub-fetch";
+import { readSse } from "./sse";
 
-export type VoiceStatus = "idle" | "recording" | "transcribing" | "error";
+export type VoiceStatus = "idle" | "recording" | "transcribing" | "cleaning" | "error";
 
 export function pickMime(): string {
   for (const m of ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"]) {
@@ -42,11 +43,21 @@ export function renderVoiceButton(deps: VoiceDeps): HTMLButtonElement {
     const tSend = performance.now();
     try {
       // 必须走 hubFetch：/api/voice 是 authed POST，缺 X-Hub-Secret 会 401（裸 fetch 是之前转写失败的根因）。
-      const res = await hubFetch("/api/voice", { method: "POST", headers: { "Content-Type": blob.type }, body: blob });
+      // /api/voice 现返回 SSE：实时推 uploaded→transcribing→cleaning→done，前端据此更新状态。
+      const res = await hubFetch("/api/voice", { method: "POST", headers: { "Content-Type": blob.type, Accept: "text/event-stream" }, body: blob });
+      if (!res.ok || !res.body) throw new Error(res.status === 501 ? "语音未启用" : "转写失败");
+      let done: { text?: string; t?: { transcribeMs: number; cleanMs: number; totalMs: number } } | null = null;
+      let errMsg = "";
+      await readSse(res.body, (ev, data) => {
+        if (ev === "transcribing") setStatus("transcribing");
+        else if (ev === "cleaning") setStatus("cleaning");
+        else if (ev === "done") done = data as typeof done;
+        else if (ev === "error") errMsg = (data as { message?: string })?.message ?? "转写失败";
+      });
+      if (errMsg) throw new Error(errMsg);
+      if (!done) throw new Error("转写中断");
       const tRecv = performance.now();
-      if (!res.ok) throw new Error(res.status === 501 ? "语音未启用" : "转写失败");
-      const data = (await res.json()) as { text?: string; t?: { transcribeMs: number; cleanMs: number; totalMs: number } };
-      const text = data.text, srv = data.t;
+      const text = (done as { text?: string }).text, srv = (done as { t?: { transcribeMs: number; cleanMs: number; totalMs: number } }).t;
       // 各阶段报告（ms）：判断时间花在哪里。
       const roundtripMs = Math.round(tRecv - tSend);
       const rpt = {

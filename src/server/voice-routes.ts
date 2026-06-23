@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { createLogger } from "./logger";
+import { pipeIntakeSse, type IntakeDone } from "./voice/intake-client";
 
 const logger = createLogger("voice");
 
@@ -24,16 +25,17 @@ export interface VoiceStoreLike {
 
 export type VoiceRouteDeps = {
   enabled: boolean;
-  transcribe: (bytes: Uint8Array) => Promise<{ text: string; audioBlobId: string }>;
-  clean: (text: string) => Promise<string>;
+  // 调 voice-intake 的 SSE，返回上游 Response（hub 把事件流原样转发给浏览器）。
+  intake: (bytes: Uint8Array) => Promise<Response>;
   // 可选：按账号保存。null/缺省 → 不持久化（向后兼容）。
   store?: VoiceStoreLike | null;
   // 可选：音频回放代理（取 mp-blob 字节）。缺省 → /api/voice/audio 返回 501。
   fetchBlob?: (blobId: string) => Promise<Response>;
 };
 
-// 录音字节 → 转写 → 轻整理 → 返回文本（前端落框待复核，不发送）。
-// 可观测性：分阶段计时，写日志（svc logs 可见）+ Server-Timing 头 + JSON 里带 t（前端展示）。
+// 录音字节 → 转发 voice-intake 的 SSE（uploaded/transcribing/transcribed/cleaning/done）。
+// hub 不再自己串 blob→asr→clean：编排+整理+降级全在 voice-intake。
+// 旁路：在 done 事件按账号落库（best-effort，不阻断转发）。
 // 账号绑定：identity 由 authGate 设置（经 gate 为真实 uid，本地直连为 "local-secret"）。
 export function buildVoiceRoutes(deps: VoiceRouteDeps): Hono {
   const r = new Hono();
@@ -47,28 +49,25 @@ export function buildVoiceRoutes(deps: VoiceRouteDeps): Hono {
     const bytes = new Uint8Array(await c.req.arrayBuffer());
     if (bytes.byteLength > MAX_AUDIO_BYTES) return c.json({ error: "audio too large" }, 413);
     if (bytes.byteLength < 1000) return c.json({ error: "audio too short" }, 400);
-    const t0 = Date.now();
-    let text: string;
-    let audioBlobId: string;
-    try { ({ text, audioBlobId } = await deps.transcribe(bytes)); }
-    catch (e) { logger.warn({ err: (e as Error).message }, "transcribe failed"); return c.json({ error: "transcribe failed" }, 502); }
-    const tAsr = Date.now();
-    const cleaned = await deps.clean(text); // clean 内部已降级，不抛
-    const tEnd = Date.now();
-    const t = { transcribeMs: tAsr - t0, cleanMs: tEnd - tAsr, totalMs: tEnd - t0 };
 
-    // 按账号保存（best-effort，失败不影响返回）。无 identity 或空文本不存。
-    // 注意：经 gate 的请求 identity=真实 uid（隔离）；本地 hub.secret 直连统一为 "local-secret"
-    // 共享桶——这是单主自用部署的设定（hub.secret 即个人凭据）；若 secret 给了第二人则其记录会混。
     const uid = c.var.identity;
-    if (deps.store && uid && cleaned.trim()) {
-      try { deps.store.add({ uid, text: cleaned, audioBlobId, mime, bytes: bytes.byteLength }); }
-      catch (e) { logger.warn({ err: (e as Error).message }, "voice persist failed"); }
-    }
+    let upstream: Response;
+    try { upstream = await deps.intake(bytes); }
+    catch (e) { logger.warn({ err: (e as Error).message }, "intake failed"); return c.json({ error: "transcribe failed" }, 502); }
+    if (!upstream.ok || !upstream.body) return c.json({ error: "transcribe failed" }, 502);
 
-    logger.info({ bytes: bytes.byteLength, uid, ...t }, "voice done");
-    c.header("Server-Timing", `transcribe;dur=${t.transcribeMs}, clean;dur=${t.cleanMs}, total;dur=${t.totalMs}`);
-    return c.json({ text: cleaned, t });
+    // done 时按账号保存（best-effort）；注意：经 gate 的请求 identity=真实 uid（隔离），
+    // 本地 hub.secret 直连统一为 "local-secret" 共享桶（单主自用设定）。
+    const onDone = (d: IntakeDone) => {
+      if (deps.store && uid && d.text?.trim()) {
+        try { deps.store.add({ uid, text: d.text, audioBlobId: d.audio_blob_id, mime, bytes: bytes.byteLength }); }
+        catch (e) { logger.warn({ err: (e as Error).message }, "voice persist failed"); }
+      }
+      logger.info({ bytes: bytes.byteLength, uid, ...d.t }, "voice done");
+    };
+
+    const piped = pipeIntakeSse(upstream.body, onDone);
+    return new Response(piped, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } });
   });
 
   // 我的语音历史（当前账号，新到旧）。非读路径 → authGate 已要求鉴权，identity 必有。
