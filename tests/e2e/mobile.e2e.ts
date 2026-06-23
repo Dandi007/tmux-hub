@@ -74,13 +74,20 @@ test.describe("mobile view", () => {
     ctx.tmuxE2E(["kill-session", "-t", name]);
   });
 
-  test("quick-launch button starts a kb-cc session and switches to it", async ({ page, ctx }) => {
+  test("+ opens template picker; selecting a template starts a session and switches to it", async ({ page, ctx }) => {
     await openApp(page);
 
-    const btn = page.getByRole("button", { name: "新建知识库 Claude Code 会话" });
+    const btn = page.getByRole("button", { name: "新建会话" });
     await expect(btn).toBeVisible({ timeout: 10_000 });
-    await expect(btn).toBeEnabled({ timeout: 10_000 });
     await btn.click();
+
+    // sheet 列出 deploy/templates.yaml.example 的模板(shell + kb-cc)
+    const sheet = page.locator(".template-picker");
+    await expect(sheet).toBeVisible();
+    await expect(sheet.locator(".template-picker__item")).toHaveCount(2, { timeout: 10_000 });
+
+    // 按 name 选「知识库 cc」
+    await sheet.getByRole("button", { name: "知识库 cc" }).click();
 
     let names: string[] = [];
     for (let i = 0; i < 40; i++) {
@@ -91,6 +98,8 @@ test.describe("mobile view", () => {
     const newName = names.find((n) => n.startsWith("kb-cc-"));
     expect(newName, `expected a kb-cc-* session in ${JSON.stringify(names)}`).toBeTruthy();
 
+    // sheet 选完即关
+    await expect(page.locator(".template-picker")).toHaveCount(0, { timeout: 10_000 });
     await expect(pickerItem(page, newName!)).toHaveCount(1, { timeout: 10_000 });
     await expect(page.locator(".session-picker__name")).toHaveText(newName!, { timeout: 10_000 });
 

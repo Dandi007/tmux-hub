@@ -31,10 +31,3 @@ export type ClientWsMessage =
 export type ServerWsMessage =
   | { kind: "pong"; ts: number }
   | { kind: "viewport"; cols: number; rows: number; owner: "native" | "web" };
-
-/**
- * 移动端 quick-launch 按钮硬编码调用的 template id。
- * 用户机器 ~/.config/tmux-hub/templates.yaml 必须存在这条 template，
- * 否则 mount 时 /templates 列表里找不到、按钮 disabled。
- */
-export const MOBILE_QUICK_LAUNCH_TEMPLATE_ID = "kb-cc";
