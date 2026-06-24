@@ -7,10 +7,9 @@ import { renderQuickLaunchButton } from "../shared/template-picker";
 import { renderImageAttachButton } from "./image-attach";
 import { renderSessionPicker } from "./session-picker";
 import { enableWakeLock } from "./wake-lock";
-import { showToast, showStickyToast, updateToast, dismissToast } from "../ui/toast";
+import { showToast } from "../ui/toast";
 import { onForegroundAfterIdle } from "../visibility-recovery";
 import { createConnectionStatus } from "../ui/connection-status";
-import { renameSession } from "../shared/rename-controller";
 import { killSession } from "../shared/kill-controller";
 import { imeGuard } from "../shared/ime-guard";
 import { confirmModal } from "../ui/confirm-modal";
@@ -18,7 +17,11 @@ import { saveLastSession, loadLastSession } from "../shared/last-session";
 import { createSuggestFlow, type Phase } from "./suggest-flow";
 import { getPaneMode, requestSuggestion } from "./suggest-client";
 import { renderVoiceButton, type VoiceStatus } from "./voice-input";
-import { openVoiceHistory } from "./voice-history";
+
+type MobileDebugHub = NonNullable<Window["__tmuxHub"]> & {
+  __setVoiceHeaderStatus?: (status: VoiceStatus, detail?: string) => void;
+  __getVoiceHeaderDebugState?: () => { fitCalls: number };
+};
 
 export function renderMobile(root: HTMLElement): void {
   root.replaceChildren();
@@ -29,15 +32,6 @@ export function renderMobile(root: HTMLElement): void {
   const header = document.createElement("header");
   header.className = "mobile-shell__header";
   root.appendChild(header);
-
-  // 「我的语音历史」入口（账号绑定的语音记录 + 回放）。
-  const historyBtn = document.createElement("button");
-  historyBtn.type = "button";
-  historyBtn.className = "mobile-history-btn";
-  historyBtn.setAttribute("aria-label", "我的语音历史");
-  historyBtn.textContent = "🎙";
-  historyBtn.addEventListener("click", () => openVoiceHistory());
-  header.appendChild(historyBtn);
 
   const termHost = document.createElement("div");
   termHost.className = "mobile-shell__term-host";
@@ -129,6 +123,85 @@ export function renderMobile(root: HTMLElement): void {
     void openSession(name);
   });
 
+  const voiceStatusRow = document.createElement("div");
+  voiceStatusRow.className = "mobile-shell__voice-status";
+  voiceStatusRow.hidden = true;
+  voiceStatusRow.setAttribute("role", "status");
+  voiceStatusRow.setAttribute("aria-live", "polite");
+  voiceStatusRow.setAttribute("aria-atomic", "true");
+  header.appendChild(voiceStatusRow);
+
+  let voiceStatusTimer: number | null = null;
+  let voiceStatusFitCalls = 0;
+
+  const updatePickerDropdownOffset = (): void => {
+    const offset = voiceStatusRow.hidden ? 0 : voiceStatusRow.offsetHeight;
+    picker.root.style.setProperty("--mobile-voice-status-offset", `${offset}px`);
+  };
+
+  const clearVoiceStatusTimer = (): void => {
+    if (voiceStatusTimer !== null) {
+      window.clearTimeout(voiceStatusTimer);
+      voiceStatusTimer = null;
+    }
+  };
+
+  const refitTerminalForHeader = (): void => {
+    if (!term) return;
+    voiceStatusFitCalls += 1;
+    window.requestAnimationFrame(() => {
+      term?.fit();
+    });
+  };
+
+  const applyVoiceStatusRow = (text: string, classes: string[], hidden: boolean, liveMode: "polite" | "assertive" = "polite"): void => {
+    voiceStatusRow.className = "mobile-shell__voice-status";
+    for (const className of classes) voiceStatusRow.classList.add(className);
+    voiceStatusRow.hidden = hidden;
+    voiceStatusRow.setAttribute("aria-live", liveMode);
+    voiceStatusRow.textContent = hidden ? "" : text;
+    updatePickerDropdownOffset();
+    refitTerminalForHeader();
+  };
+
+  const hideVoiceStatusRow = (): void => {
+    applyVoiceStatusRow("", [], true);
+  };
+
+  const setVoiceStatus = (s: VoiceStatus, detail = ""): void => {
+    clearVoiceStatusTimer();
+
+    if (s === "recording") {
+      applyVoiceStatusRow(detail ? `🎤 ${detail}` : "🎤 录音中", ["is-live"], false, "polite");
+      return;
+    }
+    if (s === "transcribing") {
+      applyVoiceStatusRow("📝 转写中…", ["is-live"], false, "polite");
+      return;
+    }
+    if (s === "cleaning") {
+      applyVoiceStatusRow("✨ 整理中…", ["is-live"], false, "polite");
+      return;
+    }
+    if (s === "idle") {
+      if (!detail) {
+        hideVoiceStatusRow();
+        return;
+      }
+      applyVoiceStatusRow(detail, [], false, "polite");
+      voiceStatusTimer = window.setTimeout(() => {
+        hideVoiceStatusRow();
+        voiceStatusTimer = null;
+      }, 2600);
+      return;
+    }
+    applyVoiceStatusRow(detail || "⚠️ 出错了", ["is-error"], false, "assertive");
+    voiceStatusTimer = window.setTimeout(() => {
+      hideVoiceStatusRow();
+      voiceStatusTimer = null;
+    }, 3200);
+  };
+
   let hasRestoredSession = false;
 
   const refreshPicker = () => {
@@ -147,61 +220,6 @@ export function renderMobile(root: HTMLElement): void {
         void openSession(target.name);
       }
     }
-  };
-
-  const enterRenameMode = (current: string): void => {
-    const input = document.createElement("input");
-    input.type = "text";
-    input.className = "mobile-shell__rename-input";
-    input.value = current;
-    input.spellcheck = false;
-    input.autocapitalize = "off";
-    input.autocomplete = "off";
-
-    const saveBtn = document.createElement("button");
-    saveBtn.type = "button";
-    saveBtn.className = "mobile-shell__rename-save";
-    saveBtn.textContent = "保存";
-
-    const cancelBtn = document.createElement("button");
-    cancelBtn.type = "button";
-    cancelBtn.className = "mobile-shell__rename-cancel";
-    cancelBtn.textContent = "取消";
-
-    header.replaceChildren(input, saveBtn, cancelBtn);
-
-    const exitRenameMode = (): void => {
-      header.replaceChildren(picker.root);
-    };
-
-    const commit = async (): Promise<void> => {
-      const next = input.value.trim();
-      if (next === "" || next === current) { exitRenameMode(); return; }
-      if (!isGrammarOk(next)) {
-        showToast(`新名字不合法：${next}（只允许 [a-zA-Z0-9_-]，1-64 字符）`, "error");
-        return;
-      }
-      try {
-        await renameSession(current, next);
-        exitRenameMode();
-      } catch (e) {
-        showToast(`重命名失败：${(e as Error).message}`, "error");
-      }
-    };
-
-    const ime = imeGuard(input);
-    saveBtn.addEventListener("click", () => { void commit(); });
-    cancelBtn.addEventListener("click", exitRenameMode);
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !ime.isComposing()) { e.preventDefault(); void commit(); }
-      else if (e.key === "Escape") { e.preventDefault(); exitRenameMode(); }
-    });
-
-    setTimeout(() => { input.focus(); input.select(); }, 0);
-  };
-
-  picker.onRename = (current: string) => {
-    enterRenameMode(current);
   };
 
   picker.onKill = (current: string) => {
@@ -267,7 +285,7 @@ export function renderMobile(root: HTMLElement): void {
   const send = (msg: ClientWsMessage) => { term?.send(msg); };
 
   // Quick-launch (+) goes in header alongside session picker.
-  renderQuickLaunchButton({
+  const quickLaunchBtn = renderQuickLaunchButton({
     parent: picker.actionRow,
     onStarted: (name) => {
       if (sessions.some((s) => s.name === name)) {
@@ -285,6 +303,8 @@ export function renderMobile(root: HTMLElement): void {
       }, 5000);
     },
   });
+  picker.actionRow.insertBefore(quickLaunchBtn, picker.actionRow.children[1] ?? null);
+  updatePickerDropdownOffset();
 
   // Keys panel (collapsible, opens when + is tapped)
   const keysPanel = document.createElement("div");
@@ -419,34 +439,7 @@ export function renderMobile(root: HTMLElement): void {
       ta.setSelectionRange(caret, caret);
       autoResize();
     },
-    // 语音状态贯穿录音→转写→整理→完成全程，用单个持久 toast 原地更新文字（不反复弹新窗）。
-    // recording/transcribing/cleaning 为进行态，持久显示；idle/error 为终态，更新后淡出。
-    onStatus: (() => {
-      let voiceToastId: string | null = null;
-      // 进行态：有 toast 则原地更新，没有则新建一个持久 toast。
-      const live = (msg: string) => {
-        if (voiceToastId) updateToast(voiceToastId, msg, "info");
-        else voiceToastId = showStickyToast(msg, "info");
-      };
-      // 终态：更新成最终文案后延时淡出；无 toast 时退化为普通一次性 toast。
-      const settle = (msg: string, level: "info" | "error", lingerMs: number) => {
-        if (voiceToastId) {
-          updateToast(voiceToastId, msg, level);
-          const id = voiceToastId;
-          voiceToastId = null;
-          window.setTimeout(() => dismissToast(id), lingerMs);
-        } else showToast(msg, level);
-      };
-      return (s: VoiceStatus, detail?: string) => {
-        if (s === "recording") live(detail ? `🎤 ${detail}` : "🎤 录音中");
-        else if (s === "transcribing") live("📝 转写中…");
-        else if (s === "cleaning") live("✨ 整理中…");
-        else if (s === "idle") {
-          if (detail) settle(detail, "info", 2600); // 端到端耗时，看一眼即淡出
-          else if (voiceToastId) { dismissToast(voiceToastId); voiceToastId = null; } // 取消（太短）立即收
-        } else if (s === "error") settle(detail ?? "⚠️ 出错了", "error", 3200);
-      };
-    })(),
+    onStatus: setVoiceStatus,
   });
   pill.appendChild(sendBtn);
 
@@ -468,11 +461,16 @@ export function renderMobile(root: HTMLElement): void {
     }, 150);
   });
 
-  window.__tmuxHub = {
+  const debugHub: MobileDebugHub = {
     ...(window.__tmuxHub ?? {}),
     focusSessionList: () => {
       picker.focus();
     },
     openSession: (name: string) => { void openSession(name); },
+    __setVoiceHeaderStatus: setVoiceStatus,
+    __getVoiceHeaderDebugState: () => ({
+      fitCalls: voiceStatusFitCalls,
+    }),
   };
+  window.__tmuxHub = debugHub;
 }

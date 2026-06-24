@@ -3,6 +3,12 @@ import { test, expect } from "./fixtures";
 import { bindSecret } from "./helpers";
 import type { Page, Locator } from "@playwright/test";
 
+type VoiceHeaderStatus = "idle" | "recording" | "transcribing" | "cleaning" | "error";
+
+type MobileDebugHub = typeof window.__tmuxHub & {
+  __setVoiceHeaderStatus?: (status: VoiceHeaderStatus, detail?: string) => void;
+};
+
 // Mobile shell: a session-picker dropdown in the header + a bottom input bar
 // (inline-expand textarea) + a collapsible special-keys panel. Sessions are
 // created through the hub's managed path (ctx.createSession / quick-launch),
@@ -25,6 +31,16 @@ async function selectSession(page: Page, name: string): Promise<void> {
   await page.waitForTimeout(800);
 }
 
+async function setVoiceHeaderStatus(page: Page, status: VoiceHeaderStatus, detail?: string): Promise<void> {
+  await page.evaluate(
+    ({ status, detail }) => {
+      const hub = window.__tmuxHub as MobileDebugHub;
+      hub.__setVoiceHeaderStatus?.(status, detail);
+    },
+    { status, detail },
+  );
+}
+
 /** Type into the bottom input bar and send (literal + Enter). */
 async function sendText(page: Page, text: string): Promise<void> {
   const ta = page.locator(".input-bar__textarea");
@@ -34,10 +50,107 @@ async function sendText(page: Page, text: string): Promise<void> {
 }
 
 test.describe("mobile view", () => {
-  test("input bar submit reaches the pane", async ({ page, ctx }) => {
-    const name = await ctx.createSession("kb-cc"); // plain sh — deterministic echo
-
+  test("mobile header first row shows picker then create then kill only", async ({ page, ctx }) => {
     await openApp(page);
+    const name = await ctx.createSession();
+    await page.reload();
+    await selectSession(page, name);
+
+    const trigger = page.locator(".session-picker__trigger");
+    const createBtn = page.getByRole("button", { name: "新建会话" });
+    const killBtn = page.getByRole("button", { name: "关闭当前 session" });
+
+    await expect(trigger).toBeVisible();
+    await expect(createBtn).toBeVisible();
+    await expect(killBtn).toBeVisible();
+    await expect(page.getByRole("button", { name: "重命名当前 session" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "我的语音历史" })).toHaveCount(0);
+
+    const [triggerBox, createBox, killBox] = await Promise.all([
+      trigger.boundingBox(),
+      createBtn.boundingBox(),
+      killBtn.boundingBox(),
+    ]);
+    expect(triggerBox).toBeTruthy();
+    expect(createBox).toBeTruthy();
+    expect(killBox).toBeTruthy();
+    expect(triggerBox!.x).toBeLessThan(createBox!.x);
+    expect(createBox!.x).toBeLessThan(killBox!.x);
+
+    ctx.tmuxE2E(["kill-session", "-t", name]);
+  });
+
+  test("voice runtime status exposes a live region for progress and errors", async ({ page }) => {
+    await openApp(page);
+
+    const row = page.locator(".mobile-shell__voice-status");
+    await setVoiceHeaderStatus(page, "recording");
+
+    await expect(row).toBeVisible();
+    await expect(row).toHaveAttribute("role", "status");
+    await expect(row).toHaveAttribute("aria-live", "polite");
+    await expect(row).toHaveAttribute("aria-atomic", "true");
+    await expect(row).toHaveText(/录音中/);
+
+    await setVoiceHeaderStatus(page, "error", "⚠️ 出错了");
+    await expect(row).toBeVisible();
+    await expect(row).toHaveAttribute("aria-live", "assertive");
+    await expect(row).toHaveText(/出错了/);
+  });
+
+  test("voice runtime status is rendered in header secondary row", async ({ page }) => {
+    await openApp(page);
+
+    await setVoiceHeaderStatus(page, "recording");
+
+    const row = page.locator(".mobile-shell__voice-status");
+    await expect(row).toBeVisible();
+    await expect(row).toHaveText(/录音中/);
+
+    await setVoiceHeaderStatus(page, "cleaning");
+    await expect(row).toHaveText(/整理中/);
+  });
+
+  test("session picker dropdown opens below the visible voice status row", async ({ page, ctx }) => {
+    const name = await ctx.createSession();
+    await openApp(page);
+    await expect(pickerItem(page, name)).toHaveCount(1, { timeout: 10_000 });
+
+    const row = page.locator(".mobile-shell__voice-status");
+    await setVoiceHeaderStatus(page, "recording");
+    await expect(row).toBeVisible();
+
+    await page.locator(".session-picker__trigger").click();
+    await expect(page.locator(".session-picker")).toHaveClass(/is-open/);
+
+    const dropdown = page.locator(".session-picker__dropdown");
+    const [rowBox, dropdownBox] = await Promise.all([row.boundingBox(), dropdown.boundingBox()]);
+    expect(rowBox).toBeTruthy();
+    expect(dropdownBox).toBeTruthy();
+    expect(dropdownBox!.y).toBeGreaterThanOrEqual(rowBox!.y + rowBox!.height - 1);
+
+    ctx.tmuxE2E(["kill-session", "-t", name]);
+  });
+
+  test("voice header status settles then hides on idle and error", async ({ page }) => {
+    await openApp(page);
+
+    const row = page.locator(".mobile-shell__voice-status");
+
+    await setVoiceHeaderStatus(page, "idle", "⏱ 松手后0.4s · 网络0.1 转写0.1 整理0.2");
+    await expect(row).toBeVisible();
+    await expect(row).toHaveText(/松手后/);
+    await expect(row).toBeHidden({ timeout: 4_000 });
+
+    await setVoiceHeaderStatus(page, "error", "⚠️ 出错了");
+    await expect(row).toBeVisible();
+    await expect(row).toHaveText(/出错了/);
+    await expect(row).toBeHidden({ timeout: 4_000 });
+  });
+
+  test("input bar submit reaches the pane", async ({ page, ctx }) => {
+    await openApp(page);
+    const name = await ctx.createSession("kb-cc"); // plain sh — deterministic echo
     await selectSession(page, name);
     await page.waitForTimeout(1000);
 
@@ -51,9 +164,8 @@ test.describe("mobile view", () => {
   });
 
   test("special-keys panel ^C interrupts a running command", async ({ page, ctx }) => {
-    const name = await ctx.createSession("kb-cc");
-
     await openApp(page);
+    const name = await ctx.createSession("kb-cc");
     await selectSession(page, name);
     await page.waitForTimeout(1000);
 
@@ -61,8 +173,8 @@ test.describe("mobile view", () => {
     await sendText(page, "sleep 5 && echo SHOULD_NOT_PRINT");
     await page.waitForTimeout(500);
 
-    // Open the keys panel (the + / expand button) and tap ^C.
-    await page.locator(".input-bar__expand").click();
+    // Open the keys panel and tap ^C.
+    await page.locator(".input-bar__keys").click();
     await expect(page.locator(".mobile-keys-panel")).toHaveClass(/is-open/, { timeout: 5_000 });
     await page.locator(".special-keys button", { hasText: "^C" }).click({ force: true });
     await page.waitForTimeout(700);
@@ -77,6 +189,10 @@ test.describe("mobile view", () => {
   test("+ opens template picker; selecting a template starts a session and switches to it", async ({ page, ctx }) => {
     await openApp(page);
 
+    const beforeNames = new Set(
+      ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n").filter(Boolean),
+    );
+
     const btn = page.getByRole("button", { name: "新建会话" });
     await expect(btn).toBeVisible({ timeout: 10_000 });
     await btn.click();
@@ -89,14 +205,14 @@ test.describe("mobile view", () => {
     // 按 name 选「知识库 cc」
     await sheet.getByRole("button", { name: "知识库 cc" }).click();
 
-    let names: string[] = [];
+    let newName: string | undefined;
     for (let i = 0; i < 40; i++) {
-      names = ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n").filter(Boolean);
-      if (names.some((n) => n.startsWith("kb-cc-"))) break;
+      const names = ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n").filter(Boolean);
+      newName = names.find((n) => n.startsWith("kb-cc-") && !beforeNames.has(n));
+      if (newName) break;
       await page.waitForTimeout(200);
     }
-    const newName = names.find((n) => n.startsWith("kb-cc-"));
-    expect(newName, `expected a kb-cc-* session in ${JSON.stringify(names)}`).toBeTruthy();
+    expect(newName, "expected a newly created kb-cc-* session").toBeTruthy();
 
     // sheet 选完即关
     await expect(page.locator(".template-picker")).toHaveCount(0, { timeout: 10_000 });
@@ -106,10 +222,40 @@ test.describe("mobile view", () => {
     ctx.tmuxE2E(["kill-session", "-t", newName!]);
   });
 
-  test("empty input bar submit sends a bare Enter to the pane", async ({ page, ctx }) => {
-    const name = await ctx.createSession("kb-cc");
-
+  test("mobile header after cleanup still supports create and kill", async ({ page, ctx }) => {
     await openApp(page);
+
+    const beforeNames = new Set(
+      ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n").filter(Boolean),
+    );
+
+    const createBtn = page.getByRole("button", { name: "新建会话" });
+    await expect(createBtn).toBeVisible({ timeout: 10_000 });
+    await createBtn.click();
+    await expect(page.locator(".template-picker")).toBeVisible();
+    await page.locator(".template-picker").getByRole("button", { name: "知识库 cc" }).click();
+
+    let created: string | undefined;
+    for (let i = 0; i < 40; i++) {
+      const names = ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n").filter(Boolean);
+      created = names.find((n) => n.startsWith("kb-cc-") && !beforeNames.has(n));
+      if (created) break;
+      await page.waitForTimeout(200);
+    }
+    expect(created).toBeTruthy();
+
+    await expect(page.locator(`.session-picker__item[data-session="${created!}"]`)).toHaveCount(1, { timeout: 10_000 });
+    await expect(page.locator(".session-picker__name")).toHaveText(created!, { timeout: 10_000 });
+    await page.getByRole("button", { name: "关闭当前 session" }).click();
+    await expect(page.locator(".modal-dialog")).toBeVisible();
+    await page.locator(".modal-dialog__actions button.is-danger").click();
+    await expect(page.locator(`.session-picker__item[data-session="${created!}"]`)).toHaveCount(0, { timeout: 10_000 });
+    expect(ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n")).not.toContain(created!);
+  });
+
+  test("empty input bar submit sends a bare Enter to the pane", async ({ page, ctx }) => {
+    await openApp(page);
+    const name = await ctx.createSession("kb-cc");
     await selectSession(page, name);
     await page.waitForTimeout(1000);
 
@@ -126,47 +272,9 @@ test.describe("mobile view", () => {
     ctx.tmuxE2E(["kill-session", "-t", name]);
   });
 
-  test("rename button switches header to edit-mode and renames the session", async ({ page, ctx }) => {
-    const name = await ctx.createSession();
-    const renamed = `${name}-r`;
-
-    await openApp(page);
-    await selectSession(page, name);
-
-    await page.getByRole("button", { name: "重命名当前 session" }).click();
-    const input = page.locator(".mobile-shell__rename-input");
-    await expect(input).toBeVisible();
-    await expect(input).toHaveValue(name);
-
-    await input.fill(renamed);
-    await page.locator(".mobile-shell__rename-save").click();
-
-    await expect(pickerItem(page, renamed)).toHaveCount(1, { timeout: 5_000 });
-    await expect(page.locator(".session-picker__name")).toHaveText(renamed);
-
-    try { ctx.tmuxE2E(["kill-session", "-t", renamed]); } catch { /* renamed away */ }
-  });
-
-  test("rename cancel restores the picker without firing a request", async ({ page, ctx }) => {
-    const name = await ctx.createSession();
-
-    await openApp(page);
-    await selectSession(page, name);
-
-    await page.getByRole("button", { name: "重命名当前 session" }).click();
-    await page.locator(".mobile-shell__rename-input").fill("ignored-value");
-    await page.locator(".mobile-shell__rename-cancel").click();
-
-    await expect(page.locator(".session-picker__trigger")).toBeVisible();
-    await expect(page.locator(".session-picker__name")).toHaveText(name);
-
-    ctx.tmuxE2E(["kill-session", "-t", name]);
-  });
-
   test("kill button shows confirm modal — cancel keeps the session alive", async ({ page, ctx }) => {
-    const name = await ctx.createSession();
-
     await openApp(page);
+    const name = await ctx.createSession();
     await selectSession(page, name);
 
     await page.getByRole("button", { name: "关闭当前 session" }).click();
@@ -202,9 +310,8 @@ test.describe("mobile view", () => {
   });
 
   test("image attach: upload opens editing and drops the path into the textarea", async ({ page, ctx }) => {
-    const name = await ctx.createSession();
-
     await openApp(page);
+    const name = await ctx.createSession();
     await selectSession(page, name);
 
     const hiddenInput = page.locator(".mobile-toolbar__image-attach-input");
@@ -219,9 +326,8 @@ test.describe("mobile view", () => {
   });
 
   test("image attach: multi-select uploads every file and drops all paths", async ({ page, ctx }) => {
-    const name = await ctx.createSession();
-
     await openApp(page);
+    const name = await ctx.createSession();
     await selectSession(page, name);
 
     const hiddenInput = page.locator(".mobile-toolbar__image-attach-input");
@@ -249,7 +355,6 @@ test.describe("mobile view", () => {
     ctx.tmuxE2E(["send-keys", "-t", b, "echo BETA_MOBILE_MARK", "Enter"]);
 
     await openApp(page);
-
     await selectSession(page, a);
     await expect(page.locator(".session-picker__name")).toHaveText(a);
     expect(ctx.tmuxE2E(["capture-pane", "-p", "-t", a])).toContain("ALPHA_MOBILE_MARK");
@@ -309,7 +414,7 @@ test.describe("mobile view", () => {
     await page.waitForTimeout(500);
 
     // Open keys panel, recall the last command with ↑, run it with ↵.
-    await page.locator(".input-bar__expand").click();
+    await page.locator(".input-bar__keys").click();
     await expect(page.locator(".mobile-keys-panel")).toHaveClass(/is-open/, { timeout: 5_000 });
     await page.locator(".tk-up").click({ force: true });
     await page.waitForTimeout(300);
