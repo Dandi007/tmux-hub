@@ -18,6 +18,11 @@ import { createSuggestFlow, type Phase } from "./suggest-flow";
 import { getPaneMode, requestSuggestion } from "./suggest-client";
 import { renderVoiceButton, type VoiceStatus } from "./voice-input";
 
+type MobileDebugHub = NonNullable<Window["__tmuxHub"]> & {
+  __setVoiceHeaderStatus?: (status: VoiceStatus, detail?: string) => void;
+  __getVoiceHeaderDebugState?: () => { fitCalls: number };
+};
+
 export function renderMobile(root: HTMLElement): void {
   root.replaceChildren();
   root.className = "mobile-shell";
@@ -124,6 +129,7 @@ export function renderMobile(root: HTMLElement): void {
   header.appendChild(voiceStatusRow);
 
   let voiceStatusTimer: number | null = null;
+  let voiceStatusFitCalls = 0;
 
   const clearVoiceStatusTimer = (): void => {
     if (voiceStatusTimer !== null) {
@@ -132,49 +138,56 @@ export function renderMobile(root: HTMLElement): void {
     }
   };
 
+  const refitTerminalForHeader = (): void => {
+    if (!term) return;
+    voiceStatusFitCalls += 1;
+    window.requestAnimationFrame(() => {
+      term?.fit();
+    });
+  };
+
+  const applyVoiceStatusRow = (text: string, classes: string[], hidden: boolean): void => {
+    voiceStatusRow.className = "mobile-shell__voice-status";
+    for (const className of classes) voiceStatusRow.classList.add(className);
+    voiceStatusRow.hidden = hidden;
+    voiceStatusRow.textContent = hidden ? "" : text;
+    refitTerminalForHeader();
+  };
+
+  const hideVoiceStatusRow = (): void => {
+    applyVoiceStatusRow("", [], true);
+  };
+
   const setVoiceStatus = (s: VoiceStatus, detail = ""): void => {
     clearVoiceStatusTimer();
-    voiceStatusRow.classList.remove("is-error", "is-live");
 
     if (s === "recording") {
-      voiceStatusRow.hidden = false;
-      voiceStatusRow.classList.add("is-live");
-      voiceStatusRow.textContent = detail ? `🎤 ${detail}` : "🎤 录音中";
+      applyVoiceStatusRow(detail ? `🎤 ${detail}` : "🎤 录音中", ["is-live"], false);
       return;
     }
     if (s === "transcribing") {
-      voiceStatusRow.hidden = false;
-      voiceStatusRow.classList.add("is-live");
-      voiceStatusRow.textContent = "📝 转写中…";
+      applyVoiceStatusRow("📝 转写中…", ["is-live"], false);
       return;
     }
     if (s === "cleaning") {
-      voiceStatusRow.hidden = false;
-      voiceStatusRow.classList.add("is-live");
-      voiceStatusRow.textContent = "✨ 整理中…";
+      applyVoiceStatusRow("✨ 整理中…", ["is-live"], false);
       return;
     }
     if (s === "idle") {
       if (!detail) {
-        voiceStatusRow.hidden = true;
-        voiceStatusRow.textContent = "";
+        hideVoiceStatusRow();
         return;
       }
-      voiceStatusRow.hidden = false;
-      voiceStatusRow.textContent = detail;
+      applyVoiceStatusRow(detail, [], false);
       voiceStatusTimer = window.setTimeout(() => {
-        voiceStatusRow.hidden = true;
-        voiceStatusRow.textContent = "";
+        hideVoiceStatusRow();
         voiceStatusTimer = null;
       }, 2600);
       return;
     }
-    voiceStatusRow.hidden = false;
-    voiceStatusRow.classList.add("is-error");
-    voiceStatusRow.textContent = detail || "⚠️ 出错了";
+    applyVoiceStatusRow(detail || "⚠️ 出错了", ["is-error"], false);
     voiceStatusTimer = window.setTimeout(() => {
-      voiceStatusRow.hidden = true;
-      voiceStatusRow.textContent = "";
+      hideVoiceStatusRow();
       voiceStatusTimer = null;
     }, 3200);
   };
@@ -436,12 +449,16 @@ export function renderMobile(root: HTMLElement): void {
     }, 150);
   });
 
-  window.__tmuxHub = {
+  const debugHub: MobileDebugHub = {
     ...(window.__tmuxHub ?? {}),
     focusSessionList: () => {
       picker.focus();
     },
     openSession: (name: string) => { void openSession(name); },
     __setVoiceHeaderStatus: setVoiceStatus,
+    __getVoiceHeaderDebugState: () => ({
+      fitCalls: voiceStatusFitCalls,
+    }),
   };
+  window.__tmuxHub = debugHub;
 }

@@ -21,7 +21,6 @@ declare global {
     __tmuxHub?: {
       focusSessionList?: () => void;
       openSession?: (name: string) => void;
-      __setVoiceHeaderStatus?: (status: "idle" | "recording" | "transcribing" | "cleaning" | "error", detail?: string) => void;
     };
   }
 }
