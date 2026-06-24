@@ -126,10 +126,18 @@ export function renderMobile(root: HTMLElement): void {
   const voiceStatusRow = document.createElement("div");
   voiceStatusRow.className = "mobile-shell__voice-status";
   voiceStatusRow.hidden = true;
+  voiceStatusRow.setAttribute("role", "status");
+  voiceStatusRow.setAttribute("aria-live", "polite");
+  voiceStatusRow.setAttribute("aria-atomic", "true");
   header.appendChild(voiceStatusRow);
 
   let voiceStatusTimer: number | null = null;
   let voiceStatusFitCalls = 0;
+
+  const updatePickerDropdownOffset = (): void => {
+    const offset = voiceStatusRow.hidden ? 0 : voiceStatusRow.offsetHeight;
+    picker.root.style.setProperty("--mobile-voice-status-offset", `${offset}px`);
+  };
 
   const clearVoiceStatusTimer = (): void => {
     if (voiceStatusTimer !== null) {
@@ -146,11 +154,13 @@ export function renderMobile(root: HTMLElement): void {
     });
   };
 
-  const applyVoiceStatusRow = (text: string, classes: string[], hidden: boolean): void => {
+  const applyVoiceStatusRow = (text: string, classes: string[], hidden: boolean, liveMode: "polite" | "assertive" = "polite"): void => {
     voiceStatusRow.className = "mobile-shell__voice-status";
     for (const className of classes) voiceStatusRow.classList.add(className);
     voiceStatusRow.hidden = hidden;
+    voiceStatusRow.setAttribute("aria-live", liveMode);
     voiceStatusRow.textContent = hidden ? "" : text;
+    updatePickerDropdownOffset();
     refitTerminalForHeader();
   };
 
@@ -162,15 +172,15 @@ export function renderMobile(root: HTMLElement): void {
     clearVoiceStatusTimer();
 
     if (s === "recording") {
-      applyVoiceStatusRow(detail ? `🎤 ${detail}` : "🎤 录音中", ["is-live"], false);
+      applyVoiceStatusRow(detail ? `🎤 ${detail}` : "🎤 录音中", ["is-live"], false, "polite");
       return;
     }
     if (s === "transcribing") {
-      applyVoiceStatusRow("📝 转写中…", ["is-live"], false);
+      applyVoiceStatusRow("📝 转写中…", ["is-live"], false, "polite");
       return;
     }
     if (s === "cleaning") {
-      applyVoiceStatusRow("✨ 整理中…", ["is-live"], false);
+      applyVoiceStatusRow("✨ 整理中…", ["is-live"], false, "polite");
       return;
     }
     if (s === "idle") {
@@ -178,14 +188,14 @@ export function renderMobile(root: HTMLElement): void {
         hideVoiceStatusRow();
         return;
       }
-      applyVoiceStatusRow(detail, [], false);
+      applyVoiceStatusRow(detail, [], false, "polite");
       voiceStatusTimer = window.setTimeout(() => {
         hideVoiceStatusRow();
         voiceStatusTimer = null;
       }, 2600);
       return;
     }
-    applyVoiceStatusRow(detail || "⚠️ 出错了", ["is-error"], false);
+    applyVoiceStatusRow(detail || "⚠️ 出错了", ["is-error"], false, "assertive");
     voiceStatusTimer = window.setTimeout(() => {
       hideVoiceStatusRow();
       voiceStatusTimer = null;
@@ -275,7 +285,7 @@ export function renderMobile(root: HTMLElement): void {
   const send = (msg: ClientWsMessage) => { term?.send(msg); };
 
   // Quick-launch (+) goes in header alongside session picker.
-  renderQuickLaunchButton({
+  const quickLaunchBtn = renderQuickLaunchButton({
     parent: picker.actionRow,
     onStarted: (name) => {
       if (sessions.some((s) => s.name === name)) {
@@ -293,6 +303,8 @@ export function renderMobile(root: HTMLElement): void {
       }, 5000);
     },
   });
+  picker.actionRow.insertBefore(quickLaunchBtn, picker.actionRow.children[1] ?? null);
+  updatePickerDropdownOffset();
 
   // Keys panel (collapsible, opens when + is tapped)
   const keysPanel = document.createElement("div");

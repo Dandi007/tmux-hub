@@ -50,18 +50,52 @@ async function sendText(page: Page, text: string): Promise<void> {
 }
 
 test.describe("mobile view", () => {
-  test("mobile header shows picker plus create and kill only", async ({ page, ctx }) => {
+  test("mobile header first row shows picker then create then kill only", async ({ page, ctx }) => {
     await openApp(page);
     const name = await ctx.createSession();
     await page.reload();
     await selectSession(page, name);
 
-    await expect(page.getByRole("button", { name: "新建会话" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "关闭当前 session" })).toBeVisible();
+    const trigger = page.locator(".session-picker__trigger");
+    const createBtn = page.getByRole("button", { name: "新建会话" });
+    const killBtn = page.getByRole("button", { name: "关闭当前 session" });
+
+    await expect(trigger).toBeVisible();
+    await expect(createBtn).toBeVisible();
+    await expect(killBtn).toBeVisible();
     await expect(page.getByRole("button", { name: "重命名当前 session" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "我的语音历史" })).toHaveCount(0);
 
+    const [triggerBox, createBox, killBox] = await Promise.all([
+      trigger.boundingBox(),
+      createBtn.boundingBox(),
+      killBtn.boundingBox(),
+    ]);
+    expect(triggerBox).toBeTruthy();
+    expect(createBox).toBeTruthy();
+    expect(killBox).toBeTruthy();
+    expect(triggerBox!.x).toBeLessThan(createBox!.x);
+    expect(createBox!.x).toBeLessThan(killBox!.x);
+
     ctx.tmuxE2E(["kill-session", "-t", name]);
+  });
+
+  test("voice runtime status exposes a live region for progress and errors", async ({ page }) => {
+    await openApp(page);
+
+    const row = page.locator(".mobile-shell__voice-status");
+    await setVoiceHeaderStatus(page, "recording");
+
+    await expect(row).toBeVisible();
+    await expect(row).toHaveAttribute("role", "status");
+    await expect(row).toHaveAttribute("aria-live", "polite");
+    await expect(row).toHaveAttribute("aria-atomic", "true");
+    await expect(row).toHaveText(/录音中/);
+
+    await setVoiceHeaderStatus(page, "error", "⚠️ 出错了");
+    await expect(row).toBeVisible();
+    await expect(row).toHaveAttribute("aria-live", "assertive");
+    await expect(row).toHaveText(/出错了/);
   });
 
   test("voice runtime status is rendered in header secondary row", async ({ page }) => {
@@ -75,6 +109,27 @@ test.describe("mobile view", () => {
 
     await setVoiceHeaderStatus(page, "cleaning");
     await expect(row).toHaveText(/整理中/);
+  });
+
+  test("session picker dropdown opens below the visible voice status row", async ({ page, ctx }) => {
+    const name = await ctx.createSession();
+    await openApp(page);
+    await expect(pickerItem(page, name)).toHaveCount(1, { timeout: 10_000 });
+
+    const row = page.locator(".mobile-shell__voice-status");
+    await setVoiceHeaderStatus(page, "recording");
+    await expect(row).toBeVisible();
+
+    await page.locator(".session-picker__trigger").click();
+    await expect(page.locator(".session-picker")).toHaveClass(/is-open/);
+
+    const dropdown = page.locator(".session-picker__dropdown");
+    const [rowBox, dropdownBox] = await Promise.all([row.boundingBox(), dropdown.boundingBox()]);
+    expect(rowBox).toBeTruthy();
+    expect(dropdownBox).toBeTruthy();
+    expect(dropdownBox!.y).toBeGreaterThanOrEqual(rowBox!.y + rowBox!.height - 1);
+
+    ctx.tmuxE2E(["kill-session", "-t", name]);
   });
 
   test("voice header status settles then hides on idle and error", async ({ page }) => {

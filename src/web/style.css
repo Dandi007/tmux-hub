@@ -478,18 +478,6 @@ button.is-danger:hover { filter: brightness(1.15); }
   gap: 0;
 }
 
-/* 「我的语音历史」入口按钮（header 左侧紧凑图标）。 */
-.mobile-history-btn {
-  flex: 0 0 auto;
-  background: transparent;
-  border: none;
-  font-size: 1.1rem;
-  line-height: 1;
-  padding: var(--space-1) var(--space-2);
-  min-height: var(--tap-min);
-}
-.mobile-history-btn:hover { background: var(--color-surface-hi); }
-
 /* 语音历史 overlay */
 .voice-history {
   position: fixed;
@@ -594,8 +582,9 @@ button.is-danger:hover { filter: brightness(1.15); }
 }
 .template-picker__item:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* Custom session picker — replaces native <select>. */
-.session-picker { position: relative; flex: 1; min-width: 0; }
+/* Keep the dropdown below the optional voice status row so it never overlaps
+   the header's secondary line when expanded. */
+.session-picker { position: relative; flex: 1; min-width: 0; --mobile-voice-status-offset: 0px; }
 .session-picker__trigger-row {
   display: flex;
   align-items: center;
@@ -655,9 +644,10 @@ button.is-danger:hover { filter: brightness(1.15); }
 }
 .session-picker.is-open .session-picker__backdrop { display: block; }
 
+/* --- Mobile header voice-status relayout --- */
 .session-picker__dropdown {
   position: absolute;
-  top: 100%;
+  top: calc(100% + var(--mobile-voice-status-offset));
   left: 0;
   right: 0;
   z-index: 11;
@@ -666,7 +656,7 @@ button.is-danger:hover { filter: brightness(1.15); }
   border-bottom: 1px solid var(--color-surface-hi);
   max-height: 0;
   overflow: hidden;
-  transition: max-height var(--duration-fast) var(--ease-out-expo);
+  transition: max-height var(--duration-fast) var(--ease-out-expo), top var(--duration-fast) var(--ease-out-expo);
 }
 .session-picker.is-open .session-picker__dropdown {
   max-height: 50dvh;
@@ -965,20 +955,6 @@ button.is-danger:hover { filter: brightness(1.15); }
 }
 
 /* Session picker action buttons — inherit .header-action base */
-
-/* --- Mobile: rename mode in header --- */
-.mobile-shell__rename-input {
-  flex: 1 1 auto;
-  min-width: 0;
-  font: inherit;
-  padding: .25rem .5rem;
-}
-.mobile-shell__rename-save,
-.mobile-shell__rename-cancel {
-  flex: 0 0 auto;
-  padding: 0 .5rem;
-  font-size: .9rem;
-}
 
 /* --- Mobile: image attach button (inherits session-picker__action style via shared rules) --- */
 .mobile-toolbar__image-attach {
