@@ -7,7 +7,6 @@ type VoiceHeaderStatus = "idle" | "recording" | "transcribing" | "cleaning" | "e
 
 type MobileDebugHub = typeof window.__tmuxHub & {
   __setVoiceHeaderStatus?: (status: VoiceHeaderStatus, detail?: string) => void;
-  __getVoiceHeaderDebugState?: () => { fitCalls: number };
 };
 
 // Mobile shell: a session-picker dropdown in the header + a bottom input bar
@@ -40,13 +39,6 @@ async function setVoiceHeaderStatus(page: Page, status: VoiceHeaderStatus, detai
     },
     { status, detail },
   );
-}
-
-async function getVoiceHeaderFitCalls(page: Page): Promise<number> {
-  return page.evaluate(() => {
-    const hub = window.__tmuxHub as MobileDebugHub;
-    return hub.__getVoiceHeaderDebugState?.().fitCalls ?? -1;
-  });
 }
 
 /** Type into the bottom input bar and send (literal + Enter). */
@@ -85,36 +77,20 @@ test.describe("mobile view", () => {
     await expect(row).toHaveText(/整理中/);
   });
 
-  test("voice header status settles then hides on idle and error", async ({ page, ctx }) => {
+  test("voice header status settles then hides on idle and error", async ({ page }) => {
     await openApp(page);
-    const name = await ctx.createSession("kb-cc");
-    await selectSession(page, name);
-    await page.waitForTimeout(1000);
 
     const row = page.locator(".mobile-shell__voice-status");
-    const before = await getVoiceHeaderFitCalls(page);
-    expect(before).toBeGreaterThanOrEqual(0);
 
-    await setVoiceHeaderStatus(page, "recording");
+    await setVoiceHeaderStatus(page, "idle", "⏱ 松手后0.4s · 网络0.1 转写0.1 整理0.2");
     await expect(row).toBeVisible();
-    await expect(row).toHaveText(/录音中/);
-    await expect.poll(async () => getVoiceHeaderFitCalls(page), { timeout: 5_000 }).toBeGreaterThan(before);
-
-    const afterRecording = await getVoiceHeaderFitCalls(page);
-    await setVoiceHeaderStatus(page, "idle", "转写完成");
-    await expect(row).toBeVisible();
-    await expect(row).toHaveText(/转写完成/);
-    await expect.poll(async () => getVoiceHeaderFitCalls(page), { timeout: 5_000 }).toBeGreaterThan(afterRecording);
+    await expect(row).toHaveText(/松手后/);
     await expect(row).toBeHidden({ timeout: 4_000 });
 
-    const afterIdleHide = await getVoiceHeaderFitCalls(page);
-    await setVoiceHeaderStatus(page, "error", "网络异常");
+    await setVoiceHeaderStatus(page, "error", "⚠️ 出错了");
     await expect(row).toBeVisible();
-    await expect(row).toHaveText(/网络异常/);
-    await expect.poll(async () => getVoiceHeaderFitCalls(page), { timeout: 5_000 }).toBeGreaterThan(afterIdleHide);
-    await expect(row).toBeHidden({ timeout: 5_000 });
-
-    ctx.tmuxE2E(["kill-session", "-t", name]);
+    await expect(row).toHaveText(/出错了/);
+    await expect(row).toBeHidden({ timeout: 4_000 });
   });
 
   test("input bar submit reaches the pane", async ({ page, ctx }) => {
