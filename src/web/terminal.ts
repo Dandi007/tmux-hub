@@ -590,6 +590,29 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   };
   window.addEventListener("resize", onResize);
 
+  // ── Re-assert viewport pin when this client re-becomes active ────────
+  // The tmux window is pinned (window-size manual) to whichever web client
+  // last sent a resize. A second web client on the SAME session (e.g. the
+  // phone) pins it to its narrower size. Our WS stays alive across that, so
+  // none of the existing re-pin triggers (initial open / window-resize /
+  // reconnect) fire when the user returns to THIS client — the pane stays
+  // stuck at the other client's size and renders in a narrow left column
+  // that never refreshes. Re-publish our own size whenever this client
+  // becomes active again, implementing "latest active client wins". This
+  // is safe against native tmux clients: publishResize() is gated on
+  // shouldSendResize() (owner === "web"), so it never fights a native owner.
+  const reassertViewport = () => {
+    if (disposed) return;
+    if (document.visibilityState === "hidden") return;
+    onResize();
+  };
+  window.addEventListener("focus", reassertViewport);
+  document.addEventListener("visibilitychange", reassertViewport);
+  // pointerdown covers the case where the browser window never lost OS focus
+  // (e.g. the user just glanced at their phone): the first interaction with
+  // this terminal re-claims the viewport.
+  el.addEventListener("pointerdown", reassertViewport);
+
   // ── Initial WS connection ──────────────────────────────────────────
   const initUrl = await buildWsUrl();
   let ws = new WebSocket(initUrl);
@@ -666,6 +689,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       stopDeadProbe();
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       window.removeEventListener("resize", onResize);
+      window.removeEventListener("focus", reassertViewport);
+      document.removeEventListener("visibilitychange", reassertViewport);
+      try { el.removeEventListener("pointerdown", reassertViewport); } catch {}
       if (resizeTimer) { clearTimeout(resizeTimer); resizeTimer = null; }
       try { el.removeEventListener("mousedown", onMouseDown); } catch {}
       try { el.removeEventListener("mousemove", onMouseMove); } catch {}
