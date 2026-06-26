@@ -10,7 +10,8 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 // 本应用在 gate-auth 里的 app 名 = 域名第一段。
-export const GATE_APP = "hub";
+// 可通过 TMUX_HUB_GATE_APP 覆盖（dogfood 实例设为 "hub-dogfood"），默认 "hub"。
+export const GATE_APP = process.env.TMUX_HUB_GATE_APP ?? "hub";
 
 // 默认时钟偏移容忍（秒），与 gate-auth /verify、todo-pwa 一致。
 export const GATE_SKEW_SECONDS = 300;
