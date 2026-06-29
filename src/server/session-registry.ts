@@ -118,7 +118,7 @@ export function extractCodexPromptTitle(screen: string): string {
 }
 
 function isCodexPlaceholderPrompt(title: string): boolean {
-  return title === "Find and fix a bug in @filename";
+  return title === "Find and fix a bug in @filename" || title === "Implement {feature}";
 }
 
 export class SessionRegistry {

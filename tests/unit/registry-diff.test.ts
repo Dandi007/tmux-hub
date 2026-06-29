@@ -105,6 +105,8 @@ describe("extractCodexPromptTitle", () => {
       "",
       "› Find and fix a bug in @filename",
       "",
+      "› Implement {feature}",
+      "",
       "  gpt-5.5 medium · /data/vault",
     ].join("\n");
     expect(extractCodexPromptTitle(screen)).toBe("我看到emojo上线了 但是title 都是valut");
