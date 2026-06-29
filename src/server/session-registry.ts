@@ -54,7 +54,7 @@ export async function listSessions(): Promise<SessionInfo[] | null> {
     return null;
   }
   if (!r.stdout) return [];
-  return r.stdout.split("\n").map((line) => {
+  const sessions = r.stdout.split("\n").map((line) => {
     const [name, activity, attached, windows, cols, rows, pane_title] = line.split("|");
     return {
       name: name!,
@@ -67,6 +67,58 @@ export async function listSessions(): Promise<SessionInfo[] | null> {
       pane_title: pane_title || "",
     };
   });
+  return Promise.all(sessions.map(enrichCodexTitle));
+}
+
+function isCodexSessionName(name: string): boolean {
+  return /(^|[-_])codex([-_]|$)/i.test(name);
+}
+
+function titleStatusPrefix(title: string): string {
+  if (!title) return "";
+  const firstChar = title.charAt(0);
+  return firstChar === "✳" || /^[\u2800-\u28ff]/.test(firstChar) ? firstChar : "";
+}
+
+async function enrichCodexTitle(info: SessionInfo): Promise<SessionInfo> {
+  if (!isCodexSessionName(info.name)) return info;
+  const promptTitle = await readCodexPromptTitle(info.name);
+  if (!promptTitle) return info;
+  const prefix = titleStatusPrefix(info.pane_title);
+  return {
+    ...info,
+    pane_title: prefix ? `${prefix} ${promptTitle}` : promptTitle,
+  };
+}
+
+async function readCodexPromptTitle(name: string): Promise<string> {
+  const r = await tmux(["capture-pane", "-p", "-t", `${name}:0.0`, "-S", "-1000"]);
+  if (r.code !== 0 || !r.stdout) return "";
+  return extractCodexPromptTitle(r.stdout);
+}
+
+export function extractCodexPromptTitle(screen: string): string {
+  const lines = screen.split("\n");
+  let title = "";
+  for (let i = 0; i < lines.length; i += 1) {
+    const match = lines[i]!.match(/^›\s*(.+?)\s*$/);
+    if (!match) continue;
+    const parts = [match[1]!];
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const line = lines[j]!;
+      if (!/^  \S/.test(line)) break;
+      if (/^(gpt-|o[0-9]|claude|deepseek|qwen|glm)/i.test(line.trim())) break;
+      parts.push(line.trim());
+    }
+    const candidate = parts.join(" ");
+    if (isCodexPlaceholderPrompt(candidate)) continue;
+    title = candidate;
+  }
+  return title.length > 80 ? `${title.slice(0, 77)}...` : title;
+}
+
+function isCodexPlaceholderPrompt(title: string): boolean {
+  return title === "Find and fix a bug in @filename";
 }
 
 export class SessionRegistry {

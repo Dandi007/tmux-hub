@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { diffSessions, filterManagedSessions } from "../../src/server/session-registry";
+import { diffSessions, extractCodexPromptTitle, filterManagedSessions } from "../../src/server/session-registry";
 import type { SessionInfo } from "../../src/shared/protocol";
 
 const s = (name: string, activity = 0, attached = 0, windows = 1, cols = 80, rows = 24): SessionInfo => ({
@@ -71,5 +71,42 @@ describe("filterManagedSessions", () => {
     const all = [s("b", 200, 1), s("a", 100, 0)];
     const managed = new Set(["a", "b"]);
     expect(filterManagedSessions(all, managed)).toEqual(all);
+  });
+});
+
+describe("extractCodexPromptTitle", () => {
+  test("uses latest Codex user prompt", () => {
+    const screen = [
+      "› 旧问题",
+      "",
+      "• Ran date",
+      "",
+      "› 不对 不是symlink 用正规方式安装",
+      "",
+      "• 我理解你的意思",
+    ].join("\n");
+    expect(extractCodexPromptTitle(screen)).toBe("不对 不是symlink 用正规方式安装");
+  });
+
+  test("joins wrapped prompt continuation lines", () => {
+    const screen = [
+      "› 我看到emojo上线了 但是title",
+      "  都是valut",
+      "",
+      "• 我先确认时间",
+    ].join("\n");
+    expect(extractCodexPromptTitle(screen)).toBe("我看到emojo上线了 但是title 都是valut");
+  });
+
+  test("ignores Codex placeholder prompt and footer", () => {
+    const screen = [
+      "› 我看到emojo上线了 但是title",
+      "  都是valut",
+      "",
+      "› Find and fix a bug in @filename",
+      "",
+      "  gpt-5.5 medium · /data/vault",
+    ].join("\n");
+    expect(extractCodexPromptTitle(screen)).toBe("我看到emojo上线了 但是title 都是valut");
   });
 });

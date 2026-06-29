@@ -32,6 +32,14 @@ kb-codex-20260629061455|vault|node
 
 因此仅靠 `pane_title` 首字符不足以覆盖 Codex idle，需要结合 session name。
 
+再次上线后确认：Codex 的 terminal title 永远只给 `vault` 这类 cwd，不给当前任务。真正的任务标题出现在 Codex TUI 屏幕里最近一条用户输入：
+
+```text
+› 不对 不是symlink 用正规方式安装
+```
+
+所以 Codex title 需要服务端从 `capture-pane` 中抽最近的 `› ...` prompt，再用原 `pane_title` 的 spinner 保留 working/idle 状态。
+
 ## §3 方案设计
 
 继续复用 `pane_title`，不新增后端协议字段。
@@ -41,6 +49,7 @@ kb-codex-20260629061455|vault|node
 - `✳`：idle，显示 `💬`。
 - 任意 Braille Unicode block 首字符 `U+2800..U+28FF`：working，显示 `⚡`。
 - session name 匹配 `codex` 且 `pane_title` 非空：idle，显示 `💬`。
+- Codex session 的显示 title 优先取最近 `capture-pane` 中的 `› ...` 用户请求；原始 `pane_title` 只保留 spinner 状态。
 - 其他 title：unknown，保持显示 session name。
 
 旧导出 `getClaudeCodeStatus` / `isClaudeCodeTitle` / `getCCStatusIcon` 保留为兼容 wrapper，避免桌面与移动端一次性大重命名。
@@ -50,11 +59,14 @@ kb-codex-20260629061455|vault|node
 | 文件 | 改动 |
 |---|---|
 | `src/web/shared/cc-status.ts` | 新增 agent status API，扩大 Braille spinner 覆盖，保留旧导出 |
+| `src/server/session-registry.ts` | Codex session 用 `capture-pane` 抽最近用户请求作为动态标题 |
 | `tests/unit/agent-status.test.ts` | 覆盖 Claude Code idle、Claude/Codex working、普通 title 非误判 |
+| `tests/unit/registry-diff.test.ts` | 覆盖 Codex prompt title 抽取 |
 
 ## §5 测试计划
 
 - `bun test tests/unit/agent-status.test.ts`
+- `bun test tests/unit/registry-diff.test.ts`
 - `bun run build`
 
 ## §6 非目标
