@@ -8,6 +8,7 @@ tmux-hub 的 session 列表需要同时支持 Claude Code 与 Codex。用户只�
 
 - Claude Code 继续按现有规则显示动态标题与状态 icon。
 - Codex 的 `pane_title` 以 Braille spinner 开头时，也显示动态标题并标记为 working。
+- Codex 的 `pane_title` 没有 spinner、但 session name 明确是 Codex 时，显示动态标题并标记为 idle。
 - 普通 shell / hostname title 不被误判成 agent。
 
 ## §2 现状与根因
@@ -23,6 +24,14 @@ kb-codex-20260629063724|⠧ vault|node
 
 `⠏` 与 `⠧` 不在旧白名单里，因此 UI 回退显示 session name，看不到 Codex 动态标题和 working 状态。
 
+重启服务后还观察到 Codex 静止时可能保留无 spinner title：
+
+```text
+kb-codex-20260629061455|vault|node
+```
+
+因此仅靠 `pane_title` 首字符不足以覆盖 Codex idle，需要结合 session name。
+
 ## §3 方案设计
 
 继续复用 `pane_title`，不新增后端协议字段。
@@ -31,6 +40,7 @@ kb-codex-20260629063724|⠧ vault|node
 
 - `✳`：idle，显示 `💬`。
 - 任意 Braille Unicode block 首字符 `U+2800..U+28FF`：working，显示 `⚡`。
+- session name 匹配 `codex` 且 `pane_title` 非空：idle，显示 `💬`。
 - 其他 title：unknown，保持显示 session name。
 
 旧导出 `getClaudeCodeStatus` / `isClaudeCodeTitle` / `getCCStatusIcon` 保留为兼容 wrapper，避免桌面与移动端一次性大重命名。

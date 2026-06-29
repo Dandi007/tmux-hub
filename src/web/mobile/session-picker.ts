@@ -1,6 +1,6 @@
 import type { SessionInfo } from "@shared/protocol";
 import { isGrammarOk, formatSessionMeta } from "@shared/session-name";
-import { getAgentStatus, getAgentStatusIcon } from "../shared/cc-status";
+import { getAgentTitleInfo, getAgentStatusIcon } from "../shared/cc-status";
 
 export type SessionPickerHandle = {
   root: HTMLElement;
@@ -96,7 +96,7 @@ export function renderSessionPicker(
         const n = document.createElement("span");
         n.className = "session-picker__item-name";
 
-        const agentStatus = getAgentStatus(s.pane_title);
+        const { status: agentStatus, title: agentTitle } = getAgentTitleInfo(s.name, s.pane_title);
         if (agentStatus !== 'unknown') {
           const statusIcon = document.createElement("span");
           statusIcon.className = `session-picker__cc-status cc-status--${agentStatus}`;
@@ -104,7 +104,7 @@ export function renderSessionPicker(
           n.appendChild(statusIcon);
 
           const titleText = document.createElement("span");
-          titleText.textContent = s.pane_title.substring(1).trim();
+          titleText.textContent = agentTitle;
           n.appendChild(titleText);
         } else {
           n.textContent = ok ? s.name : `${s.name} (external)`;
@@ -128,9 +128,10 @@ export function renderSessionPicker(
 
     if (active) {
       const activeSession = sessions.find((s) => s.name === active);
-      const agentStatus = activeSession ? getAgentStatus(activeSession.pane_title) : 'unknown';
+      const agentInfo = activeSession ? getAgentTitleInfo(activeSession.name, activeSession.pane_title) : { status: 'unknown' as const, title: "" };
+      const agentStatus = agentInfo.status;
       if (agentStatus !== 'unknown' && activeSession) {
-        nameSpan.textContent = `${getAgentStatusIcon(agentStatus)} ${activeSession.pane_title.substring(1).trim()}`;
+        nameSpan.textContent = `${getAgentStatusIcon(agentStatus)} ${agentInfo.title}`;
       } else {
         nameSpan.textContent = active;
       }
@@ -140,9 +141,10 @@ export function renderSessionPicker(
   const setActive = (name: string) => {
     activeName = name;
     const activeSession = sessions.find((s) => s.name === name);
-    const agentStatus = activeSession ? getAgentStatus(activeSession.pane_title) : 'unknown';
+    const agentInfo = activeSession ? getAgentTitleInfo(activeSession.name, activeSession.pane_title) : { status: 'unknown' as const, title: "" };
+    const agentStatus = agentInfo.status;
     if (agentStatus !== 'unknown' && activeSession) {
-      nameSpan.textContent = `${getAgentStatusIcon(agentStatus)} ${activeSession.pane_title.substring(1).trim()}`;
+      nameSpan.textContent = `${getAgentStatusIcon(agentStatus)} ${agentInfo.title}`;
     } else {
       nameSpan.textContent = name;
     }

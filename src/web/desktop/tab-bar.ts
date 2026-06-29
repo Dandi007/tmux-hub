@@ -4,7 +4,7 @@ import { showContextMenu } from "../ui/context-menu";
 import { showToast } from "../ui/toast";
 import { renameSession } from "../shared/rename-controller";
 import { imeGuard } from "../shared/ime-guard";
-import { getAgentStatus, getAgentStatusIcon } from "../shared/cc-status";
+import { getAgentTitleInfo, getAgentStatusIcon } from "../shared/cc-status";
 
 export type TabBarHandle = {
   el: HTMLElement;
@@ -121,7 +121,7 @@ export function createTabBar(parent: HTMLElement): TabBarHandle {
     nameSpan.className = "tab-bar__name";
 
     // Agent session: show status icon + task title from pane_title.
-    const agentStatus = getAgentStatus(s.pane_title);
+    const { status: agentStatus, title: agentTitle } = getAgentTitleInfo(s.name, s.pane_title);
     if (agentStatus !== 'unknown') {
       const statusIcon = document.createElement("span");
       statusIcon.className = `tab-bar__cc-status cc-status--${agentStatus}`;
@@ -130,7 +130,7 @@ export function createTabBar(parent: HTMLElement): TabBarHandle {
 
       const titleText = document.createElement("span");
       titleText.className = "tab-bar__cc-title";
-      titleText.textContent = s.pane_title.substring(1).trim();
+      titleText.textContent = agentTitle;
       nameSpan.appendChild(titleText);
     } else {
       nameSpan.textContent = s.name;

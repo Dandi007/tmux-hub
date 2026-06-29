@@ -5,7 +5,7 @@ import { isGrammarOk, formatSessionMeta } from "@shared/session-name";
 import { showToast } from "../ui/toast";
 import { renameSession } from "../shared/rename-controller";
 import { imeGuard } from "../shared/ime-guard";
-import { getAgentStatus, getAgentStatusIcon } from "../shared/cc-status";
+import { getAgentTitleInfo, getAgentStatusIcon } from "../shared/cc-status";
 
 export type SessionListHandle = {
   el: HTMLElement;
@@ -46,7 +46,7 @@ export function renderSessionList(parent: HTMLElement): SessionListHandle {
     name.className = "session-list__name";
 
     // Agent session: show status icon + task title from pane_title.
-    const agentStatus = getAgentStatus(s.pane_title);
+    const { status: agentStatus, title: agentTitle } = getAgentTitleInfo(s.name, s.pane_title);
     if (agentStatus !== 'unknown') {
       const statusIcon = document.createElement("span");
       statusIcon.className = `session-list__cc-status cc-status--${agentStatus}`;
@@ -55,7 +55,7 @@ export function renderSessionList(parent: HTMLElement): SessionListHandle {
 
       const titleText = document.createElement("span");
       titleText.className = "session-list__cc-title";
-      titleText.textContent = s.pane_title.substring(1).trim();
+      titleText.textContent = agentTitle;
       name.appendChild(titleText);
     } else {
       name.textContent = s.name;

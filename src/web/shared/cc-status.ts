@@ -9,6 +9,11 @@
 export type AgentStatus = 'idle' | 'working' | 'unknown';
 export type CCStatus = AgentStatus;
 
+export type AgentTitleInfo = {
+  status: AgentStatus;
+  title: string;
+};
+
 /**
  * Detect Claude Code / Codex status from pane_title.
  */
@@ -24,6 +29,37 @@ export function getAgentStatus(title: string): AgentStatus {
   if (/^[\u2800-\u28ff]/.test(firstChar)) return 'working';
 
   return 'unknown';
+}
+
+/**
+ * Detect agent status with session-name context. Codex keeps publishing a
+ * useful pane_title after the spinner disappears, so codex-named sessions with
+ * a non-empty title are treated as idle instead of falling back to session name.
+ */
+export function getSessionAgentStatus(sessionName: string, title: string): AgentStatus {
+  const direct = getAgentStatus(title);
+  if (direct !== 'unknown') return direct;
+  if (isCodexSessionName(sessionName) && title.trim()) return 'idle';
+  return 'unknown';
+}
+
+export function getAgentTitleInfo(sessionName: string, title: string): AgentTitleInfo {
+  const status = getSessionAgentStatus(sessionName, title);
+  if (status === 'unknown') return { status, title: "" };
+  return { status, title: stripAgentTitleMarker(title) };
+}
+
+function isCodexSessionName(sessionName: string): boolean {
+  return /(^|[-_])codex([-_]|$)/i.test(sessionName);
+}
+
+function stripAgentTitleMarker(title: string): string {
+  if (!title) return "";
+  const firstChar = title.charAt(0);
+  if (firstChar === '✳' || /^[\u2800-\u28ff]/.test(firstChar)) {
+    return title.substring(1).trim();
+  }
+  return title.trim();
 }
 
 /**
