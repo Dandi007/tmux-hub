@@ -4,7 +4,7 @@ import { showContextMenu } from "../ui/context-menu";
 import { showToast } from "../ui/toast";
 import { renameSession } from "../shared/rename-controller";
 import { imeGuard } from "../shared/ime-guard";
-import { getClaudeCodeStatus, getCCStatusIcon } from "../shared/cc-status";
+import { getAgentStatus, getAgentStatusIcon } from "../shared/cc-status";
 
 export type TabBarHandle = {
   el: HTMLElement;
@@ -120,21 +120,19 @@ export function createTabBar(parent: HTMLElement): TabBarHandle {
     const nameSpan = document.createElement("span");
     nameSpan.className = "tab-bar__name";
 
-    // Check if this is a Claude Code session and get its status
-    const ccStatus = getClaudeCodeStatus(s.pane_title);
-    if (ccStatus !== 'unknown') {
-      // Claude Code session: show status icon + task title
+    // Agent session: show status icon + task title from pane_title.
+    const agentStatus = getAgentStatus(s.pane_title);
+    if (agentStatus !== 'unknown') {
       const statusIcon = document.createElement("span");
-      statusIcon.className = `tab-bar__cc-status cc-status--${ccStatus}`;
-      statusIcon.textContent = getCCStatusIcon(ccStatus);
+      statusIcon.className = `tab-bar__cc-status cc-status--${agentStatus}`;
+      statusIcon.textContent = getAgentStatusIcon(agentStatus);
       nameSpan.appendChild(statusIcon);
 
       const titleText = document.createElement("span");
       titleText.className = "tab-bar__cc-title";
-      titleText.textContent = s.pane_title.substring(1).trim(); // Remove spinner char
+      titleText.textContent = s.pane_title.substring(1).trim();
       nameSpan.appendChild(titleText);
     } else {
-      // Regular session: show session name
       nameSpan.textContent = s.name;
     }
 

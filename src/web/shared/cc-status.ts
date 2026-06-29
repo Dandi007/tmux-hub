@@ -1,43 +1,66 @@
 /**
- * Claude Code status detection from pane_title.
+ * Agent status detection from tmux pane_title.
  *
- * Claude Code updates pane_title with different spinner characters to indicate state:
- * - ✳ = idle (waiting for user input)
- * - ⠐, ⠂, ⠈, ⠠, ⠄, ⠁ (braille spinner) = working (thinking/outputting)
+ * Claude Code and Codex both publish live task titles through terminal title
+ * OSC sequences. Claude Code uses ✳ when waiting for input. Both tools use
+ * Braille spinner frames while thinking/outputting.
  */
 
-export type CCStatus = 'idle' | 'working' | 'unknown';
+export type AgentStatus = 'idle' | 'working' | 'unknown';
+export type CCStatus = AgentStatus;
 
 /**
- * Detect Claude Code status from pane_title.
+ * Detect Claude Code / Codex status from pane_title.
  */
-export function getClaudeCodeStatus(title: string): CCStatus {
+export function getAgentStatus(title: string): AgentStatus {
   if (!title) return 'unknown';
   const firstChar = title.charAt(0);
 
   // ✳ = waiting for user input (idle)
   if (firstChar === '✳') return 'idle';
 
-  // Braille spinner characters = working (thinking/outputting)
-  if (/^[⠐⠂⠈⠠⠄⠁]/.test(firstChar)) return 'working';
+  // Braille spinner characters = working (thinking/outputting). Codex has
+  // been observed using frames such as ⠏ and ⠧, so accept the full block.
+  if (/^[\u2800-\u28ff]/.test(firstChar)) return 'working';
 
   return 'unknown';
 }
 
 /**
- * Check if pane_title is a Claude Code dynamic task title.
+ * Backward-compatible name for existing UI code.
  */
-export function isClaudeCodeTitle(title: string): boolean {
-  return getClaudeCodeStatus(title) !== 'unknown';
+export function getClaudeCodeStatus(title: string): CCStatus {
+  return getAgentStatus(title);
 }
 
 /**
- * Get status icon for Claude Code.
+ * Check if pane_title is a dynamic agent task title.
  */
-export function getCCStatusIcon(status: CCStatus): string {
+export function isAgentTitle(title: string): boolean {
+  return getAgentStatus(title) !== 'unknown';
+}
+
+/**
+ * Backward-compatible name for existing UI code.
+ */
+export function isClaudeCodeTitle(title: string): boolean {
+  return isAgentTitle(title);
+}
+
+/**
+ * Get status icon for Claude Code / Codex.
+ */
+export function getAgentStatusIcon(status: AgentStatus): string {
   switch (status) {
     case 'idle': return '💬';
     case 'working': return '⚡';
     default: return '';
   }
+}
+
+/**
+ * Backward-compatible name for existing UI code.
+ */
+export function getCCStatusIcon(status: CCStatus): string {
+  return getAgentStatusIcon(status);
 }

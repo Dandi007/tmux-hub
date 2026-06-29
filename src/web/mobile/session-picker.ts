@@ -1,6 +1,6 @@
 import type { SessionInfo } from "@shared/protocol";
 import { isGrammarOk, formatSessionMeta } from "@shared/session-name";
-import { getClaudeCodeStatus, getCCStatusIcon } from "../shared/cc-status";
+import { getAgentStatus, getAgentStatusIcon } from "../shared/cc-status";
 
 export type SessionPickerHandle = {
   root: HTMLElement;
@@ -96,11 +96,11 @@ export function renderSessionPicker(
         const n = document.createElement("span");
         n.className = "session-picker__item-name";
 
-        const ccStatus = getClaudeCodeStatus(s.pane_title);
-        if (ccStatus !== 'unknown') {
+        const agentStatus = getAgentStatus(s.pane_title);
+        if (agentStatus !== 'unknown') {
           const statusIcon = document.createElement("span");
-          statusIcon.className = `session-picker__cc-status cc-status--${ccStatus}`;
-          statusIcon.textContent = getCCStatusIcon(ccStatus);
+          statusIcon.className = `session-picker__cc-status cc-status--${agentStatus}`;
+          statusIcon.textContent = getAgentStatusIcon(agentStatus);
           n.appendChild(statusIcon);
 
           const titleText = document.createElement("span");
@@ -128,9 +128,9 @@ export function renderSessionPicker(
 
     if (active) {
       const activeSession = sessions.find((s) => s.name === active);
-      const ccStatus = activeSession ? getClaudeCodeStatus(activeSession.pane_title) : 'unknown';
-      if (ccStatus !== 'unknown' && activeSession) {
-        nameSpan.textContent = `${getCCStatusIcon(ccStatus)} ${activeSession.pane_title.substring(1).trim()}`;
+      const agentStatus = activeSession ? getAgentStatus(activeSession.pane_title) : 'unknown';
+      if (agentStatus !== 'unknown' && activeSession) {
+        nameSpan.textContent = `${getAgentStatusIcon(agentStatus)} ${activeSession.pane_title.substring(1).trim()}`;
       } else {
         nameSpan.textContent = active;
       }
@@ -140,9 +140,9 @@ export function renderSessionPicker(
   const setActive = (name: string) => {
     activeName = name;
     const activeSession = sessions.find((s) => s.name === name);
-    const ccStatus = activeSession ? getClaudeCodeStatus(activeSession.pane_title) : 'unknown';
-    if (ccStatus !== 'unknown' && activeSession) {
-      nameSpan.textContent = `${getCCStatusIcon(ccStatus)} ${activeSession.pane_title.substring(1).trim()}`;
+    const agentStatus = activeSession ? getAgentStatus(activeSession.pane_title) : 'unknown';
+    if (agentStatus !== 'unknown' && activeSession) {
+      nameSpan.textContent = `${getAgentStatusIcon(agentStatus)} ${activeSession.pane_title.substring(1).trim()}`;
     } else {
       nameSpan.textContent = name;
     }

@@ -5,7 +5,7 @@ import { isGrammarOk, formatSessionMeta } from "@shared/session-name";
 import { showToast } from "../ui/toast";
 import { renameSession } from "../shared/rename-controller";
 import { imeGuard } from "../shared/ime-guard";
-import { getClaudeCodeStatus, getCCStatusIcon } from "../shared/cc-status";
+import { getAgentStatus, getAgentStatusIcon } from "../shared/cc-status";
 
 export type SessionListHandle = {
   el: HTMLElement;
@@ -45,21 +45,19 @@ export function renderSessionList(parent: HTMLElement): SessionListHandle {
     const name = document.createElement("div");
     name.className = "session-list__name";
 
-    // Check if this is a Claude Code session and get its status
-    const ccStatus = getClaudeCodeStatus(s.pane_title);
-    if (ccStatus !== 'unknown') {
-      // Claude Code session: show status icon + task title
+    // Agent session: show status icon + task title from pane_title.
+    const agentStatus = getAgentStatus(s.pane_title);
+    if (agentStatus !== 'unknown') {
       const statusIcon = document.createElement("span");
-      statusIcon.className = `session-list__cc-status cc-status--${ccStatus}`;
-      statusIcon.textContent = getCCStatusIcon(ccStatus);
+      statusIcon.className = `session-list__cc-status cc-status--${agentStatus}`;
+      statusIcon.textContent = getAgentStatusIcon(agentStatus);
       name.appendChild(statusIcon);
 
       const titleText = document.createElement("span");
       titleText.className = "session-list__cc-title";
-      titleText.textContent = s.pane_title.substring(1).trim(); // Remove spinner char
+      titleText.textContent = s.pane_title.substring(1).trim();
       name.appendChild(titleText);
     } else {
-      // Regular session: show session name
       name.textContent = s.name;
     }
 
