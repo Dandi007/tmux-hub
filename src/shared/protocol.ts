@@ -28,7 +28,10 @@ export type ClientWsMessage =
   // is translated into wheel reports the app scrolls itself. col/row are 1-based
   // cell coords of the touch point; notches is the number of wheel ticks.
   | { kind: "wheel"; direction: "up" | "down"; notches: number; col: number; row: number }
-  | { kind: "ping"; ts: number };
+  | { kind: "ping"; ts: number }
+  // Client render telemetry (opt-in via ?debug=perf). Logged server-side, never
+  // forwarded to the pty — purely diagnostic.
+  | { kind: "telemetry"; payload: Record<string, unknown> };
 
 export type ServerWsMessage =
   | { kind: "pong"; ts: number }

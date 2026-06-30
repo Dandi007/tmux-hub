@@ -6,6 +6,7 @@ import { showToast } from "./ui/toast";
 import "xterm/css/xterm.css";
 import type { ClientWsMessage, ServerWsMessage } from "@shared/protocol";
 import { hubWsUrl, refreshSecret } from "./hub-fetch";
+import { perfEnabled, createPerfTelemetry, type PerfTelemetry } from "./perf-telemetry";
 import {
   type ViewportState,
   handleViewportMessage,
@@ -53,6 +54,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // and any straggler ws callbacks can skip when the caller has already
   // torn this attach down (mobile session switch race).
   let disposed = false;
+  // Render telemetry — only created when `?debug=perf`; assigned once the send
+  // queue exists (below). Hoisted here so writeTerm/CanvasAddon can reference it.
+  let perf: PerfTelemetry | null = null;
   const term = new Terminal({
     convertEol: true,
     cursorBlink: false,
@@ -116,8 +120,10 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     try {
       term.loadAddon(new CanvasAddon());
       fit.fit();
+      perf?.setRenderer("canvas");
     } catch (e) {
       console.warn("[tmux-hub] CanvasAddon failed to load, falling back to DOM:", e);
+      perf?.setRenderer("dom");
     }
   }, 50);
 
@@ -246,9 +252,14 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // `disposed` is hoisted to the top of attachTerminal.
   const writeTerm = (data: string | Uint8Array): void => {
     if (disposed) return;
+    const t0 = perf ? performance.now() : 0;
     try { term.write(data); } catch (e) {
       // Last line of defence; should not happen with the disposed gate.
       console.warn("[tmux-hub] term.write failed:", e);
+    }
+    if (perf) {
+      const bytes = typeof data === "string" ? data.length : data.byteLength;
+      perf.recordData(bytes, performance.now() - t0);
     }
   };
 
@@ -415,6 +426,15 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     sendQueue = [];
     sendQueueBytes = 0;
   };
+
+  // ── Render telemetry (opt-in via ?debug=perf) ────────────────────────
+  // Ships per-second render-cadence samples back over this WS so the operator
+  // can read real per-device numbers from the hub logs instead of guessing.
+  if (perfEnabled()) {
+    perf = createPerfTelemetry(opts.sessionName, (payload) =>
+      queuedSend({ kind: "telemetry", payload }));
+    perf.attach(term);
+  }
 
   // ── WS wiring + reconnect logic ───────────────────────────────────
   const wireWs = (socket: WebSocket): void => {
@@ -685,6 +705,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     },
     close: () => {
       disposed = true;
+      perf?.stop();
       stopHeartbeat();
       stopDeadProbe();
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
