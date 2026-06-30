@@ -382,6 +382,15 @@ Bun.serve({
         try { ws.send(JSON.stringify({ kind: "pong", ts })); } catch {}
         return;
       }
+      // Client render telemetry (opt-in via ?debug=perf): log and stop — never
+      // forward to the pty. Lets us read real per-device render cadence from logs.
+      if (typeof parsed === "object" && parsed !== null && (parsed as { kind?: string }).kind === "telemetry") {
+        logger.info(
+          { session: sessionName, connId, perf: (parsed as { payload?: unknown }).payload },
+          "client perf telemetry",
+        );
+        return;
+      }
       input.send(sessionName, parsed as Parameters<typeof input.send>[1]).then((result) => {
         // If resize was skipped (native attached), send authoritative viewport back
         if (result?.skipped && result.cols && result.rows) {
