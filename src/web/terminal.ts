@@ -207,27 +207,45 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // already gone, but a mid-drag read still has it.
   const onMouseMove = (e: MouseEvent): void => { if (e.buttons & 1) trackSelection(); };
   const onMouseDown = (): void => { pendingSelection = ""; };
+  // execCommand('copy') on a hidden textarea. More lenient than the async
+  // Clipboard API about transient activation, so it can succeed for OSC 52
+  // copies (fired from a ws message, not directly in the mouse gesture) that
+  // navigator.clipboard.writeText rejects with NotAllowedError.
+  const execCommandCopy = (text: string): boolean => {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.top = "0";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  };
   const copyToClipboard = async (text: string): Promise<void> => {
     const count = [...text].length;
-    try {
-      if (navigator.clipboard?.writeText) {
+    // Try the async Clipboard API first (best fidelity), then fall back to
+    // execCommand on rejection/absence before declaring failure.
+    if (navigator.clipboard?.writeText) {
+      try {
         await navigator.clipboard.writeText(text);
-      } else {
-        // Fallback for non-secure contexts / older browsers.
-        const ta = document.createElement("textarea");
-        ta.value = text;
-        ta.style.position = "fixed";
-        ta.style.opacity = "0";
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand("copy");
-        ta.remove();
+        showToast(`已复制 ${count} 字符到剪贴板`, "info");
+        return;
+      } catch (e) {
+        console.warn("[tmux-hub] clipboard.writeText rejected, trying execCommand:", e);
       }
-      showToast(`已复制 ${count} 字符到剪贴板`, "info");
-    } catch (e) {
-      console.warn("[tmux-hub] clipboard write failed:", e);
-      showToast("复制失败：浏览器拒绝写入剪贴板", "error");
     }
+    if (execCommandCopy(text)) {
+      showToast(`已复制 ${count} 字符到剪贴板`, "info");
+      return;
+    }
+    showToast("复制失败：浏览器拒绝写入剪贴板", "error");
   };
   const onMouseUp = (): void => {
     if (disposed) return;
