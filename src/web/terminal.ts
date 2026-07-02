@@ -242,6 +242,35 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   el.addEventListener("mousemove", onMouseMove);
   el.addEventListener("mouseup", onMouseUp);
 
+  // ── OSC 52 → browser clipboard ──────────────────────────────────────
+  // When tmux (set-clipboard on) or an app inside it copies, it emits
+  // OSC 52 (ESC ] 52 ; <targets> ; <base64> BEL) to us. Handle it so a plain
+  // tmux mouse-drag copy lands in the USER's browser clipboard with no
+  // force-selection modifier needed — the app-side copy is what fires this.
+  // Payload "?" is a clipboard READ request (we don't support host-initiated
+  // reads); ignore it. The write reuses copyToClipboard; because this fires
+  // right after the user's mouse-release gesture (OSC arrives ms later over
+  // the ws), the browser's transient activation usually still permits the
+  // clipboard write — and copyToClipboard already toasts on failure.
+  try {
+    term.parser.registerOscHandler(52, (data) => {
+      const semi = data.indexOf(";");
+      if (semi < 0) return true;
+      const payload = data.slice(semi + 1);
+      if (payload === "" || payload === "?") return true;
+      try {
+        const bytes = Uint8Array.from(atob(payload), (ch) => ch.charCodeAt(0));
+        const text = new TextDecoder().decode(bytes);
+        if (text) void copyToClipboard(text);
+      } catch (e) {
+        console.warn("[tmux-hub] OSC 52 decode failed:", e);
+      }
+      return true;
+    });
+  } catch (e) {
+    console.warn("[tmux-hub] OSC 52 handler registration failed:", e);
+  }
+
   // Once `close()` is called we MUST stop touching `term`. Any write into a
   // disposed xterm tunnels into `_renderService.onRequestRedraw` and throws
   // "Cannot read properties of undefined", which on mobile leaves the new
