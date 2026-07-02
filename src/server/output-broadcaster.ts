@@ -8,6 +8,7 @@ import {
   RING_BUFFER_BYTES,
   REPLAY_CAP_BYTES,
   EMULATOR_ENABLED,
+  PIPE_SINK_CMD,
   SNAPSHOT_SCROLLBACK_LINES,
   WINDOW_COLS,
   WINDOW_ROWS,
@@ -70,7 +71,10 @@ export class SessionBroadcaster {
     // without a shell command; we deliberately call it twice (once to turn off any
     // pre-existing pipe, then once to turn ours on with a redirect).
     await this.run(["pipe-pane", "-o", "-t", `${this.session}:0.0`]).catch(() => undefined);
-    const shellCmd = `cat >> ${shellQuote(this.logPath)}`;
+    // PIPE_SINK_CMD must flush per read (not line-buffer); see config.ts. A
+    // line-buffered sink (uutils cat) batches Claude's newline-sparse redraws
+    // into ~1.7s lumps, making the browser clock jump every few seconds.
+    const shellCmd = `${PIPE_SINK_CMD} >> ${shellQuote(this.logPath)}`;
     const r = await this.run(["pipe-pane", "-t", `${this.session}:0.0`, shellCmd]);
     if (r.code !== 0) {
       logger.error({ session: this.session, code: r.code, stderr: r.stderr }, "pipe-pane failed");

@@ -90,6 +90,29 @@ export const REPLAY_CAP_BYTES = parsePositiveInt(
   "TMUX_HUB_REPLAY_CAP_BYTES",
 );
 
+// Live-output pipe sink: the shell command tmux `pipe-pane` runs with the pane's
+// raw byte stream on stdin; it appends to the per-session log the broadcaster
+// polls. This command MUST flush per read (NOT line-buffer): Claude Code's Ink
+// TUI emits cursor-addressed redraws with ~zero newlines, so a line-buffered
+// writer holds ~1.7s of frames before flushing and the browser clock jumps every
+// few seconds — while a native `tmux attach` (never touches this path) stays
+// smooth. Ubuntu 26.04 ships uutils `cat` (Rust, line-buffered) which triggers
+// this; GNU/BSD `cat` (macOS) writes per read and is fine. On Linux we therefore
+// prefer `busybox cat` when installed (measured p50 1775ms -> 103ms on the NUC).
+// Override explicitly with TMUX_HUB_PIPE_SINK (e.g. "busybox cat"). `stdbuf` does
+// NOT help — uutils is Rust and bypasses libc stdio buffering.
+function resolvePipeSinkCmd(): string {
+  const override = process.env.TMUX_HUB_PIPE_SINK?.trim();
+  if (override) return override;
+  if (process.platform === "linux") {
+    for (const p of ["/usr/bin/busybox", "/bin/busybox"]) {
+      if (existsSync(p)) return `${p} cat`;
+    }
+  }
+  return "cat";
+}
+export const PIPE_SINK_CMD = resolvePipeSinkCmd();
+
 // Feature flag: when set, attach sends a coherent server-emulator snapshot
 // instead of a raw byte-slice replay. Dual-path so the legacy path stays
 // available for instant rollback (svc restart with the flag unset).
