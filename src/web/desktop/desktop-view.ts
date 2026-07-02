@@ -13,6 +13,7 @@ import { imeGuard } from "../shared/ime-guard";
 import { killSession } from "../shared/kill-controller";
 import { saveLastSession, loadLastSession } from "../shared/last-session";
 import { openTemplatePicker } from "../shared/template-picker";
+import { isMac } from "../shared/platform";
 
 export function renderDesktop(root: HTMLElement): void {
   root.replaceChildren();
@@ -207,12 +208,35 @@ export function renderDesktop(root: HTMLElement): void {
     })();
   });
 
-  // Keyboard shortcuts (Cmd+T, Cmd+W, Cmd+1-9)
+  // Keyboard shortcuts. The primary app modifier is Command on macOS
+  // (metaKey) and Control everywhere else — this keeps Control free for the
+  // terminal's own control codes on macOS. Cmd/Ctrl+T new, +W close, +1-9
+  // switch to the Nth session tab.
+  //
+  // CRITICAL: this listener runs in the CAPTURE phase so it fires BEFORE
+  // xterm's textarea keydown handler. In the old bubble-phase wiring xterm
+  // had already converted e.g. Ctrl+3 into an ESC byte and shipped it to the
+  // PTY (interrupting claude code) by the time this handler ran, so
+  // preventDefault was too late. Capturing lets us stopPropagation and keep
+  // the chord from ever reaching the terminal.
+  const primaryModifier = (e: KeyboardEvent): boolean => (isMac ? e.metaKey : e.ctrlKey);
   const handleShortcuts = (e: KeyboardEvent): void => {
-    if (!e.metaKey && !e.ctrlKey) return;
+    const isDigit = e.key >= "1" && e.key <= "9";
+
+    // On macOS, Ctrl+1-9 must never reach the terminal (xterm would emit a
+    // control byte and interrupt the running TUI). Swallow it here as a
+    // no-op — tab switching is bound to Cmd, not Ctrl.
+    if (isMac && e.ctrlKey && !e.metaKey && !e.altKey && isDigit) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
+    if (!primaryModifier(e) || e.altKey) return;
 
     if (e.key === "t") {
       e.preventDefault();
+      e.stopPropagation();
       openTemplatePicker({
         anchor: tabBar.newBtn,
         onStarted: (name) => {
@@ -225,14 +249,16 @@ export function renderDesktop(root: HTMLElement): void {
       });
     } else if (e.key === "w") {
       e.preventDefault();
+      e.stopPropagation();
       if (openedName) closeSession(openedName);
-    } else if (e.key >= "1" && e.key <= "9") {
+    } else if (isDigit) {
       e.preventDefault();
+      e.stopPropagation();
       const name = tabBar.getSessionAt(parseInt(e.key, 10) - 1);
       if (name) openSession(name);
     }
   };
-  document.addEventListener("keydown", handleShortcuts);
+  document.addEventListener("keydown", handleShortcuts, true);
 
   onForegroundAfterIdle(3000, () => {
     sse.reconnectIfNeeded();
