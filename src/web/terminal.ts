@@ -3,8 +3,6 @@ import { FitAddon } from "xterm-addon-fit";
 import { CanvasAddon } from "xterm-addon-canvas";
 import { attachMomentumScroll } from "./momentum-scroll";
 import { showToast } from "./ui/toast";
-import { showContextMenu } from "./ui/context-menu";
-import { isMac } from "./shared/platform";
 import "xterm/css/xterm.css";
 import type { ClientWsMessage, ServerWsMessage } from "@shared/protocol";
 import { hubWsUrl, refreshSecret } from "./hub-fetch";
@@ -243,57 +241,6 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   el.addEventListener("mousedown", onMouseDown);
   el.addEventListener("mousemove", onMouseMove);
   el.addEventListener("mouseup", onMouseUp);
-
-  // ── Explicit copy paths (right-click menu + keyboard) ───────────────
-  // Auto-copy-on-mouseup only fires for a drag that produced a LOCAL xterm
-  // selection. When an app owns the mouse (claude code, vim) the user must
-  // hold the force-selection modifier (Option/⌥ on macOS, Shift elsewhere)
-  // for the drag to select locally instead of being forwarded to the app.
-  // These paths give the user a reliable, discoverable way to copy the
-  // current selection and surface that requirement when nothing is selected.
-  const readSelection = (): string => {
-    try { return term.hasSelection() ? term.getSelection() : ""; }
-    catch { return ""; }
-  };
-  const copySelectionOrHint = (): void => {
-    const text = readSelection() || pendingSelection;
-    if (text) {
-      void copyToClipboard(text);
-    } else {
-      const forceKey = isMac ? "按住 ⌥ 拖动" : "按住 Shift 拖动";
-      showToast(`没有选中内容：应用占用鼠标时需${forceKey}选中`, "info");
-    }
-  };
-
-  // Right-click → 复制. Suppress the browser's native context menu so our
-  // menu is the only thing that shows.
-  const onContextMenu = (e: MouseEvent): void => {
-    if (disposed) return;
-    e.preventDefault();
-    const hasSel = readSelection() !== "" || pendingSelection !== "";
-    showContextMenu(e.clientX, e.clientY, [
-      { label: hasSel ? "复制选中内容" : "复制（先选中文字）", action: copySelectionOrHint },
-    ]);
-  };
-  el.addEventListener("contextmenu", onContextMenu);
-
-  // Cmd+C on macOS / Ctrl+Shift+C elsewhere copies the selection. We handle
-  // it explicitly because the canvas renderer paints its own selection with
-  // no real DOM text selection, so the browser's native copy sees nothing.
-  // Terminal control chords are left untouched: on macOS Ctrl+C still reaches
-  // the PTY as SIGINT; on other platforms plain Ctrl+C is never intercepted.
-  const onCopyKey = (e: KeyboardEvent): void => {
-    if (disposed || opts.readOnly) return;
-    const isCopyChord = isMac
-      ? e.metaKey && !e.ctrlKey && !e.altKey && e.key.toLowerCase() === "c"
-      : e.ctrlKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === "c";
-    if (!isCopyChord) return;
-    if (readSelection() === "" && pendingSelection === "") return; // no selection → let default happen
-    e.preventDefault();
-    e.stopPropagation();
-    copySelectionOrHint();
-  };
-  el.addEventListener("keydown", onCopyKey, true);
 
   // Once `close()` is called we MUST stop touching `term`. Any write into a
   // disposed xterm tunnels into `_renderService.onRequestRedraw` and throws
@@ -770,8 +717,6 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       try { el.removeEventListener("mousedown", onMouseDown); } catch {}
       try { el.removeEventListener("mousemove", onMouseMove); } catch {}
       try { el.removeEventListener("mouseup", onMouseUp); } catch {}
-      try { el.removeEventListener("contextmenu", onContextMenu); } catch {}
-      try { el.removeEventListener("keydown", onCopyKey, true); } catch {}
       try { selectionDisposable.dispose(); } catch {}
       try { detachMomentum?.(); } catch {}
       ws.onmessage = null;

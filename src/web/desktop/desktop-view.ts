@@ -13,7 +13,6 @@ import { imeGuard } from "../shared/ime-guard";
 import { killSession } from "../shared/kill-controller";
 import { saveLastSession, loadLastSession } from "../shared/last-session";
 import { openTemplatePicker } from "../shared/template-picker";
-import { isMac } from "../shared/platform";
 
 export function renderDesktop(root: HTMLElement): void {
   root.replaceChildren();
@@ -208,10 +207,12 @@ export function renderDesktop(root: HTMLElement): void {
     })();
   });
 
-  // Keyboard shortcuts. The primary app modifier is Command on macOS
-  // (metaKey) and Control everywhere else — this keeps Control free for the
-  // terminal's own control codes on macOS. Cmd/Ctrl+T new, +W close, +1-9
-  // switch to the Nth session tab.
+  // Keyboard shortcuts: Ctrl+T new / Ctrl+W close / Ctrl+1-9 switch to the
+  // Nth session tab. Control is the only modifier that reliably reaches the
+  // page on macOS — Chrome reserves Cmd+1-9 for its own browser-tab switching
+  // and never delivers those keydowns to a page in a normal tab. We also
+  // accept Cmd (harmless, and it works in the installed PWA where Cmd is not
+  // reserved), but Ctrl is the guaranteed path.
   //
   // CRITICAL: this listener runs in the CAPTURE phase so it fires BEFORE
   // xterm's textarea keydown handler. In the old bubble-phase wiring xterm
@@ -219,20 +220,9 @@ export function renderDesktop(root: HTMLElement): void {
   // PTY (interrupting claude code) by the time this handler ran, so
   // preventDefault was too late. Capturing lets us stopPropagation and keep
   // the chord from ever reaching the terminal.
-  const primaryModifier = (e: KeyboardEvent): boolean => (isMac ? e.metaKey : e.ctrlKey);
   const handleShortcuts = (e: KeyboardEvent): void => {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
     const isDigit = e.key >= "1" && e.key <= "9";
-
-    // On macOS, Ctrl+1-9 must never reach the terminal (xterm would emit a
-    // control byte and interrupt the running TUI). Swallow it here as a
-    // no-op — tab switching is bound to Cmd, not Ctrl.
-    if (isMac && e.ctrlKey && !e.metaKey && !e.altKey && isDigit) {
-      e.preventDefault();
-      e.stopPropagation();
-      return;
-    }
-
-    if (!primaryModifier(e) || e.altKey) return;
 
     if (e.key === "t") {
       e.preventDefault();
