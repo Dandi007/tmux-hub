@@ -77,6 +77,20 @@ export function attachMomentumScroll(
   // fractional part across frames and only commit when |acc| >= 1.
   let scrollAcc = 0;
   let lastFrameTs = 0;
+  // The scrollTop value momentum itself last wrote (or null before the first
+  // write). Used to detect when an external actor (xterm appending output →
+  // pinning the viewport to bottom, the user touching the scrollbar, another
+  // momentum gesture) has moved the viewport out from under us. When that
+  // happens the in-flight inertia is no longer pointing where the user
+  // expects, so we halt rather than fight the external position — this is
+  // what stops the "拉到顶又弹回 / 跳到最顶上" race on Kimi/Codex sessions
+  // where new output arrives mid-fling.
+  let expectedScrollTop: number | null = null;
+  // External-change detection threshold in px. scrollTop is an integer and
+  // momentum only writes integer steps, so any drift larger than this between
+  // the value we last wrote and what we just read came from outside. 2px
+  // absorbs rounding noise without mistaking our own writes for interference.
+  const EXTERNAL_CHANGE_THRESHOLD = 2;
   // Wheel-forwarding state. Decided once per gesture at touchstart so a drag
   // can't flip modes mid-stroke. wheelAcc carries sub-tick drag pixels across
   // moves so slow drags still accumulate into ticks.
@@ -90,6 +104,7 @@ export function attachMomentumScroll(
     }
     lastFrameTs = 0;
     scrollAcc = 0;
+    expectedScrollTop = null;
   };
 
   const clampScroll = (target: number): number => {
@@ -175,6 +190,20 @@ export function attachMomentumScroll(
       const frameDt = Math.min(50, Math.max(1, now - lastFrameTs));
       lastFrameTs = now;
 
+      // External-viewport-change guard. If the scrollTop we read now differs
+      // from the value momentum last wrote by more than rounding noise, an
+      // external actor (xterm pinning to bottom on new output, the user
+      // grabbing the scrollbar, a concurrent gesture) moved the viewport.
+      // Our in-flight velocity is no longer pointing where the user expects,
+      // so halt cleanly instead of fighting the external position. This is
+      // the fix for the "跳到最顶上 / 拉到顶又弹回" race on Kimi/Codex.
+      if (expectedScrollTop !== null
+        && Math.abs(scrollEl.scrollTop - expectedScrollTop) > EXTERNAL_CHANGE_THRESHOLD) {
+        cancelAnim();
+        velocity = 0;
+        return;
+      }
+
       scrollAcc += velocity * frameDt;
       const integerStep = Math.trunc(scrollAcc);
       if (integerStep !== 0) {
@@ -182,11 +211,13 @@ export function attachMomentumScroll(
         const next = scrollEl.scrollTop + integerStep;
         if (max <= 0 || next <= 0 || next >= max) {
           scrollEl.scrollTop = clampScroll(next);
+          expectedScrollTop = scrollEl.scrollTop;
           cancelAnim();
           velocity = 0;
           return;
         }
         scrollEl.scrollTop = next;
+        expectedScrollTop = next;
         scrollAcc -= integerStep;
       }
 

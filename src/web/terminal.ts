@@ -77,7 +77,14 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     cols: opts.cols ?? 200,
     rows: opts.rows ?? 50,
     disableStdin: opts.readOnly ?? false,
-    scrollback: 5000,
+    // Unlimited scrollback so users can scroll back through the entire
+    // session history for shells / Codex / Kimi (which run on the normal
+    // buffer and rely on xterm's local scrollback). xterm stores lines in a
+    // ring buffer, so a huge cap does not pre-allocate memory — it only
+    // raises the ceiling on how many lines are retained before the oldest
+    // are dropped. Alt-screen TUIs (claude code, vim) are unaffected: they
+    // have no scrollback by spec regardless of this setting.
+    scrollback: Number.MAX_SAFE_INTEGER,
     smoothScrollDuration: 0,
     // Let the user force a LOCAL (browser-side) selection even when a TUI app
     // (claude code, vim) has captured the mouse. xterm's force-selection
