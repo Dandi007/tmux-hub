@@ -81,3 +81,24 @@ describe("readManagedNames", () => {
     expect(names.size).toBe(0);
   });
 });
+
+describe("scroll positions", () => {
+  test("set/get roundtrip and default null", () => {
+    const db = new ManagedSessionDb(dbPath());
+    expect(db.getScrollPos("s1")).toBeNull();
+    db.setScrollPos("s1", 123);
+    expect(db.getScrollPos("s1")).toBe(123);
+    db.setScrollPos("s1", 7); // upsert
+    expect(db.getScrollPos("s1")).toBe(7);
+    db.close();
+  });
+
+  test("remove(name) cascades scroll position", () => {
+    const db = new ManagedSessionDb(dbPath());
+    db.add("s2");
+    db.setScrollPos("s2", 42);
+    db.remove("s2");
+    expect(db.getScrollPos("s2")).toBeNull();
+    db.close();
+  });
+});
