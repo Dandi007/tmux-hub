@@ -193,7 +193,10 @@ export function attachMomentumScroll(
       lastFrameTs = now;
 
       const rh = opt.rowHeightPx?.() ?? 0;
-      // Row-aligned writes make xterm's realign a no-op (≤0.5px rounding), so
+      // Row-aligned writes make xterm's realign a no-op: under the canvas
+      // renderer with a fractional dpr, css cell height and the device-pixel
+      // row height used for Viewport write-back can differ; the write-back
+      // error is bounded by rh/2, still < 1.5·rh threshold, so
       // 1.5 rows cleanly separates it from genuine external jumps. Without a
       // known row height we can't quantize, so tolerate up to ~2-3 rows of
       // realign drift instead (the old 2px threshold killed every fling the

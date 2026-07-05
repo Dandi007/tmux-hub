@@ -479,8 +479,15 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // 初值 0：安静躺在底部的 client 永远不上报，不会用 0 覆盖别的设备存的位置；
   // 只有真实滚动（值变化）才写。1s 轮询兼顾 momentum/拖动/键盘所有滚动来源。
   let lastReportedLfb = 0;
+  // scrollposRestoredOnce tracks whether we have applied the first scrollpos
+  // delivery for this attach. Fresh attach → always restore. Reconnect
+  // re-deliveries → only re-anchor if this client is actively reading history.
+  let scrollposRestoredOnce = false;
   const reportScrollPos = (): void => {
-    if (disposed || opts.readOnly || currentState !== "connected") return;
+    // NOTE: readOnly is intentionally NOT checked here. readOnly only means
+    // "don't send pty keyboard input"; mobile clients are always readOnly:true
+    // yet still need to report their scroll position for cross-device memory.
+    if (disposed || currentState !== "connected") return;
     try {
       const buf = term.buffer.active;
       if (buf.type !== "normal") return; // alt-screen 无 scrollback 语义
@@ -529,7 +536,13 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
               }
               if (kind === "scrollpos") {
                 const lfb = (parsed as { linesFromBottom?: number }).linesFromBottom ?? 0;
-                if (lfb > 0) {
+                // First delivery = fresh attach → always restore. Re-deliveries arrive on
+                // reconnect (server re-sends after every replay); only re-anchor when THIS
+                // client was actually reading history (lastReportedLfb > 0) — a client
+                // following the bottom must not be yanked into the past by a reconnect.
+                const shouldRestore = lfb > 0 && (!scrollposRestoredOnce || lastReportedLfb > 0);
+                scrollposRestoredOnce = true;
+                if (shouldRestore) {
                   // Parse barrier: replay 字节先于本消息到达，但 term.write 是
                   // 异步的——空写入的回调保证在它们全部 parse 完之后执行。
                   term.write("", () => {
