@@ -31,9 +31,14 @@ export type MomentumOptions = {
   onWheel?: (direction: WheelDirection, notches: number, clientX: number, clientY: number) => void;
   // px of drag that equals one wheel tick when forwarding.
   wheelPxPerNotch?: number;
+  // px — current xterm row height. When provided, inertia writes are
+  // quantized to whole rows so xterm's own row-realign write-back
+  // (Viewport._innerRefresh: scrollTop = ydisp*rowHeight) equals what we
+  // wrote and never trips the external-change guard. 0/undefined = unknown.
+  rowHeightPx?: () => number;
 };
 
-const DEFAULTS: Required<Omit<MomentumOptions, "shouldForwardWheel" | "onWheel">> = {
+const DEFAULTS: Required<Omit<MomentumOptions, "shouldForwardWheel" | "onWheel" | "rowHeightPx">> = {
   minVelocity: 0.04,
   friction: 0.94,
   velocitySmoothingMs: 30,
@@ -86,11 +91,6 @@ export function attachMomentumScroll(
   // what stops the "拉到顶又弹回 / 跳到最顶上" race on Kimi/Codex sessions
   // where new output arrives mid-fling.
   let expectedScrollTop: number | null = null;
-  // External-change detection threshold in px. scrollTop is an integer and
-  // momentum only writes integer steps, so any drift larger than this between
-  // the value we last wrote and what we just read came from outside. 2px
-  // absorbs rounding noise without mistaking our own writes for interference.
-  const EXTERNAL_CHANGE_THRESHOLD = 2;
   // Wheel-forwarding state. Decided once per gesture at touchstart so a drag
   // can't flip modes mid-stroke. wheelAcc carries sub-tick drag pixels across
   // moves so slow drags still accumulate into ticks.
@@ -150,7 +150,12 @@ export function attachMomentumScroll(
 
     const dt = now - lastTs;
 
-    if (dy !== 0) scrollEl.scrollTop = clampScroll(scrollEl.scrollTop + dy);
+    if (dy !== 0) {
+      const rh = opt.rowHeightPx?.() ?? 0;
+      const nextPos = clampScroll(scrollEl.scrollTop + dy);
+      // Align to row grid during drag if row height is known
+      scrollEl.scrollTop = rh > 0 ? Math.round(nextPos / rh) * rh : nextPos;
+    }
 
     if (dt > 0) {
       const instant = dy / dt;
@@ -190,25 +195,29 @@ export function attachMomentumScroll(
       const frameDt = Math.min(50, Math.max(1, now - lastFrameTs));
       lastFrameTs = now;
 
-      // External-viewport-change guard. If the scrollTop we read now differs
-      // from the value momentum last wrote by more than rounding noise, an
-      // external actor (xterm pinning to bottom on new output, the user
-      // grabbing the scrollbar, a concurrent gesture) moved the viewport.
-      // Our in-flight velocity is no longer pointing where the user expects,
-      // so halt cleanly instead of fighting the external position. This is
-      // the fix for the "跳到最顶上 / 拉到顶又弹回" race on Kimi/Codex.
+      const rh = opt.rowHeightPx?.() ?? 0;
+      // Row-aligned writes make xterm's realign a no-op (≤0.5px rounding), so
+      // 1.5 rows cleanly separates it from genuine external jumps. Without a
+      // known row height we can't quantize, so tolerate up to ~2-3 rows of
+      // realign drift instead (the old 2px threshold killed every fling the
+      // moment output arrived — see work folder findings 2026-07-05).
+      const threshold = rh > 0 ? rh * 1.5 : 40;
       if (expectedScrollTop !== null
-        && Math.abs(scrollEl.scrollTop - expectedScrollTop) > EXTERNAL_CHANGE_THRESHOLD) {
+        && Math.abs(scrollEl.scrollTop - expectedScrollTop) > threshold) {
         cancelAnim();
         velocity = 0;
         return;
       }
 
       scrollAcc += velocity * frameDt;
-      const integerStep = Math.trunc(scrollAcc);
-      if (integerStep !== 0) {
+      const unit = rh > 0 ? rh : 1;
+      const steps = Math.trunc(scrollAcc / unit);
+      if (steps !== 0) {
         const max = scrollEl.scrollHeight - scrollEl.clientHeight;
-        const next = scrollEl.scrollTop + integerStep;
+        const st = scrollEl.scrollTop;
+        const next = rh > 0
+          ? Math.round((Math.round(st / rh) + steps) * rh)
+          : st + steps;
         if (max <= 0 || next <= 0 || next >= max) {
           scrollEl.scrollTop = clampScroll(next);
           expectedScrollTop = scrollEl.scrollTop;
@@ -218,7 +227,7 @@ export function attachMomentumScroll(
         }
         scrollEl.scrollTop = next;
         expectedScrollTop = next;
-        scrollAcc -= integerStep;
+        scrollAcc -= steps * unit;
       }
 
       velocity *= Math.pow(opt.friction, frameDt / 16);
