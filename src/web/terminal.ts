@@ -536,6 +536,11 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                     if (disposed) return;
                     try {
                       if (term.buffer.active.type !== "normal") return;
+                      // scrollLines is RELATIVE. Anchor to bottom first so the
+                      // offset is absolute — on a reconnect the viewport may
+                      // already sit mid-history and a bare scrollLines(-lfb)
+                      // would compound the offset. Fresh attach: no-op.
+                      term.scrollToBottom();
                       term.scrollLines(-lfb);
                       lastReportedLfb = Math.max(0, term.buffer.active.baseY - term.buffer.active.viewportY);
                     } catch { /* disposed */ }
