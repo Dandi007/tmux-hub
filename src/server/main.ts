@@ -404,8 +404,8 @@ Bun.serve({
       // Per-session scroll position memory (cross-device). Persist and stop —
       // never forward to the pty.
       if (typeof parsed === "object" && parsed !== null && (parsed as { kind?: string }).kind === "scrollpos") {
-        const raw = (parsed as { linesFromBottom?: unknown }).linesFromBottom;
-        const lfb = clampInt(Number(raw), 0, 10_000_000, 0);
+        const rawLfb = (parsed as { linesFromBottom?: unknown }).linesFromBottom;
+        const lfb = clampInt(Number(rawLfb), 0, 10_000_000, 0);
         try { managedDb.setScrollPos(sessionName, lfb); } catch (e) {
           logger.warn({ session: sessionName, connId, err: e }, "scrollpos persist failed");
         }
