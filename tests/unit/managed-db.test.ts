@@ -111,4 +111,14 @@ describe("scroll positions", () => {
     expect(db.getScrollPos("r1")).toBeNull();
     db.close();
   });
+
+  test("rename onto a name with a stale scroll row does not throw", () => {
+    const db = new ManagedSessionDb(dbPath());
+    db.setScrollPos("stale-target", 9);
+    db.add("r3");
+    db.setScrollPos("r3", 77);
+    db.rename("r3", "stale-target");
+    expect(db.getScrollPos("stale-target")).toBe(77);
+    db.close();
+  });
 });

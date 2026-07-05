@@ -72,6 +72,8 @@ export class ManagedSessionDb {
 
   rename(oldName: string, newName: string): void {
     this.db.run("UPDATE managed_sessions SET name = ? WHERE name = ?", [newName, oldName]);
+    // Stale row from an out-of-band killed session must not block rename.
+    this.db.run("DELETE FROM scroll_positions WHERE name = ?", [newName]);
     this.db.run("UPDATE scroll_positions SET name = ? WHERE name = ?", [newName, oldName]);
   }
 
