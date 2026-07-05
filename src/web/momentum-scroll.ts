@@ -151,10 +151,7 @@ export function attachMomentumScroll(
     const dt = now - lastTs;
 
     if (dy !== 0) {
-      const rh = opt.rowHeightPx?.() ?? 0;
-      const nextPos = clampScroll(scrollEl.scrollTop + dy);
-      // Align to row grid during drag if row height is known
-      scrollEl.scrollTop = rh > 0 ? Math.round(nextPos / rh) * rh : nextPos;
+      scrollEl.scrollTop = clampScroll(scrollEl.scrollTop + dy);
     }
 
     if (dt > 0) {

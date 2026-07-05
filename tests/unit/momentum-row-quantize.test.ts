@@ -62,19 +62,31 @@ describe("momentum row quantization", () => {
     resetRaf();
     const { el, fire } = fakeEl({ scrollHeight: 100_000, clientHeight: 100 });
     const writes: number[] = [];
-    // 用 defineProperty 记录每次 scrollTop 写入
+    // 用 defineProperty 记录写入，但只在 touchend 之后开始记录（惯性阶段）
     let _st = 0;
+    let recording = false;
     Object.defineProperty(el, "scrollTop", {
       get: () => _st,
-      set: (v: number) => { _st = v; writes.push(v); },
+      set: (v: number) => { _st = v; if (recording) writes.push(v); },
     });
     attachMomentumScroll(el, el, { shouldForwardWheel: () => false, rowHeightPx: () => 15 });
-    fire("touchstart", 200); fire("touchmove", 100); fire("touchend", 0);
+    fire("touchstart", 200); fire("touchmove", 100);
+    recording = true; // 只在 touchend 之后开始记录
+    fire("touchend", 0);
     flushRaf(33); flushRaf(49); flushRaf(65); flushRaf(81);
     expect(writes.length).toBeGreaterThan(0);
     for (const w of writes.filter((v) => v > 0)) {
       expect(Math.abs(w - Math.round(w / 15) * 15)).toBeLessThanOrEqual(0.5);
     }
+  });
+
+  test("drag writes are 1:1 px (not quantized)", () => {
+    resetRaf();
+    const { el, fire } = fakeEl({ scrollHeight: 100_000, clientHeight: 100 });
+    attachMomentumScroll(el, el, { shouldForwardWheel: () => false, rowHeightPx: () => 15 });
+    fire("touchstart", 200);
+    fire("touchmove", 193); // dy = 200 - 193 = 7px (不足一行15px)
+    expect(el.scrollTop).toBe(7);
   });
 
   test("xterm sub-pixel realign (<1px) does NOT cancel the fling", () => {
