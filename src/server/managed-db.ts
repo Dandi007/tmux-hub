@@ -72,6 +72,7 @@ export class ManagedSessionDb {
 
   rename(oldName: string, newName: string): void {
     this.db.run("UPDATE managed_sessions SET name = ? WHERE name = ?", [newName, oldName]);
+    this.db.run("UPDATE scroll_positions SET name = ? WHERE name = ?", [newName, oldName]);
   }
 
   setScrollPos(name: string, linesFromBottom: number): void {

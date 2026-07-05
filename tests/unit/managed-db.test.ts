@@ -101,4 +101,14 @@ describe("scroll positions", () => {
     expect(db.getScrollPos("s2")).toBeNull();
     db.close();
   });
+
+  test("rename(old, new) migrates scroll position", () => {
+    const db = new ManagedSessionDb(dbPath());
+    db.add("r1");
+    db.setScrollPos("r1", 55);
+    db.rename("r1", "r2");
+    expect(db.getScrollPos("r2")).toBe(55);
+    expect(db.getScrollPos("r1")).toBeNull();
+    db.close();
+  });
 });
