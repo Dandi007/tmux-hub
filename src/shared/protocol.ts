@@ -31,8 +31,15 @@ export type ClientWsMessage =
   | { kind: "ping"; ts: number }
   // Client render telemetry (opt-in via ?debug=perf). Logged server-side, never
   // forwarded to the pty — purely diagnostic.
-  | { kind: "telemetry"; payload: Record<string, unknown> };
+  | { kind: "telemetry"; payload: Record<string, unknown> }
+  // Scroll position recovery: client reports cursor position relative to buffer bottom
+  // for cross-device scroll memory (linesFromBottom = viewport top distance to buffer bottom,
+  // 0 = following buffer tail).
+  | { kind: "scrollpos"; linesFromBottom: number };
 
 export type ServerWsMessage =
   | { kind: "pong"; ts: number }
-  | { kind: "viewport"; cols: number; rows: number; owner: "native" | "web" };
+  | { kind: "viewport"; cols: number; rows: number; owner: "native" | "web" }
+  // Scroll position recovery: server sends restored scroll position to client after attach,
+  // allowing cross-device memory of user's viewing location in buffer history.
+  | { kind: "scrollpos"; linesFromBottom: number };

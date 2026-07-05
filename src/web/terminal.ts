@@ -182,6 +182,20 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
             : 1;
           queuedSend({ kind: "wheel", direction, notches, col, row });
         },
+        // xterm 真实行高：renderer 私有维度优先，取不到用 scrollHeight/总行数
+        // 兜底，再不行返回 0（momentum 退回像素模式 + 宽容阈值）。
+        rowHeightPx: () => {
+          try {
+            const h = (term as unknown as { _core?: { _renderService?: { dimensions?: { css?: { cell?: { height?: number } } } } } })
+              ._core?._renderService?.dimensions?.css?.cell?.height;
+            if (typeof h === "number" && h > 0) return h;
+          } catch { /* private API drift */ }
+          try {
+            const lines = term.buffer.active.length;
+            if (lines > 0 && viewport.scrollHeight > 0) return viewport.scrollHeight / lines;
+          } catch { /* disposed */ }
+          return 0;
+        },
       });
     }
   }
@@ -460,6 +474,31 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     sendQueueBytes = 0;
   };
 
+  // ── Per-session scroll position memory ─────────────────────────────
+  // linesFromBottom = buffer.baseY - buffer.viewportY（0 = 在底部跟随）。
+  // 初值 0：安静躺在底部的 client 永远不上报，不会用 0 覆盖别的设备存的位置；
+  // 只有真实滚动（值变化）才写。1s 轮询兼顾 momentum/拖动/键盘所有滚动来源。
+  let lastReportedLfb = 0;
+  // scrollposRestoredOnce tracks whether we have applied the first scrollpos
+  // delivery for this attach. Fresh attach → always restore. Reconnect
+  // re-deliveries → only re-anchor if this client is actively reading history.
+  let scrollposRestoredOnce = false;
+  const reportScrollPos = (): void => {
+    // NOTE: readOnly is intentionally NOT checked here. readOnly only means
+    // "don't send pty keyboard input"; mobile clients are always readOnly:true
+    // yet still need to report their scroll position for cross-device memory.
+    if (disposed || currentState !== "connected") return;
+    try {
+      const buf = term.buffer.active;
+      if (buf.type !== "normal") return; // alt-screen 无 scrollback 语义
+      const lfb = Math.max(0, buf.baseY - buf.viewportY);
+      if (lfb === lastReportedLfb) return;
+      lastReportedLfb = lfb;
+      queuedSend({ kind: "scrollpos", linesFromBottom: lfb });
+    } catch { /* disposed */ }
+  };
+  const scrollPosTimer = setInterval(reportScrollPos, 1000);
+
   // ── Render telemetry (opt-in via ?debug=perf) ────────────────────────
   // Ships per-second render-cadence samples back over this WS so the operator
   // can read real per-device numbers from the hub logs instead of guessing.
@@ -492,6 +531,33 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                   // Native owns: adopt server's viewport size
                   term.resize(result.action.cols, result.action.rows);
                   console.log(`[tmux-hub] viewport locked to native: ${result.action.cols}x${result.action.rows}`);
+                }
+                return;
+              }
+              if (kind === "scrollpos") {
+                const lfb = (parsed as { linesFromBottom?: number }).linesFromBottom ?? 0;
+                // First delivery = fresh attach → always restore. Re-deliveries arrive on
+                // reconnect (server re-sends after every replay); only re-anchor when THIS
+                // client was actually reading history (lastReportedLfb > 0) — a client
+                // following the bottom must not be yanked into the past by a reconnect.
+                const shouldRestore = lfb > 0 && (!scrollposRestoredOnce || lastReportedLfb > 0);
+                scrollposRestoredOnce = true;
+                if (shouldRestore) {
+                  // Parse barrier: replay 字节先于本消息到达，但 term.write 是
+                  // 异步的——空写入的回调保证在它们全部 parse 完之后执行。
+                  term.write("", () => {
+                    if (disposed) return;
+                    try {
+                      if (term.buffer.active.type !== "normal") return;
+                      // scrollLines is RELATIVE. Anchor to bottom first so the
+                      // offset is absolute — on a reconnect the viewport may
+                      // already sit mid-history and a bare scrollLines(-lfb)
+                      // would compound the offset. Fresh attach: no-op.
+                      term.scrollToBottom();
+                      term.scrollLines(-lfb);
+                      lastReportedLfb = Math.max(0, term.buffer.active.baseY - term.buffer.active.viewportY);
+                    } catch { /* disposed */ }
+                  });
                 }
                 return;
               }
@@ -740,6 +806,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       disposed = true;
       perf?.stop();
       stopHeartbeat();
+      clearInterval(scrollPosTimer);
       stopDeadProbe();
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       window.removeEventListener("resize", onResize);

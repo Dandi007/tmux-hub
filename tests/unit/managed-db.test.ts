@@ -81,3 +81,44 @@ describe("readManagedNames", () => {
     expect(names.size).toBe(0);
   });
 });
+
+describe("scroll positions", () => {
+  test("set/get roundtrip and default null", () => {
+    const db = new ManagedSessionDb(dbPath());
+    expect(db.getScrollPos("s1")).toBeNull();
+    db.setScrollPos("s1", 123);
+    expect(db.getScrollPos("s1")).toBe(123);
+    db.setScrollPos("s1", 7); // upsert
+    expect(db.getScrollPos("s1")).toBe(7);
+    db.close();
+  });
+
+  test("remove(name) cascades scroll position", () => {
+    const db = new ManagedSessionDb(dbPath());
+    db.add("s2");
+    db.setScrollPos("s2", 42);
+    db.remove("s2");
+    expect(db.getScrollPos("s2")).toBeNull();
+    db.close();
+  });
+
+  test("rename(old, new) migrates scroll position", () => {
+    const db = new ManagedSessionDb(dbPath());
+    db.add("r1");
+    db.setScrollPos("r1", 55);
+    db.rename("r1", "r2");
+    expect(db.getScrollPos("r2")).toBe(55);
+    expect(db.getScrollPos("r1")).toBeNull();
+    db.close();
+  });
+
+  test("rename onto a name with a stale scroll row does not throw", () => {
+    const db = new ManagedSessionDb(dbPath());
+    db.setScrollPos("stale-target", 9);
+    db.add("r3");
+    db.setScrollPos("r3", 77);
+    db.rename("r3", "stale-target");
+    expect(db.getScrollPos("stale-target")).toBe(77);
+    db.close();
+  });
+});

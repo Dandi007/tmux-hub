@@ -48,6 +48,13 @@ export class ManagedSessionDb {
         template_id TEXT
       )
     `);
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS scroll_positions (
+        name TEXT PRIMARY KEY,
+        lines_from_bottom INTEGER NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
     logger.info({ path }, "managed sessions db opened");
   }
 
@@ -60,10 +67,27 @@ export class ManagedSessionDb {
 
   remove(name: string): void {
     this.db.run("DELETE FROM managed_sessions WHERE name = ?", [name]);
+    this.db.run("DELETE FROM scroll_positions WHERE name = ?", [name]);
   }
 
   rename(oldName: string, newName: string): void {
     this.db.run("UPDATE managed_sessions SET name = ? WHERE name = ?", [newName, oldName]);
+    // Stale row from an out-of-band killed session must not block rename.
+    this.db.run("DELETE FROM scroll_positions WHERE name = ?", [newName]);
+    this.db.run("UPDATE scroll_positions SET name = ? WHERE name = ?", [newName, oldName]);
+  }
+
+  setScrollPos(name: string, linesFromBottom: number): void {
+    this.db.run(
+      "INSERT INTO scroll_positions (name, lines_from_bottom, updated_at) VALUES (?, ?, datetime('now')) " +
+      "ON CONFLICT(name) DO UPDATE SET lines_from_bottom = excluded.lines_from_bottom, updated_at = excluded.updated_at",
+      [name, linesFromBottom],
+    );
+  }
+
+  getScrollPos(name: string): number | null {
+    const row = this.db.query("SELECT lines_from_bottom FROM scroll_positions WHERE name = ?").get(name) as { lines_from_bottom: number } | null;
+    return row ? row.lines_from_bottom : null;
   }
 
   has(name: string): boolean {

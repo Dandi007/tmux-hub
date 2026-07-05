@@ -358,6 +358,16 @@ Bun.serve({
       });
       const unsubData = await b.attachWithReplay((chunk) => { try { ws.send(chunk); } catch {} }, paneCols, paneRows);
       ws.data.unsubs.push(unsubEvents, unsubData);
+      // Restore remembered scroll position: sent AFTER replay bytes so the
+      // client can apply it behind a parse barrier. 0/absent = follow bottom.
+      try {
+        const lfb = managedDb.getScrollPos(sessionName);
+        if (lfb !== null && lfb > 0) {
+          ws.send(JSON.stringify({ kind: "scrollpos", linesFromBottom: lfb }));
+        }
+      } catch (e) {
+        logger.warn({ session: sessionName, connId, err: e }, "scrollpos restore send failed");
+      }
     },
     async close(ws: ServerWebSocket<WsData>, code: number, reason: string) {
       const { sessionName, connId } = ws.data;
@@ -389,6 +399,16 @@ Bun.serve({
           { session: sessionName, connId, perf: (parsed as { payload?: unknown }).payload },
           "client perf telemetry",
         );
+        return;
+      }
+      // Per-session scroll position memory (cross-device). Persist and stop —
+      // never forward to the pty.
+      if (typeof parsed === "object" && parsed !== null && (parsed as { kind?: string }).kind === "scrollpos") {
+        const rawLfb = (parsed as { linesFromBottom?: unknown }).linesFromBottom;
+        const lfb = clampInt(Number(rawLfb), 0, 10_000_000, 0);
+        try { managedDb.setScrollPos(sessionName, lfb); } catch (e) {
+          logger.warn({ session: sessionName, connId, err: e }, "scrollpos persist failed");
+        }
         return;
       }
       input.send(sessionName, parsed as Parameters<typeof input.send>[1]).then((result) => {
