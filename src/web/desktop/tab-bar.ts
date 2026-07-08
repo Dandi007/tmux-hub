@@ -15,6 +15,7 @@ export type TabBarHandle = {
   onClose: (fn: (name: string) => void) => void;
   onNew: (fn: () => void) => void;
   getSessionAt: (index: number) => string | undefined;
+  getNextSession: (currentName: string) => string | undefined;
   destroy: () => void;
 };
 
@@ -205,6 +206,11 @@ export function createTabBar(parent: HTMLElement): TabBarHandle {
     onClose: (fn) => { closeFn = fn; },
     onNew: (fn) => { newFn = fn; },
     getSessionAt: (index) => orderedSessions[index]?.name,
+    getNextSession: (currentName) => {
+      const idx = orderedSessions.findIndex((s) => s.name === currentName);
+      if (idx === -1) return orderedSessions[0]?.name;
+      return orderedSessions[(idx + 1) % orderedSessions.length]?.name;
+    },
     destroy: () => { el.remove(); },
   };
 }

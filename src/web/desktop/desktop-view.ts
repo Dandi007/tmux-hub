@@ -207,11 +207,11 @@ export function renderDesktop(root: HTMLElement): void {
     })();
   });
 
-  // Keyboard shortcuts: Ctrl+T new / Ctrl+W close / Ctrl+1-9 switch to the
-  // Nth session tab. Control is the only modifier that reliably reaches the
-  // page on macOS — Chrome reserves Cmd+1-9 for its own browser-tab switching
-  // and never delivers those keydowns to a page in a normal tab. We also
-  // accept Cmd (harmless, and it works in the installed PWA where Cmd is not
+  // Keyboard shortcuts: Ctrl/Cmd+T new / Ctrl/Cmd+W close / Ctrl/Cmd+1-9 switch to the
+  // Nth session tab / Ctrl/Cmd+Tab cycle to the next tab. Control is the only modifier
+  // that reliably reaches the page on macOS — Chrome reserves Cmd+1-9 for its own
+  // browser-tab switching and never delivers those keydowns to a page in a normal tab.
+  // We also accept Cmd (harmless, and it works in the installed PWA where Cmd is not
   // reserved), but Ctrl is the guaranteed path.
   //
   // CRITICAL: this listener runs in the CAPTURE phase so it fires BEFORE
@@ -245,6 +245,11 @@ export function renderDesktop(root: HTMLElement): void {
       e.preventDefault();
       e.stopPropagation();
       const name = tabBar.getSessionAt(parseInt(e.key, 10) - 1);
+      if (name) openSession(name);
+    } else if (e.key === "Tab") {
+      e.preventDefault();
+      e.stopPropagation();
+      const name = openedName ? tabBar.getNextSession(openedName) : undefined;
       if (name) openSession(name);
     }
   };
