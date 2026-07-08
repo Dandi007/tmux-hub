@@ -16,6 +16,7 @@ export type TabBarHandle = {
   onNew: (fn: () => void) => void;
   getSessionAt: (index: number) => string | undefined;
   getNextSession: (currentName: string) => string | undefined;
+  getPrevSession: (currentName: string) => string | undefined;
   destroy: () => void;
 };
 
@@ -210,6 +211,11 @@ export function createTabBar(parent: HTMLElement): TabBarHandle {
       const idx = orderedSessions.findIndex((s) => s.name === currentName);
       if (idx === -1) return orderedSessions[0]?.name;
       return orderedSessions[(idx + 1) % orderedSessions.length]?.name;
+    },
+    getPrevSession: (currentName) => {
+      const idx = orderedSessions.findIndex((s) => s.name === currentName);
+      if (idx === -1) return orderedSessions[orderedSessions.length - 1]?.name;
+      return orderedSessions[(idx - 1 + orderedSessions.length) % orderedSessions.length]?.name;
     },
     destroy: () => { el.remove(); },
   };

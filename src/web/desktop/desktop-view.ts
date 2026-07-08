@@ -208,11 +208,12 @@ export function renderDesktop(root: HTMLElement): void {
   });
 
   // Keyboard shortcuts: Ctrl/Cmd+T new / Ctrl/Cmd+W close / Ctrl/Cmd+1-9 switch to the
-  // Nth session tab / Ctrl/Cmd+Tab cycle to the next tab. Control is the only modifier
-  // that reliably reaches the page on macOS — Chrome reserves Cmd+1-9 for its own
-  // browser-tab switching and never delivers those keydowns to a page in a normal tab.
-  // We also accept Cmd (harmless, and it works in the installed PWA where Cmd is not
-  // reserved), but Ctrl is the guaranteed path.
+  // Nth session tab / Ctrl/Cmd+Tab cycle to the next tab / Ctrl/Cmd+Shift+Tab cycle
+  // to the previous tab. Control is the only modifier that reliably reaches the page
+  // on macOS — Chrome reserves Cmd+1-9 for its own browser-tab switching and never
+  // delivers those keydowns to a page in a normal tab. We also accept Cmd (harmless,
+  // and it works in the installed PWA where Cmd is not reserved), but Ctrl is the
+  // guaranteed path.
   //
   // CRITICAL: this listener runs in the CAPTURE phase so it fires BEFORE
   // xterm's textarea keydown handler. In the old bubble-phase wiring xterm
@@ -221,7 +222,8 @@ export function renderDesktop(root: HTMLElement): void {
   // preventDefault was too late. Capturing lets us stopPropagation and keep
   // the chord from ever reaching the terminal.
   const handleShortcuts = (e: KeyboardEvent): void => {
-    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+    const isTabChord = e.key === "Tab";
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || (e.shiftKey && !isTabChord)) return;
     const isDigit = e.key >= "1" && e.key <= "9";
 
     if (e.key === "t") {
@@ -249,7 +251,9 @@ export function renderDesktop(root: HTMLElement): void {
     } else if (e.key === "Tab") {
       e.preventDefault();
       e.stopPropagation();
-      const name = openedName ? tabBar.getNextSession(openedName) : undefined;
+      const name = openedName
+        ? (e.shiftKey ? tabBar.getPrevSession(openedName) : tabBar.getNextSession(openedName))
+        : undefined;
       if (name) openSession(name);
     }
   };

@@ -160,6 +160,31 @@ test.describe("desktop tab-bar", () => {
     ctx.tmuxE2E(["kill-session", "-t", c]);
   });
 
+  test("Ctrl+Shift+Tab cycles to the previous tab and wraps around", async ({ page, ctx }) => {
+    const a = await ctx.createSession();
+    const b = await ctx.createSession();
+    const c = await ctx.createSession();
+
+    await openApp(page);
+
+    await expect(tab(page, a)).toBeVisible({ timeout: 10_000 });
+    await tab(page, a).click();
+    await expect(tab(page, a)).toHaveClass(/is-active/, { timeout: 5_000 });
+
+    await page.keyboard.press("Control+Shift+Tab");
+    await expect(tab(page, c)).toHaveClass(/is-active/, { timeout: 5_000 });
+
+    await page.keyboard.press("Control+Shift+Tab");
+    await expect(tab(page, b)).toHaveClass(/is-active/, { timeout: 5_000 });
+
+    await page.keyboard.press("Control+Shift+Tab");
+    await expect(tab(page, a)).toHaveClass(/is-active/, { timeout: 5_000 });
+
+    ctx.tmuxE2E(["kill-session", "-t", a]);
+    ctx.tmuxE2E(["kill-session", "-t", b]);
+    ctx.tmuxE2E(["kill-session", "-t", c]);
+  });
+
   test("+ button launches a new managed zsh session", async ({ page, ctx }) => {
     await openApp(page);
 
