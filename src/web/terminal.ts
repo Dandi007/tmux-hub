@@ -481,9 +481,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // 只有真实滚动（值变化）才写。1s 轮询兼顾 momentum/拖动/键盘所有滚动来源。
   let lastReportedLfb = 0;
   // scrollposRestoredOnce tracks whether we have applied the first scrollpos
-  // delivery for this attach lifetime. First delivery = fresh attach（DB 值
-  // 作 best-effort 初始化）；re-deliveries arrive on reconnect（只信本地快照）。
-  // 具体决策在 decideScrollRestore（src/shared/scroll-restore.ts，INV-1/2/3）。
+  // delivery for this attach lifetime. First delivery = fresh attach（v2 起
+  // 一律显式钉底，INV-5）；re-deliveries arrive on reconnect（只信本地快照）。
+  // 具体决策在 decideScrollRestore（src/shared/scroll-restore.ts，INV-1/2/3/5）。
   let scrollposRestoredOnce = false;
   // savedLocalLfb：断线瞬间即时快照的本地 lfb（INV-1 的真值来源）。1s 轮询的
   // lastReportedLfb 有最多 1s 滞后（用户回底后 <1s 断线会残留 >0），不能用它
@@ -500,6 +500,15 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     // yet still need to report their scroll position for cross-device memory.
     if (disposed || currentState !== "connected") return;
     if (!reportingEnabled) return; // INV-4: replay 未 parse 完，采样是噪声
+    // INV-6: 不可见的 term 的位置是程序态，永不上报，防 DB 污染。desktop pool
+    // 对所有 tab 常驻 attach，非激活 slot 用 visibility:hidden 藏着——hidden
+    // renderer 在 snapshot 大块写入期间的竞态会让 viewport 停在随机位置
+    // （hidden-slot attach 竞态 / pool 切换，findings v2）。真实案例：hidden
+    // Codex slot 把 lfb≈990 写进 DB → 每次打开页面跳到顶部附近。
+    // 双重检查：页面级（tab 在后台）+ 元素级（slot 被 visibility:hidden 藏起，
+    // checkVisibility 旧浏览器不存在时视为可见，保持既有行为）。
+    if (document.visibilityState !== "visible") return;
+    if (!(el.checkVisibility?.() ?? true)) return;
     try {
       const buf = term.buffer.active;
       if (buf.type !== "normal") return; // alt-screen 无 scrollback 语义
@@ -547,10 +556,11 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                 return;
               }
               if (kind === "scrollpos") {
-                // Server sends this unconditionally after every replay：既是
-                // 记忆值也是 replay-done 信号。落点决策全部收敛到
-                // decideScrollRestore（INV-1/2/3）——fresh attach 只把 DB 值当
-                // best-effort 初始化，reconnect 只信断线瞬间的本地快照。
+                // Server sends this unconditionally after every replay。v2 起
+                // client 只把它当 replay-done 信号（v2-3：DB 记忆消费退役，
+                // serverLfb 仍透传给 decideScrollRestore 保持协议/签名兼容）。
+                // 落点决策全部收敛到 decideScrollRestore（INV-1/2/3/5）——
+                // fresh attach 一律显式钉底，reconnect 只信断线瞬间的本地快照。
                 const serverLfb = (parsed as { linesFromBottom?: number }).linesFromBottom ?? 0;
                 const isFirstDelivery = !scrollposRestoredOnce;
                 scrollposRestoredOnce = true;
