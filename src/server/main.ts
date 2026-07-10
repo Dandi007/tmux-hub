@@ -358,13 +358,15 @@ Bun.serve({
       });
       const unsubData = await b.attachWithReplay((chunk) => { try { ws.send(chunk); } catch {} }, paneCols, paneRows);
       ws.data.unsubs.push(unsubEvents, unsubData);
-      // Restore remembered scroll position: sent AFTER replay bytes so the
-      // client can apply it behind a parse barrier. 0/absent = follow bottom.
+      // Scroll memory + replay-done signal: sent AFTER replay bytes so the
+      // client can apply it behind a parse barrier. 无条件发送——语义升级为
+      // "replay-done 信号 + 记忆值"：client 的恢复决策（decideScrollRestore）
+      // 需要稳定触发点，lfb=0/无记忆时 reconnect 回底同样依赖这条消息；
+      // snapshot 是流式字节，client 侧没有结束标记可依赖。旧 client 对
+      // lfb=0 消息天然忽略（其 shouldRestore 含 lfb > 0 条件），兼容。
       try {
         const lfb = managedDb.getScrollPos(sessionName);
-        if (lfb !== null && lfb > 0) {
-          ws.send(JSON.stringify({ kind: "scrollpos", linesFromBottom: lfb }));
-        }
+        ws.send(JSON.stringify({ kind: "scrollpos", linesFromBottom: lfb ?? 0 }));
       } catch (e) {
         logger.warn({ session: sessionName, connId, err: e }, "scrollpos restore send failed");
       }
