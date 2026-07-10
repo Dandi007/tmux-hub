@@ -27,12 +27,17 @@ function uniqSession(prefix: string): string {
 }
 
 const testSessions: string[] = [];
+const registries: SessionRegistry[] = [];
+let dbSeq = 0;
 
 function buildApp() {
   const app = new Hono();
-  const managedDb = new ManagedSessionDb();
+  // Explicit temp path: the bare ManagedSessionDb() form resolves to the real
+  // ~/.cache/tmux-hub db, and the polling registry below can prune live rows.
+  const managedDb = new ManagedSessionDb(join(TMP, `managed-sessions-${dbSeq++}.db`));
   const retainLog = new Set<string>();
   const registry = new SessionRegistry(managedDb);
+  registries.push(registry);
   const broadcasters = new BroadcasterRegistry();
 
   registry.subscribe(async (event) => {
@@ -92,6 +97,7 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
+  for (const r of registries) r.stop();
   await tmuxTestKillServer();
   try { rmSync(TMP, { recursive: true, force: true }); } catch {}
 });

@@ -15,8 +15,16 @@ export function setupIsolatedTmux(): { socket: string; tmpdir: string } {
 }
 
 export async function tmuxTest(args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
-  const { socket } = setupIsolatedTmux();
-  const proc = Bun.spawn(["tmux", "-L", socket, ...args], { stdout: "pipe", stderr: "pipe" });
+  const { socket, tmpdir: sockDir } = setupIsolatedTmux();
+  // Explicit env is REQUIRED: Bun.spawn without `env` inherits the process's
+  // STARTUP environment and silently drops runtime process.env mutations, so
+  // the TMUX_TMPDIR set in setupIsolatedTmux never reached the child and test
+  // sockets landed in the ambient (possibly production) socket dir. TMUX is
+  // dropped so running the suite from inside a tmux session behaves the same
+  // as running it outside one.
+  const env: Record<string, string | undefined> = { ...process.env, TMUX_TMPDIR: sockDir };
+  delete env.TMUX;
+  const proc = Bun.spawn(["tmux", "-L", socket, ...args], { stdout: "pipe", stderr: "pipe", env });
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),

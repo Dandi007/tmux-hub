@@ -18,11 +18,17 @@ function addManaged(name: string, templateId?: string): void {
   db.close();
 }
 
-// Helper to run tmux commands with the same socket the CLI will use
+// Helper to run tmux commands with the same socket the CLI will use.
+// Explicit env: Bun.spawn without `env` inherits the STARTUP environment and
+// drops runtime process.env mutations (the test preload's TMUX_TMPDIR), which
+// would put this server and the CLI's tmux client in different socket dirs.
 async function tmux(args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
+  const env: Record<string, string | undefined> = { ...process.env };
+  delete env.TMUX;
   const proc = Bun.spawn(["tmux", "-L", SOCKET, ...args], {
     stdout: "pipe",
     stderr: "pipe",
+    env,
   });
   const stdout = await new Response(proc.stdout).text();
   const stderr = await new Response(proc.stderr).text();
@@ -166,6 +172,12 @@ describe("hub-tui integration", () => {
 
   test("interactive attach via PTY actually attaches to session", async () => {
     // Create a dedicated session for this test
+    // Host dependency: the PTY harness needs the `expect` binary. Skip (loudly)
+    // where it is missing instead of failing the whole suite.
+    if (!Bun.which("expect")) {
+      console.warn("[hub-tui] `expect` not installed on this host; skipping PTY attach test");
+      return;
+    }
     const ptySessionName = `pty-attach-${process.pid}`;
     const createResult = await tmux(["new-session", "-d", "-s", ptySessionName, "sleep", "60"]);
     expect(createResult.code).toBe(0);

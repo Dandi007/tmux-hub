@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { authGate, _resetSecretForTest } from "../../src/server/auth";
+import { setupIsolatedTmux, tmuxTest, tmuxTestKillServer } from "../helpers/tmux-test";
 
 // Regression guard for the mobile-TUI "press Enter on a template does nothing"
 // bug: the TUI launches a template via POST /templates/:id/run, a route gated by
@@ -34,7 +35,13 @@ let server: ReturnType<typeof Bun.serve> | null = null;
 let port = 0;
 let runHeaders: Record<string, string> = {};
 
-beforeAll(() => {
+beforeAll(async () => {
+  // The TUI verifies tmux reachability before printing the attach command.
+  // Give it a real ISOLATED server: without this the test silently depends on
+  // whatever tmux server the host env points at (on a prod host that is the
+  // live hub socket) and fails on hosts with none — the cause of the CI red.
+  const r = await tmuxTest(["new-session", "-d", "-s", "tui-auth-keepalive", "sleep 300"]);
+  if (r.code !== 0) throw new Error(`failed to start isolated tmux server: ${r.stderr}`);
   _resetSecretForTest();
   const app = new Hono();
   app.use("*", authGate); // the real global gate, exactly as main.ts mounts it
@@ -53,16 +60,20 @@ beforeAll(() => {
   port = server.port ?? 0;
 });
 
-afterAll(() => {
+afterAll(async () => {
   server?.stop(true);
+  await tmuxTestKillServer();
   try {
     rmSync(TMP, { recursive: true, force: true });
   } catch {}
 });
 
 async function cli(args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
+  const iso = setupIsolatedTmux();
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
+    TMUX_HUB_SOCKET: iso.socket,
+    TMUX_TMPDIR: iso.tmpdir,
     TMUX_HUB_PORT: String(port),
     TMUX_HUB_SECRET_PATH: SECRET_PATH,
     TMUX_HUB_ADMIN_SECRET_PATH: ADMIN_SECRET_PATH,
