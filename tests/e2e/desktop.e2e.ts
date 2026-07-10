@@ -232,6 +232,11 @@ test.describe("desktop tab-bar", () => {
   });
 
   test("a session killed externally disappears from the tab-bar via SSE", async ({ page, ctx }) => {
+    // Keeper：kill 目标若是该 tmux server 上最后一个 session，server 会随之
+    // 退出 → listSessions 得到 "no server running" → #92 起视为探测不确定
+    // （不 prune、不 emit removed），tab 永不消失。生产常态下 server 上总有
+    // 别的 session，这里显式自建一个，不依赖前序测试/auto-create 的残留。
+    await ctx.createSession();
     const name = await ctx.createSession();
 
     await openApp(page);
@@ -239,7 +244,11 @@ test.describe("desktop tab-bar", () => {
 
     ctx.tmuxE2E(["kill-session", "-t", name]);
 
-    await expect(tab(page, name)).toHaveCount(0, { timeout: 10_000 });
+    // #90 起 removed 判定有去抖：连续 REMOVAL_CONFIRM_POLLS(3) 次 poll
+    // （REGISTRY_INTERVAL_MS=2s）确认缺失才 emit session_removed，最坏
+    // ~8s（kill 相位 + 3 个周期）再叠 SSE/渲染——10s 窗口在 CI 上是边缘
+    // 值，放宽到 20s。
+    await expect(tab(page, name)).toHaveCount(0, { timeout: 20_000 });
   });
 
   test("image attach inserts the uploaded path into the input bar", async ({ page, ctx }) => {
