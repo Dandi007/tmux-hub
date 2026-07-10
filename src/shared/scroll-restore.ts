@@ -6,12 +6,12 @@
 // 持久化的 linesFromBottom（lfb）参照的却是重建前的无限 scrollback，直接
 // scrollLines(-lfb) 会被 xterm clamp 到 buffer 顶——即"跳到最顶上"的字面成因。
 //
-// 不变量（见 spec）：
-// - INV-1: 本地实时 lfb 是位置真值；server DB 值只在 fresh attach 时作初始化参考。
-// - INV-2: 恢复目标超出重建 buffer 可滚动范围（> baseY）时，fresh attach 放弃
-//   恢复留在底部；reconnect clamp 到 min(target, baseY)（本地值是用户真实位置，
-//   clamp 是 best-effort；stale DB 值则直接放弃）。
+// 不变量（见 spec，含 v2 增补）：
+// - INV-1: 本地实时 lfb 是位置真值（v2 起 server DB 值不再参与任何决策）。
+// - INV-2: reconnect 恢复目标超出重建 buffer 可滚动范围（> baseY）时 clamp 到
+//   min(target, baseY)（本地值是用户真实位置，clamp 是 best-effort）。
 // - INV-3: lfb == 0 的 client（跟底）在任何恢复路径下必须回到底部跟随。
+// - INV-5: attach 后落点必须确定——fresh attach 一律显式钉底。
 
 export type RestoreDecision =
   | { action: "bottom" }                  // scrollToBottom（或保持跟底）
@@ -26,25 +26,28 @@ const clampNonNegInt = (n: number): number =>
 export function decideScrollRestore(input: {
   /** 本次 attach 生命周期里第一个 scrollpos（fresh attach） */
   isFirstDelivery: boolean;
-  /** server 下发的 DB 值（0 = 无记忆/跟底） */
+  /**
+   * server 下发的 DB 值（0 = 无记忆/跟底）。v2 起不参与决策，参数保留：
+   * 协议兼容（server 仍无条件下发）+ 未来可能恢复跨设备记忆 feature。
+   */
   serverLfb: number;
   /** 断线瞬间快照的本地 lfb（fresh attach 时为 0） */
   localLfb: number;
   /** 恢复时刻重建 buffer 的可滚动深度 */
   baseY: number;
 }): RestoreDecision {
-  const serverLfb = clampNonNegInt(input.serverLfb);
   const localLfb = clampNonNegInt(input.localLfb);
   const baseY = clampNonNegInt(input.baseY);
 
   if (input.isFirstDelivery) {
-    // Fresh attach：DB 值只是跨设备记忆的 best-effort 初始化（INV-1）。
-    // 无记忆 → 保持默认在底，不需要任何动作。
-    if (serverLfb === 0) return { action: "none" };
-    // stale 超深值：目标不在重建 buffer 里，恢复没有意义——clamp 到顶正是
-    // 跳顶 bug 的字面症状。诚实从底部开始（INV-2 fresh 分支，黄金律 1）。
-    if (serverLfb > baseY) return { action: "none" };
-    return { action: "restore", lines: serverLfb };
+    // Fresh attach：一律显式钉底（INV-5：attach 后落点必须确定）。
+    // v1 曾假设"默认已在底部"（无记忆 → none），该假设被 hidden-slot attach
+    // 竞态证伪——desktop pool 的 visibility:hidden slot 在 snapshot 大块写入
+    // 期间 viewport 停在随机位置（实测过顶部/中间/底部三种，见 work folder
+    // 2026/07/10/tmux-hub-scroll-jump-to-top-root-cause-fix findings v2 节）。
+    // parse barrier 后显式 scrollToBottom 兜住该竞态；serverLfb（DB 记忆）
+    // 无论 0/正常/超深/NaN 都不再消费（v2-3：跨设备记忆退役）。
+    return { action: "bottom" };
   }
 
   // Reconnect：只信断线瞬间的本地快照，无视 serverLfb——DB 值经过 1s 采样
