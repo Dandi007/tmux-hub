@@ -5,7 +5,7 @@ import { attachMomentumScroll } from "./momentum-scroll";
 import { showToast } from "./ui/toast";
 import "xterm/css/xterm.css";
 import type { ClientWsMessage, ServerWsMessage } from "@shared/protocol";
-import { decideScrollRestore } from "@shared/scroll-restore";
+import { decideScrollRestore, snapshotLocalLfb } from "@shared/scroll-restore";
 import { hubWsUrl, refreshSecret } from "./hub-fetch";
 import { perfEnabled, createPerfTelemetry, type PerfTelemetry } from "./perf-telemetry";
 import {
@@ -626,10 +626,21 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     // 断线瞬间即时快照本地 lfb——这是 reconnect 恢复的唯一真值来源（INV-1），
     // 不用 1s 轮询的滞后值 lastReportedLfb 做任何判断。alt-screen（claude
     // code / vim）无 scrollback 语义，取 0。
+    //
+    // Invariant：reportingEnabled 同时承担 "buffer 可信" 的语义——只有上一次
+    // scrollpos 恢复决策执行完后它才为 true。replay 中间态（RIS 已清空
+    // buffer、恢复决策尚未执行、reportingEnabled 仍为 false）发生二次断线时，
+    // buffer 是重建中间态，采样是 0/垃圾值——此时保留上一次快照，不覆盖
+    // savedLocalLfb（snapshotLocalLfb，弱网移动端高频场景）。
     try {
       const buf = term.buffer.active;
-      savedLocalLfb = buf.type === "normal" ? Math.max(0, buf.baseY - buf.viewportY) : 0;
-    } catch { savedLocalLfb = 0; }
+      const currentLfb = buf.type === "normal" ? Math.max(0, buf.baseY - buf.viewportY) : 0;
+      savedLocalLfb = snapshotLocalLfb({
+        bufferTrusted: reportingEnabled,
+        currentLfb,
+        previousSaved: savedLocalLfb,
+      });
+    } catch { /* buffer 不可读（disposed 边缘）→ 保留上一次快照 */ }
     // INV-4: reconnect replay 期间 RIS 会把 baseY/viewportY 归零，任何采样都是
     // 噪声——关闭上报，直到下一次 scrollpos 决策执行完再打开。
     reportingEnabled = false;

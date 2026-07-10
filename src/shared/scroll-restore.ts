@@ -58,3 +58,22 @@ export function decideScrollRestore(input: {
   if (lines === 0) return { action: "bottom" };
   return { action: "restore", lines };
 }
+
+// 断线瞬间的本地 lfb 快照决策——纯函数，供 enterReconnecting() 调用。
+//
+// 关键 invariant：bufferTrusted（= client 的 reportingEnabled gate）同时承担
+// "buffer 是可信的用户状态" 的语义——只有上一次 scrollpos 恢复决策执行完毕后
+// 它才为 true。若 replay 中间态（RIS 已清空 buffer、恢复决策尚未执行）发生
+// 二次断线，此刻 buffer 是重建中间态，采样值是 0/垃圾——必须保留上一次快照，
+// 否则用户位置被污染、最终恢复回底（弱网移动端高频场景）。
+export function snapshotLocalLfb(input: {
+  /** buffer 是否可信 = 上一次恢复决策已执行完（client 的 reportingEnabled） */
+  bufferTrusted: boolean;
+  /** 断线瞬间从 buffer 采样的 lfb（alt-screen 无 scrollback 语义，传 0） */
+  currentLfb: number;
+  /** 上一次快照值（buffer 不可信时原样保留） */
+  previousSaved: number;
+}): number {
+  if (!input.bufferTrusted) return clampNonNegInt(input.previousSaved);
+  return clampNonNegInt(input.currentLfb);
+}

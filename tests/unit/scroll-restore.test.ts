@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { decideScrollRestore } from "../../src/shared/scroll-restore";
+import { decideScrollRestore, snapshotLocalLfb } from "../../src/shared/scroll-restore";
 
 // 决策表（spec：tmux-hub 滚动跳顶修复）逐行验证 + 边界。
 // fresh attach（isFirstDelivery=true）：server DB 值仅作 best-effort 初始化（INV-1）；
@@ -74,5 +74,31 @@ describe("decideScrollRestore — 边界", () => {
       .toEqual({ action: "none" });
     expect(decideScrollRestore({ isFirstDelivery: false, serverLfb: 0, localLfb: Number.NaN, baseY: 900 }))
       .toEqual({ action: "bottom" });
+  });
+});
+
+// enterReconnecting() 的快照决策：bufferTrusted = client 的 reportingEnabled gate，
+// 同时承担 "buffer 可信" 的语义（上一次恢复决策已执行完）。
+describe("snapshotLocalLfb — 断线快照决策", () => {
+  test("buffer 可信（bufferTrusted=true）→ 用当前采样值更新快照", () => {
+    expect(snapshotLocalLfb({ bufferTrusted: true, currentLfb: 500, previousSaved: 0 })).toBe(500);
+    // 用户已回底：跟底状态也要如实覆盖旧快照（INV-3 的输入来源）
+    expect(snapshotLocalLfb({ bufferTrusted: true, currentLfb: 0, previousSaved: 500 })).toBe(0);
+  });
+
+  test("replay 中间态二次断线（bufferTrusted=false）→ 保留上一次快照，不被中间态污染", () => {
+    // 场景：读历史 lfb=500 → 断线快照 500 → 重连 replay 进行中（RIS 已清空
+    // buffer，采样是 0/垃圾）→ 再次断线。快照必须仍是 500。
+    expect(snapshotLocalLfb({ bufferTrusted: false, currentLfb: 0, previousSaved: 500 })).toBe(500);
+    expect(snapshotLocalLfb({ bufferTrusted: false, currentLfb: 37, previousSaved: 500 })).toBe(500);
+    // fresh attach 首个恢复决策前断线：previousSaved 初值 0，保持 0
+    expect(snapshotLocalLfb({ bufferTrusted: false, currentLfb: 123, previousSaved: 0 })).toBe(0);
+  });
+
+  test("防御性归一：负数/NaN 视同 0（两条路径都过 clamp）", () => {
+    expect(snapshotLocalLfb({ bufferTrusted: true, currentLfb: -5, previousSaved: 500 })).toBe(0);
+    expect(snapshotLocalLfb({ bufferTrusted: true, currentLfb: Number.NaN, previousSaved: 500 })).toBe(0);
+    expect(snapshotLocalLfb({ bufferTrusted: false, currentLfb: 500, previousSaved: -5 })).toBe(0);
+    expect(snapshotLocalLfb({ bufferTrusted: false, currentLfb: 500, previousSaved: Number.NaN })).toBe(0);
   });
 });
