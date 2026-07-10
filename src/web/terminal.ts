@@ -5,7 +5,7 @@ import { attachMomentumScroll } from "./momentum-scroll";
 import { showToast } from "./ui/toast";
 import "xterm/css/xterm.css";
 import type { ClientWsMessage, ServerWsMessage } from "@shared/protocol";
-import { decideScrollRestore, snapshotLocalLfb } from "@shared/scroll-restore";
+import { decideScrollRestore, snapshotLocalLfb, type RestoreDecision } from "@shared/scroll-restore";
 import { hubWsUrl, refreshSecret } from "./hub-fetch";
 import { perfEnabled, createPerfTelemetry, type PerfTelemetry } from "./perf-telemetry";
 import {
@@ -494,6 +494,40 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // 初始 false，scrollpos decision 执行完（含 action none）置 true；
   // enterReconnecting() 置 false。
   let reportingEnabled = false;
+  // isTermVisible（INV-5/INV-6 共用的可见性判定）：
+  // computed visibility 会从祖先继承（pool 的 .term-slot 用 visibility:hidden
+  // 藏非激活 slot），比 checkVisibility() 可靠——后者默认不检查 visibility 属性
+  // （需 options.visibilityProperty，v2 在此踩坑）。
+  const isTermVisible = (): boolean => {
+    if (document.visibilityState !== "visible") return false;
+    const cs = getComputedStyle(el);
+    return cs.visibility === "visible" && cs.display !== "none";
+  };
+  // pendingDecision（INV-5 hidden-slot 补丁）：scrollpos 决策到达时若 term 不
+  // 可见（desktop pool 非激活 slot），scrollToBottom/scrollLines 在 hidden
+  // renderer 上不生效（xterm renderer 暂停态的 viewport 同步问题，v2 线上
+  // 坐实：切到该 tab 看到的是 buffer 顶部历史）——挂起决策，等 pool activate
+  // 调 fit() 时消费。hidden 期间用户无法滚动该 slot，activate 时消费挂起
+  // 决策不会覆盖用户意图；新决策到来（reconnect）直接覆盖旧 pending。
+  let pendingDecision: RestoreDecision | null = null;
+  // 执行落点决策（parse barrier 回调与 fit() 挂起消费两处共用）。
+  const executeScrollDecision = (decision: RestoreDecision): void => {
+    if (decision.action === "bottom") {
+      // 断线前跟底 → 明确回底（replay 可能把 viewport 留在中间态），
+      // 黄金律 1 / INV-3。
+      term.scrollToBottom();
+    } else if (decision.action === "restore") {
+      // scrollLines is RELATIVE. Anchor to bottom first so the offset is
+      // absolute — the viewport may already sit mid-history and a bare
+      // scrollLines(-lines) would compound the offset.
+      term.scrollToBottom();
+      term.scrollLines(-decision.lines);
+    }
+    // 决策执行后把 lastReportedLfb 重置为实际 lfb（保留既有做法）：
+    // 下一轮上报不把恢复动作本身当成用户滚动。
+    const buf = term.buffer.active;
+    lastReportedLfb = Math.max(0, buf.baseY - buf.viewportY);
+  };
   const reportScrollPos = (): void => {
     // NOTE: readOnly is intentionally NOT checked here. readOnly only means
     // "don't send pty keyboard input"; mobile clients are always readOnly:true
@@ -505,10 +539,8 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     // renderer 在 snapshot 大块写入期间的竞态会让 viewport 停在随机位置
     // （hidden-slot attach 竞态 / pool 切换，findings v2）。真实案例：hidden
     // Codex slot 把 lfb≈990 写进 DB → 每次打开页面跳到顶部附近。
-    // 双重检查：页面级（tab 在后台）+ 元素级（slot 被 visibility:hidden 藏起，
-    // checkVisibility 旧浏览器不存在时视为可见，保持既有行为）。
-    if (document.visibilityState !== "visible") return;
-    if (!(el.checkVisibility?.() ?? true)) return;
+    // 判定含页面级（tab 在后台）+ 元素级（slot 被 visibility:hidden 藏起）。
+    if (!isTermVisible()) return;
     try {
       const buf = term.buffer.active;
       if (buf.type !== "normal") return; // alt-screen 无 scrollback 语义
@@ -577,21 +609,20 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                         localLfb: savedLocalLfb,
                         baseY: buf.baseY,
                       });
-                      if (decision.action === "bottom") {
-                        // 断线前跟底 → 明确回底（replay 可能把 viewport 留在
-                        // 中间态），黄金律 1 / INV-3。
-                        term.scrollToBottom();
-                      } else if (decision.action === "restore") {
-                        // scrollLines is RELATIVE. Anchor to bottom first so
-                        // the offset is absolute — the viewport may already
-                        // sit mid-history and a bare scrollLines(-lines)
-                        // would compound the offset.
-                        term.scrollToBottom();
-                        term.scrollLines(-decision.lines);
+                      if (isTermVisible()) {
+                        executeScrollDecision(decision);
+                        pendingDecision = null;
+                      } else {
+                        // hidden slot：scrollToBottom/scrollLines 在暂停态
+                        // renderer 上不可靠（v2 线上坐实）——挂起，等 pool
+                        // activate 调 fit() 时消费；覆盖旧 pending（reconnect
+                        // 产生的新决策总是更新的真值）。
+                        pendingDecision = decision;
                       }
-                      // 决策执行后把 lastReportedLfb 重置为实际 lfb（保留既有
-                      // 做法）：下一轮上报不把恢复动作本身当成用户滚动。
-                      lastReportedLfb = Math.max(0, buf.baseY - buf.viewportY);
+                    } else {
+                      // alt-screen 无 scrollback 语义：跳过决策并清 pending
+                      //（挂起的旧决策对 alt-screen buffer 已无意义）。
+                      pendingDecision = null;
                     }
                   } catch { /* disposed */ }
                   // INV-4: 决策执行完（含 action none / alt-screen 跳过）才放开
@@ -845,6 +876,19 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     fit: () => {
       if (disposed) return;
       try { fit.fit(); } catch {}
+      // 消费挂起的落点决策（INV-5 hidden-slot 补丁）：pool activate 把 slot
+      // 置为可见后会调 fit()——此时 renderer 恢复，scrollToBottom/scrollLines
+      // 才可靠。hidden 期间用户无法滚动该 slot，这里消费不会覆盖用户意图。
+      // 在 fit 完成后执行，保证决策基于 resize 后的最终 viewport 几何。
+      if (pendingDecision && isTermVisible()) {
+        const decision = pendingDecision;
+        pendingDecision = null;
+        try {
+          if (term.buffer.active.type === "normal") {
+            executeScrollDecision(decision);
+          }
+        } catch { /* disposed 边缘 */ }
+      }
       publishResize();
     },
     notifySessionActivity: (attached: number, cols: number, rows: number) => {
