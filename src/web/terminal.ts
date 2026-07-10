@@ -5,6 +5,7 @@ import { attachMomentumScroll } from "./momentum-scroll";
 import { showToast } from "./ui/toast";
 import "xterm/css/xterm.css";
 import type { ClientWsMessage, ServerWsMessage } from "@shared/protocol";
+import { decideScrollRestore } from "@shared/scroll-restore";
 import { hubWsUrl, refreshSecret } from "./hub-fetch";
 import { perfEnabled, createPerfTelemetry, type PerfTelemetry } from "./perf-telemetry";
 import {
@@ -480,14 +481,25 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // 只有真实滚动（值变化）才写。1s 轮询兼顾 momentum/拖动/键盘所有滚动来源。
   let lastReportedLfb = 0;
   // scrollposRestoredOnce tracks whether we have applied the first scrollpos
-  // delivery for this attach. Fresh attach → always restore. Reconnect
-  // re-deliveries → only re-anchor if this client is actively reading history.
+  // delivery for this attach lifetime. First delivery = fresh attach（DB 值
+  // 作 best-effort 初始化）；re-deliveries arrive on reconnect（只信本地快照）。
+  // 具体决策在 decideScrollRestore（src/shared/scroll-restore.ts，INV-1/2/3）。
   let scrollposRestoredOnce = false;
+  // savedLocalLfb：断线瞬间即时快照的本地 lfb（INV-1 的真值来源）。1s 轮询的
+  // lastReportedLfb 有最多 1s 滞后（用户回底后 <1s 断线会残留 >0），不能用它
+  // 做恢复判断。fresh attach 生命周期内保持 0。
+  let savedLocalLfb = 0;
+  // reportingEnabled（INV-4）：replay parse 完成、恢复决策执行完之前不上报。
+  // 否则 RIS 把 baseY/viewportY 归零后的中间采样值（0 或垃圾值）会污染 DB。
+  // 初始 false，scrollpos decision 执行完（含 action none）置 true；
+  // enterReconnecting() 置 false。
+  let reportingEnabled = false;
   const reportScrollPos = (): void => {
     // NOTE: readOnly is intentionally NOT checked here. readOnly only means
     // "don't send pty keyboard input"; mobile clients are always readOnly:true
     // yet still need to report their scroll position for cross-device memory.
     if (disposed || currentState !== "connected") return;
+    if (!reportingEnabled) return; // INV-4: replay 未 parse 完，采样是噪声
     try {
       const buf = term.buffer.active;
       if (buf.type !== "normal") return; // alt-screen 无 scrollback 语义
@@ -535,30 +547,47 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                 return;
               }
               if (kind === "scrollpos") {
-                const lfb = (parsed as { linesFromBottom?: number }).linesFromBottom ?? 0;
-                // First delivery = fresh attach → always restore. Re-deliveries arrive on
-                // reconnect (server re-sends after every replay); only re-anchor when THIS
-                // client was actually reading history (lastReportedLfb > 0) — a client
-                // following the bottom must not be yanked into the past by a reconnect.
-                const shouldRestore = lfb > 0 && (!scrollposRestoredOnce || lastReportedLfb > 0);
+                // Server sends this unconditionally after every replay：既是
+                // 记忆值也是 replay-done 信号。落点决策全部收敛到
+                // decideScrollRestore（INV-1/2/3）——fresh attach 只把 DB 值当
+                // best-effort 初始化，reconnect 只信断线瞬间的本地快照。
+                const serverLfb = (parsed as { linesFromBottom?: number }).linesFromBottom ?? 0;
+                const isFirstDelivery = !scrollposRestoredOnce;
                 scrollposRestoredOnce = true;
-                if (shouldRestore) {
-                  // Parse barrier: replay 字节先于本消息到达，但 term.write 是
-                  // 异步的——空写入的回调保证在它们全部 parse 完之后执行。
-                  term.write("", () => {
-                    if (disposed) return;
-                    try {
-                      if (term.buffer.active.type !== "normal") return;
-                      // scrollLines is RELATIVE. Anchor to bottom first so the
-                      // offset is absolute — on a reconnect the viewport may
-                      // already sit mid-history and a bare scrollLines(-lfb)
-                      // would compound the offset. Fresh attach: no-op.
-                      term.scrollToBottom();
-                      term.scrollLines(-lfb);
-                      lastReportedLfb = Math.max(0, term.buffer.active.baseY - term.buffer.active.viewportY);
-                    } catch { /* disposed */ }
-                  });
-                }
+                // Parse barrier: replay 字节先于本消息到达，但 term.write 是
+                // 异步的——空写入的回调保证在它们全部 parse 完之后执行。
+                term.write("", () => {
+                  if (disposed) return;
+                  try {
+                    const buf = term.buffer.active;
+                    if (buf.type === "normal") {
+                      const decision = decideScrollRestore({
+                        isFirstDelivery,
+                        serverLfb,
+                        localLfb: savedLocalLfb,
+                        baseY: buf.baseY,
+                      });
+                      if (decision.action === "bottom") {
+                        // 断线前跟底 → 明确回底（replay 可能把 viewport 留在
+                        // 中间态），黄金律 1 / INV-3。
+                        term.scrollToBottom();
+                      } else if (decision.action === "restore") {
+                        // scrollLines is RELATIVE. Anchor to bottom first so
+                        // the offset is absolute — the viewport may already
+                        // sit mid-history and a bare scrollLines(-lines)
+                        // would compound the offset.
+                        term.scrollToBottom();
+                        term.scrollLines(-decision.lines);
+                      }
+                      // 决策执行后把 lastReportedLfb 重置为实际 lfb（保留既有
+                      // 做法）：下一轮上报不把恢复动作本身当成用户滚动。
+                      lastReportedLfb = Math.max(0, buf.baseY - buf.viewportY);
+                    }
+                  } catch { /* disposed */ }
+                  // INV-4: 决策执行完（含 action none / alt-screen 跳过）才放开
+                  // 上报 gate。
+                  reportingEnabled = true;
+                });
                 return;
               }
             }
@@ -594,6 +623,16 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
 
   const enterReconnecting = (): void => {
     if (disposed) return;
+    // 断线瞬间即时快照本地 lfb——这是 reconnect 恢复的唯一真值来源（INV-1），
+    // 不用 1s 轮询的滞后值 lastReportedLfb 做任何判断。alt-screen（claude
+    // code / vim）无 scrollback 语义，取 0。
+    try {
+      const buf = term.buffer.active;
+      savedLocalLfb = buf.type === "normal" ? Math.max(0, buf.baseY - buf.viewportY) : 0;
+    } catch { savedLocalLfb = 0; }
+    // INV-4: reconnect replay 期间 RIS 会把 baseY/viewportY 归零，任何采样都是
+    // 噪声——关闭上报，直到下一次 scrollpos 决策执行完再打开。
+    reportingEnabled = false;
     console.log(`[tmux-hub] entering reconnect for ${opts.sessionName}`);
     stopHeartbeat();
     try { ws.onmessage = null; ws.onclose = null; ws.onerror = null; ws.close(); } catch {}
