@@ -232,6 +232,11 @@ test.describe("desktop tab-bar", () => {
   });
 
   test("a session killed externally disappears from the tab-bar via SSE", async ({ page, ctx }) => {
+    // Keeper：kill 目标若是该 tmux server 上最后一个 session，server 会随之
+    // 退出 → listSessions 得到 "no server running" → #92 起视为探测不确定
+    // （不 prune、不 emit removed），tab 永不消失。生产常态下 server 上总有
+    // 别的 session，这里显式自建一个，不依赖前序测试/auto-create 的残留。
+    await ctx.createSession();
     const name = await ctx.createSession();
 
     await openApp(page);
