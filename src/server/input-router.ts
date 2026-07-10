@@ -95,8 +95,14 @@ export class InputRouter {
         throw classifyTmuxError(session, r.stderr);
       }
     } else if (msg.kind === "resize") {
-      // Ownership guard: skip resize if native client attached
-      const attachCount = await getNativeAttachCount(session);
+      // Ownership guard: skip resize if native client attached. Thread the
+      // injected runner through (adapted to viewport-pinner's throwing style):
+      // the default would bypass injection and hit the ambient tmux socket.
+      const attachCount = await getNativeAttachCount(session, async (args) => {
+        const r = await this.run(args);
+        if (r.code !== 0) throw new Error(`tmux ${args.join(" ")} failed (${r.code}): ${r.stderr}`);
+        return r.stdout;
+      });
       if (attachCount > 0) {
         logger.debug({ session, attachCount }, "native client attached, skipping resize");
         // Query current viewport size to send back
