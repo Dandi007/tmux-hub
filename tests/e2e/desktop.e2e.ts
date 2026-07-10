@@ -239,7 +239,11 @@ test.describe("desktop tab-bar", () => {
 
     ctx.tmuxE2E(["kill-session", "-t", name]);
 
-    await expect(tab(page, name)).toHaveCount(0, { timeout: 10_000 });
+    // #90 起 removed 判定有去抖：连续 REMOVAL_CONFIRM_POLLS(3) 次 poll
+    // （REGISTRY_INTERVAL_MS=2s）确认缺失才 emit session_removed，最坏
+    // ~8s（kill 相位 + 3 个周期）再叠 SSE/渲染——10s 窗口在 CI 上是边缘
+    // 值，放宽到 20s。
+    await expect(tab(page, name)).toHaveCount(0, { timeout: 20_000 });
   });
 
   test("image attach inserts the uploaded path into the input bar", async ({ page, ctx }) => {
