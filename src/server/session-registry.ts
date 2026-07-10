@@ -121,15 +121,29 @@ function isCodexPlaceholderPrompt(title: string): boolean {
   return title === "Find and fix a bug in @filename" || title === "Implement {feature}";
 }
 
+/**
+ * A managed session missing from `tmux list-sessions` is only pruned (db row
+ * removed + session_removed emitted, which discards its replay log) after
+ * this many CONSECUTIVE polls confirm the miss. A single glitched poll —
+ * wrong socket, slow tmux, transient error mapped to "no sessions" — must
+ * not destroy state (2026-07-10 incident).
+ */
+export const REMOVAL_CONFIRM_POLLS = 3;
+
 export class SessionRegistry {
   private state: SessionInfo[] = [];
   private serverReachable = true;
   private timer: ReturnType<typeof setInterval> | null = null;
   private listeners = new Set<(event: ServerEvent) => void>();
   private db: ManagedSessionDb;
+  private lister: () => Promise<SessionInfo[] | null>;
+  private missingStreak = new Map<string, number>();
 
-  constructor(db: ManagedSessionDb) {
+  // `lister` is an explicit seam so tests can drive poll() without a live
+  // tmux server; production wiring uses the real listSessions.
+  constructor(db: ManagedSessionDb, lister: () => Promise<SessionInfo[] | null> = listSessions) {
     this.db = db;
+    this.lister = lister;
   }
 
   async start(): Promise<void> {
@@ -165,7 +179,7 @@ export class SessionRegistry {
   }
 
   private async poll() {
-    const all = await listSessions();
+    const all = await this.lister();
     if (all === null) {
       if (this.serverReachable) {
         this.serverReachable = false;
@@ -181,14 +195,45 @@ export class SessionRegistry {
     }
 
     const managed = this.db.all();
-
-    // Prune DB entries whose tmux sessions no longer exist
     const alive = new Set(all.map((s) => s.name));
-    for (const name of managed) {
-      if (!alive.has(name)) this.db.remove(name);
+
+    // Self-heal: a session we are tracking that is still alive in tmux must
+    // not lose management just because its db row vanished out from under us
+    // (external writer, stray test, corruption). Dropping it here cascades
+    // into session_removed → replay-log discard, so restore the row instead
+    // (2026-07-10 incident).
+    for (const s of this.state) {
+      if (alive.has(s.name) && !managed.has(s.name)) {
+        this.db.add(s.name);
+        managed.add(s.name);
+        logger.warn({ session: s.name }, "managed row vanished while session alive; re-adopted");
+      }
     }
 
     const next = filterManagedSessions(all, managed);
+
+    // Prune DB entries whose tmux sessions no longer exist — debounced: only
+    // after REMOVAL_CONFIRM_POLLS consecutive misses. While a removal is
+    // pending confirmation, keep the last-known info in `next` so no
+    // session_removed (and thus no log discard) fires yet.
+    for (const name of managed) {
+      if (alive.has(name)) {
+        this.missingStreak.delete(name);
+        continue;
+      }
+      const streak = (this.missingStreak.get(name) ?? 0) + 1;
+      if (streak >= REMOVAL_CONFIRM_POLLS) {
+        this.missingStreak.delete(name);
+        this.db.remove(name);
+      } else {
+        this.missingStreak.set(name, streak);
+        const prev = this.state.find((s) => s.name === name);
+        if (prev) next.push(prev);
+      }
+    }
+    for (const name of [...this.missingStreak.keys()]) {
+      if (!managed.has(name)) this.missingStreak.delete(name);
+    }
     const events = diffSessions(this.state, next);
     this.state = next;
     for (const e of events) {
