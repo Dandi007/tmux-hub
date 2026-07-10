@@ -14,9 +14,9 @@ import {
   WINDOW_ROWS,
 } from "./config";
 import { SessionEmulator } from "./session-emulator";
-import { mkdirSync, openSync, readSync, closeSync, existsSync, unlinkSync, statSync } from "node:fs";
+import { mkdirSync, openSync, readSync, closeSync, existsSync, unlinkSync, statSync, renameSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { createLogger } from "./logger";
 
 const logger = createLogger("broadcaster");
@@ -24,6 +24,23 @@ const logger = createLogger("broadcaster");
 const LOG_DIR = process.env.TMUX_HUB_LOG_DIR
   ? resolve(process.env.TMUX_HUB_LOG_DIR)
   : resolve(homedir(), ".cache/tmux-hub/logs");
+
+// Discarded replay logs are moved here instead of unlinked, so a false
+// session_removed (glitched poll, external db wipe — 2026-07-10 incident)
+// never destroys history irrecoverably. Entries older than the retention
+// window are pruned opportunistically on each discard.
+const TRASH_DIR = resolve(LOG_DIR, ".trash");
+const TRASH_RETAIN_MS = 7 * 24 * 60 * 60 * 1000;
+
+function trashLog(logPath: string): void {
+  mkdirSync(TRASH_DIR, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  renameSync(logPath, resolve(TRASH_DIR, `${basename(logPath, ".log")}.${stamp}.log`));
+  for (const f of readdirSync(TRASH_DIR)) {
+    const p = resolve(TRASH_DIR, f);
+    try { if (Date.now() - statSync(p).mtimeMs > TRASH_RETAIN_MS) unlinkSync(p); } catch { /* ignore */ }
+  }
+}
 
 type Subscriber = (chunk: Uint8Array) => void;
 
@@ -254,10 +271,11 @@ export class SessionBroadcaster {
     if (this.emulator) { this.emulator.dispose(); this.emulator = null; }
     await this.run(["pipe-pane", "-o", "-t", `${this.session}:0.0`]).catch(() => undefined);
     // Default: KEEP the log file so history persists across hub restarts.
-    // Only delete when the underlying tmux session is gone (caller passes
-    // deleteLog: true from the session_removed handler).
+    // Only discard when the underlying tmux session is gone (caller passes
+    // deleteLog: true from the session_removed handler) — and even then move
+    // it to .trash rather than unlink, so a false removal is recoverable.
     if (opts.deleteLog) {
-      try { if (existsSync(this.logPath)) unlinkSync(this.logPath); } catch { /* ignore */ }
+      try { if (existsSync(this.logPath)) trashLog(this.logPath); } catch { /* ignore */ }
     }
     for (const l of this.eventListeners) l({ kind: "stopped" });
     this.subscribers.clear();
