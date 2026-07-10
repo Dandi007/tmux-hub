@@ -47,10 +47,18 @@ export function diffSessions(prev: SessionInfo[], next: SessionInfo[]): ServerEv
   return events;
 }
 
-export async function listSessions(): Promise<SessionInfo[] | null> {
-  const r = await tmux(["list-sessions", "-F", FORMAT]);
+/** Injectable tmux runner — production default is the global `tmux`; tests pass a fake. */
+export type TmuxRunner = typeof tmux;
+
+export async function listSessions(runner: TmuxRunner = tmux): Promise<SessionInfo[] | null> {
+  const r = await runner(["list-sessions", "-F", FORMAT]);
   if (r.code !== 0) {
-    if (/no server running|no sessions/i.test(r.stderr)) return [];
+    // "no sessions": server alive, zero sessions — a genuine empty list.
+    if (/no sessions/i.test(r.stderr)) return [];
+    // "no server running" (and any other failure) means the probe is
+    // inconclusive — NOT "every session is gone". Returning [] here would let
+    // poll()'s prune wipe the entire managed_sessions table when the hub is
+    // started with a drifted socket/env (historical incident, multiple times).
     return null;
   }
   if (!r.stdout) return [];
