@@ -16,6 +16,22 @@ beforeAll(async () => {
   await tmuxTest(["new-session", "-d", "-s", S, "sleep 30"]);
 });
 
+// Attach a native client through `script` so tmux gets a TTY. Two traps:
+// - Bun.spawn without `env` inherits the STARTUP environment, dropping the
+//   runtime TMUX_TMPDIR mutation (attach would look in the wrong socket dir),
+//   and an inherited TMUX makes attach refuse to nest.
+// - util-linux `script` only takes the command via -c; the positional form is
+//   BSD/macOS. Without the branch the Linux run never attached at all.
+function spawnAttach() {
+  const { socket, tmpdir: sockDir } = setupIsolatedTmux();
+  const env: Record<string, string | undefined> = { ...process.env, TMUX_TMPDIR: sockDir };
+  delete env.TMUX;
+  const argv = process.platform === "linux"
+    ? ["script", "-q", "-c", `tmux -L ${socket} attach -t ${S}`, "/dev/null"]
+    : ["script", "-q", "/dev/null", "tmux", "-L", socket, "attach", "-t", S];
+  return Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", env });
+}
+
 afterAll(async () => {
   await tmuxTest(["kill-session", "-t", S]).catch(() => {});
   await tmuxTestKillServer();
@@ -32,12 +48,7 @@ describe("viewport-ownership integration", () => {
   });
 
   test("with client: resize request does not change window size", async () => {
-    // Use script to provide a TTY so tmux attach succeeds
-    const { socket } = setupIsolatedTmux();
-    const attachProc = Bun.spawn(
-      ["script", "-q", "/dev/null", "tmux", "-L", socket, "attach", "-t", S],
-      { stdout: "pipe", stderr: "pipe" }
-    );
+    const attachProc = spawnAttach();
 
     // Wait for attach to register
     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -82,11 +93,7 @@ describe("viewport-ownership integration", () => {
     expect(sizeBefore).toBe("140x35");
 
     // Attach a client
-    const { socket } = setupIsolatedTmux();
-    const attachProc = Bun.spawn(
-      ["script", "-q", "/dev/null", "tmux", "-L", socket, "attach", "-t", S],
-      { stdout: "pipe", stderr: "pipe" }
-    );
+    const attachProc = spawnAttach();
 
     await new Promise(resolve => setTimeout(resolve, 1000));
 
