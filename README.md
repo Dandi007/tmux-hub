@@ -2,7 +2,7 @@
 
 **在手机或任意浏览器上实时查看、操作 Mac 上运行的 tmux session——无需 SSH、无需 VPN、不丢历史输出。**
 
-用于解决一个具体问题：Claude Code / Cursor 等 AI agent 在 Mac tmux session 里长时间跑任务时，人不在电脑前只能干等。tmux-hub 让你在手机上就能看到实时输出、发送按键、新建或关闭 session，随时掌控进度。
+用于解决一个具体问题：Claude Code / Codex 等 CLI AI agent 在 Mac tmux session 里长时间跑任务时，人不在电脑前只能干等。tmux-hub 让你在手机上就能看到实时输出、发送按键、新建或关闭 session，随时掌控进度。
 
 ---
 
@@ -19,7 +19,7 @@
   </tr>
 </table>
 
-> 截图由 Playwright 生成。本机起 `bun run dev` 后跑 `bun run screenshots:readme` 可重新生成——脚本会通过 `/templates/shell/run` API spawn 一个临时 demo session、跑无害命令、截图、再 kill。
+> 截图由 `bun run screenshots:readme` 自动生成（Playwright spawn 临时 demo session → 截图 → kill）。
 
 ---
 
@@ -35,7 +35,7 @@
 | **语音输入** | 移动端 🎤 录音 → 本机 ASR 转写 + LLM 整理 → 插入输入框（人确认后发送），带按用户隔离的历史与音频回放 |
 | **命令建议** | 移动端输入自然语言，前台是 shell 时自动翻译成单行命令，review 确认后发送；agent/TUI 前台时不打扰 |
 | **Session 管理** | 查看全部 session、切换、重命名、关闭（带确认弹窗）、一键新建（模板 / ad-hoc API / TUI 三入口） |
-| **图片上传** | 选择文件或粘贴剪贴板图片 → 上传到服务端 → 把路径注入到当前 pane（给 AI agent 看图用） |
+| **图片上传** | 选择文件上传（桌面端还支持直接粘贴剪贴板图片）→ 服务端落盘 → 把路径注入到当前 pane（给 AI agent 看图用） |
 | **断线自愈** | WebSocket 心跳 + 指数退避重连 + 后台冻结恢复 + 滚动位置恢复，iOS Safari / PWA 全覆盖 |
 | **PWA 安装** | 支持 Chrome / Edge / Brave 安装到桌面 / Dock，standalone 模式无地址栏，Dock 快捷方式直达新会话 / 会话列表 |
 | **终端入口 (TUI)** | `tmux-hub tui` 从任意终端（含 SSH / tmux popup）fzf 选择、创建、attach session |
@@ -92,11 +92,17 @@ graph TD
 
 **Session 发现（registry poll）**：每 2 秒调用 `tmux list-sessions`，diff 出新增 / 删除 / 变化的 session，通过 SSE 推送给前端，前端不需要轮询。session 归属落 SQLite；删除需连续 3 个 poll 确认（去抖），tmux 探测不确定时绝不清表——防瞬时故障误删。
 
-**输入路由（send-keys）**：浏览器侧按键通过 WebSocket JSON 消息发到 server，server 调用 `tmux send-keys` 注入到对应 pane。每个 session 串行化保证按键顺序；滚轮转 SGR 鼠标编码；resize 尊重 viewport 所有权——本地有 tmux 客户端 attach 时不抢尺寸。
+**输入路由（send-keys）**：浏览器侧按键通过 WebSocket JSON 消息发到 server，server 调用 `tmux send-keys` 注入到对应 pane。每个 session 串行化保证按键顺序；滚轮事件转成终端标准鼠标滚动序列（SGR 1006 编码）后注入；resize 尊重 viewport 所有权——本地有 tmux 客户端 attach 时不抢尺寸。
 
 **心跳与重连**：client 每 15s 发 ping，server 立即回 pong。5s 无 pong 判定断线，指数退避重连（500ms → 30s，最多 8 次），之后进入 dead 状态每 60s 探测。iOS 后台恢复时额外触发一次探测。重连后滚动位置按 client 本地记忆恢复，fresh attach 一律回到底部。
 
-**认证**：三层——边缘 gate-auth 注入的签名身份（HMAC）→ Cloudflare Access → 本机 `hub.secret`（client 经 `/system/auth-check` 获取，`X-Hub-Secret` header 鉴权）。任意命令启动（`POST /sessions`）另走独立的 `hub.admin.secret`，仅本机进程可用且拒绝 tunnel 请求。
+**认证**：三层递进，任一层通过即可：
+
+1. **边缘签名身份**：若部署了 forward-auth 边缘认证服务（作者自建的 gate-auth），由它注入 HMAC 签名的用户身份；
+2. **Cloudflare Access**：走 Cloudflare Tunnel 暴露时由 CF Access 在边缘完成登录；
+3. **本机 `hub.secret`**：浏览器经 `/system/auth-check` 获取密钥，后续请求带 `X-Hub-Secret` header。
+
+「启动任意命令」（`POST /sessions`）另走独立的 `hub.admin.secret`，详见下文[信任模型](#信任模型)。
 
 ### 技术栈
 
@@ -205,6 +211,8 @@ tmux-hub 默认监听 127.0.0.1，要从手机访问需要做内网穿透：
 在 Chrome / Edge / Brave 访问部署地址后，地址栏会出现「安装 tmux-hub」按钮。安装后以 standalone 窗口运行，Dock 右键可用「新会话」和「会话列表」快捷入口。
 
 ---
+
+> 以下两节（会话启动 API、hub TUI）是参考手册性质的进阶内容；只想部署使用的读者可以跳过。
 
 ## 通用会话启动（`POST /sessions`）
 
@@ -351,8 +359,8 @@ TUI 菜单按以下顺序显示：
 ## 测试
 
 ```bash
-bun test                    # unit + integration (74+ tests)
-bun run test:e2e            # Playwright E2E (35+ tests, desktop/mobile/PWA)
+bun test                    # unit + integration（70+ 测试文件）
+bun run test:e2e            # Playwright E2E（desktop / mobile / PWA / key-conformance / suggest）
 ```
 
 详细的测试规范和开发流程见 [AGENTS.md](AGENTS.md)。
