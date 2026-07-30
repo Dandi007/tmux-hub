@@ -29,12 +29,16 @@
 
 | 功能 | 说明 |
 |------|------|
-| **实时终端输出** | 浏览器内 xterm.js 终端，通过 WebSocket 接收 tmux pane 的实时输出流 |
-| **键盘输入** | 移动端：textarea 多行输入 + 特殊键工具栏（Esc / Tab / ^C / 方向键）；桌面端：原生 xterm 键盘直通 |
-| **Session 管理** | 查看全部 session、切换、重命名、关闭（带确认弹窗）、一键新建 |
+| **实时终端输出** | 浏览器内 xterm.js 终端（CanvasAddon GPU 渲染），通过 WebSocket 接收 tmux pane 的实时输出流 |
+| **键盘输入** | 移动端：textarea 多行输入 + 特殊键工具栏（Esc / Tab / ^C / 方向键）；桌面端：原生 xterm 键盘直通 + Ctrl/Cmd+T/W/1-9/Tab 标签快捷键 |
+| **Agent 状态一览** | 从 pane 动态标题识别 Claude Code / Codex 状态——💬 等待输入、⚡ 正在工作，显示在标签 / session 列表上，一眼看出哪个 agent 在等人 |
+| **语音输入** | 移动端 🎤 录音 → 本机 ASR 转写 + LLM 整理 → 插入输入框（人确认后发送），带按用户隔离的历史与音频回放 |
+| **命令建议** | 移动端输入自然语言，前台是 shell 时自动翻译成单行命令，review 确认后发送；agent/TUI 前台时不打扰 |
+| **Session 管理** | 查看全部 session、切换、重命名、关闭（带确认弹窗）、一键新建（模板 / ad-hoc API / TUI 三入口） |
 | **图片上传** | 选择文件或粘贴剪贴板图片 → 上传到服务端 → 把路径注入到当前 pane（给 AI agent 看图用） |
-| **断线自愈** | WebSocket 心跳 + 指数退避重连 + 后台冻结恢复，iOS Safari / PWA 全覆盖 |
-| **PWA 安装** | 支持 Chrome / Edge / Brave 安装到桌面 / Dock，standalone 模式无地址栏 |
+| **断线自愈** | WebSocket 心跳 + 指数退避重连 + 后台冻结恢复 + 滚动位置恢复，iOS Safari / PWA 全覆盖 |
+| **PWA 安装** | 支持 Chrome / Edge / Brave 安装到桌面 / Dock，standalone 模式无地址栏，Dock 快捷方式直达新会话 / 会话列表 |
+| **终端入口 (TUI)** | `tmux-hub tui` 从任意终端（含 SSH / tmux popup）fzf 选择、创建、attach session |
 
 ### 设计原则
 
@@ -46,6 +50,8 @@
 
 ## 技术实现
 
+> 完整架构（模块地图、数据流、协议、配置全集、测试隔离）见 **[docs/architecture.md](docs/architecture.md)**。以下是速览。
+
 ### 架构总览
 
 ```mermaid
@@ -54,25 +60,27 @@ graph TD
     XTERM["xterm.js 终端渲染"]
     SSE_CLIENT["SSE 事件实时同步"]
     SESSION_UI["Session 管理 UI"]
-    IMG_UI["图片上传 (file/paste)"]
+    EXTRA_UI["图片上传 · 语音 · 命令建议"]
   end
 
   subgraph Server["Bun Server (Hono)"]
-    BROADCASTER["Broadcast Registry"]
-    REGISTRY["Session Registry\n(2s poll)"]
+    BROADCASTER["Output Broadcaster\n(pipe-pane → 5ms poll)"]
+    REGISTRY["Session Registry\n(2s poll + 去抖)"]
     CONTROL["Session Control"]
-    IMG_UPLOAD["Image Upload"]
+    FEATURES["Image / Voice / Suggest"]
+    DB[("SQLite\nmanaged sessions + scrollpos")]
   end
 
   subgraph TMUX["tmux server"]
     SESSIONS["session-A &nbsp; session-B &nbsp; session-C &nbsp; ..."]
   end
 
-  XTERM -- "WebSocket" --> BROADCASTER
+  XTERM -- "WebSocket (输出 + 输入)" --> BROADCASTER
   SSE_CLIENT -- "GET /events (SSE)" --> REGISTRY
   SESSION_UI -- "POST" --> CONTROL
-  IMG_UI -- "POST" --> IMG_UPLOAD
+  EXTRA_UI -- "POST" --> FEATURES
 
+  REGISTRY <--> DB
   BROADCASTER -- "pipe-pane" --> SESSIONS
   REGISTRY -- "list-sessions" --> SESSIONS
   CONTROL -- "send-keys / kill / rename" --> SESSIONS
@@ -80,24 +88,24 @@ graph TD
 
 ### 关键机制
 
-**输出广播（pipe-pane）**：tmux 原生的 `pipe-pane` 把 pane 输出重定向到日志文件，server 以 5ms 间隔轮询文件增量，通过 WebSocket 推给所有连接的浏览器。内存中维护一个 1MB ring buffer 用于 attach 时的快速回放。
+**输出广播（pipe-pane）**：tmux 原生的 `pipe-pane` 把 pane 输出重定向到日志文件，server 以 5ms 间隔轮询文件增量，通过 WebSocket 推给所有连接的浏览器。内存中维护一个 1MB ring buffer；attach 回放可选 server 侧 headless xterm（emulator）快照——按当前宽度正确重排、恢复鼠标 / 光标等终端模式。
 
-**Session 发现（registry poll）**：每 2 秒调用 `tmux list-sessions`，diff 出新增 / 删除 / 变化的 session，通过 SSE 推送给前端。前端不需要轮询。
+**Session 发现（registry poll）**：每 2 秒调用 `tmux list-sessions`，diff 出新增 / 删除 / 变化的 session，通过 SSE 推送给前端，前端不需要轮询。session 归属落 SQLite；删除需连续 3 个 poll 确认（去抖），tmux 探测不确定时绝不清表——防瞬时故障误删。
 
-**输入路由（send-keys）**：浏览器侧按键通过 WebSocket JSON 消息发到 server，server 调用 `tmux send-keys` 注入到对应 pane。每个 session 串行化，保证按键顺序。
+**输入路由（send-keys）**：浏览器侧按键通过 WebSocket JSON 消息发到 server，server 调用 `tmux send-keys` 注入到对应 pane。每个 session 串行化保证按键顺序；滚轮转 SGR 鼠标编码；resize 尊重 viewport 所有权——本地有 tmux 客户端 attach 时不抢尺寸。
 
-**心跳与重连**：client 每 15s 发 ping，server 立即回 pong。5s 无 pong 判定断线，指数退避重连（500ms → 30s，最多 8 次），之后进入 dead 状态每 60s 探测。iOS 后台恢复时额外触发一次探测。
+**心跳与重连**：client 每 15s 发 ping，server 立即回 pong。5s 无 pong 判定断线，指数退避重连（500ms → 30s，最多 8 次），之后进入 dead 状态每 60s 探测。iOS 后台恢复时额外触发一次探测。重连后滚动位置按 client 本地记忆恢复，fresh attach 一律回到底部。
 
-**认证**：server 启动时生成或读取一个 secret file，client 通过 `/system/auth-check` 获取 secret 后缓存到 sessionStorage，后续请求通过 `X-Hub-Secret` header 鉴权。生产部署可前置 Cloudflare Access 做边缘认证。
+**认证**：三层——边缘 gate-auth 注入的签名身份（HMAC）→ Cloudflare Access → 本机 `hub.secret`（client 经 `/system/auth-check` 获取，`X-Hub-Secret` header 鉴权）。任意命令启动（`POST /sessions`）另走独立的 `hub.admin.secret`，仅本机进程可用且拒绝 tunnel 请求。
 
 ### 技术栈
 
 | 层 | 技术 |
 |----|------|
-| Server runtime | Bun |
+| Server runtime | Bun（含 bun:sqlite 持久化） |
 | HTTP framework | Hono |
 | Web build | Vite + vite-plugin-pwa |
-| Terminal rendering | xterm.js (CanvasAddon) |
+| Terminal rendering | xterm.js (CanvasAddon；server 侧 headless + SerializeAddon 做快照) |
 | Config validation | Zod |
 | Test | bun:test (unit/integration) + Playwright (E2E) |
 | PWA | Workbox precaching + injectManifest |
@@ -349,4 +357,4 @@ bun run test:e2e            # Playwright E2E (35+ tests, desktop/mobile/PWA)
 
 详细的测试规范和开发流程见 [AGENTS.md](AGENTS.md)。
 
-Spec 和实现计划见 [`docs/superpowers/`](docs/superpowers/)。
+架构文档见 [`docs/architecture.md`](docs/architecture.md)；历史设计 spec 与实现计划见 [`docs/superpowers/`](docs/superpowers/)。
