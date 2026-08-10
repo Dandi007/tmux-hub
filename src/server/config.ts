@@ -180,6 +180,18 @@ export const ASR_BASE = assertLoopbackBase("TMUX_HUB_ASR_BASE", process.env.TMUX
 // loopback 断言同 BLOB/ASR：防被改成外部地址成 SSRF gadget。
 export const INTAKE_BASE = assertLoopbackBase("TMUX_HUB_INTAKE_BASE", process.env.TMUX_HUB_INTAKE_BASE ?? "http://127.0.0.1:8099");
 
+// === 上传直传 broker（TOS 预签名，token 存在即启用）===
+// 浏览器把文件直传 TOS，hub 只代为取签名和验收，字节不经过 hub、不经过 ECS 公网 IP。
+// 老的 multipart 端点保留，前端失败自动降级——broker 没起也不该让人传不了图。
+// loopback 断言同 BLOB/ASR/INTAKE：broker 持有 TOS 凭证，被改成外部地址就是 SSRF gadget。
+export const UPLOAD_BROKER_BASE = assertLoopbackBase(
+  "TMUX_HUB_UPLOAD_BROKER_BASE",
+  process.env.TMUX_HUB_UPLOAD_BROKER_BASE ?? "http://127.0.0.1:8105",
+);
+export const UPLOAD_BROKER_NS = process.env.TMUX_HUB_UPLOAD_BROKER_NS ?? "tmux-hub";
+export const UPLOAD_BROKER_TOKEN = process.env.TMUX_HUB_UPLOAD_BROKER_TOKEN ?? "";
+export const UPLOAD_BROKER_ENABLED = UPLOAD_BROKER_TOKEN.length > 0;
+
 // === gate-id 身份验签 ===
 // 与 gate-auth 共享的注入签名密钥（edge 经 forward_auth 注入 X-Auth-Sig）。
 // 函数而非 eager const：测试可动态设 env；生产 svc 启动前已由 hub.env 注入。

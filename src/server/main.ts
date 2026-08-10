@@ -10,7 +10,7 @@ import { InputRouter, HubError } from "./input-router";
 import { pinViewport, getNativeAttachCount } from "./viewport-pinner";
 import { tmux } from "./tmux-cmd";
 import { bootstrapTmuxHooks } from "./tmux-bootstrap";
-import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS, IMAGE_DIR, MAX_IMAGE_BYTES, expandHome, SUGGEST_ENABLED, SUGGEST_ENDPOINT, SUGGEST_MODEL, SUGGEST_CAPTURE_LINES, SUGGEST_TIMEOUT_MS, SUGGEST_PROTOCOL, SUGGEST_HISTORY_ENABLED, SUGGEST_HISTORY_PATH, SUGGEST_HISTORY_TOP, VOICE_ENABLED, BLOB_BASE, INTAKE_BASE } from "./config";
+import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS, IMAGE_DIR, MAX_IMAGE_BYTES, expandHome, SUGGEST_ENABLED, SUGGEST_ENDPOINT, SUGGEST_MODEL, SUGGEST_CAPTURE_LINES, SUGGEST_TIMEOUT_MS, SUGGEST_PROTOCOL, SUGGEST_HISTORY_ENABLED, SUGGEST_HISTORY_PATH, SUGGEST_HISTORY_TOP, VOICE_ENABLED, BLOB_BASE, INTAKE_BASE, UPLOAD_BROKER_ENABLED, UPLOAD_BROKER_BASE, UPLOAD_BROKER_NS, UPLOAD_BROKER_TOKEN } from "./config";
 import { buildSuggestRoutes } from "./suggest-routes";
 import { buildVoiceRoutes } from "./voice-routes";
 import { VoiceStore } from "./voice-store";
@@ -22,6 +22,7 @@ import { authGate, adminGate } from "./auth";
 import { isGrammarOk, isManagedSessionName } from "../shared/session-name";
 import { buildSessionControlRoutes } from "./session-control";
 import { buildImageUploadRoutes } from "./image-upload";
+import { buildUploadBrokerRoutes } from "./upload-broker";
 import { TemplateRunner, TemplateError, launchSession, formatTs14 } from "./template-runner";
 import { ManagedSessionDb } from "./managed-db";
 import { listSessions } from "./session-registry";
@@ -82,7 +83,7 @@ catch (e) { logger.warn({ err: e }, "bootstrap tmux hooks failed"); }
 
 // Auto-create a default session if none are managed
 if (registry.snapshot().length === 0 && templates.length > 0) {
-  const defaultTemplate = templates.find((t) => t.id === "shell") ?? templates[0]!;
+  const defaultTemplate = templates.find((t) => t.id === "vault-cc-native") ?? templates[0]!;
   const cwd = defaultTemplate.cwd_choices[0]!;
   try {
     const name = await templateRunner.run(defaultTemplate.id, cwd);
@@ -162,6 +163,13 @@ app.route("/", buildSessionControlRoutes({ broadcasters, managedDb }));
 app.route("/", buildImageUploadRoutes({
   imageDir: IMAGE_DIR,
   maxBytes: MAX_IMAGE_BYTES,
+  sessionExists: (name) => registry.snapshot().some((s) => s.name === name),
+}));
+app.route("/", buildUploadBrokerRoutes({
+  enabled: UPLOAD_BROKER_ENABLED,
+  base: UPLOAD_BROKER_BASE,
+  namespace: UPLOAD_BROKER_NS,
+  token: UPLOAD_BROKER_TOKEN,
   sessionExists: (name) => registry.snapshot().some((s) => s.name === name),
 }));
 app.route("/", buildSuggestRoutes({
