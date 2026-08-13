@@ -18,12 +18,13 @@ OUT_DIR="$REPO_ROOT/src/web/fonts"
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
-# Unicode coverage: ASCII + Latin-1/Ext-A for the primary-font case (Android),
-# then the symbol blocks terminals actually hit — punctuation (— … ·), arrows,
-# math operators (≤ ≥ ≠), Misc Technical (⌘ ⏵ ⏻), box drawing, block elements
+# Unicode coverage: SYMBOLS ONLY, deliberately no ASCII/Latin — Latin text must
+# keep rendering with the platform's own monospace (Roboto Mono on Android),
+# this face only fills the symbol blocks those fonts lack: arrows, math
+# operators (≤ ≥ ≠), Misc Technical (⌘ ⏵ ⏻), box drawing, block elements
 # (█ ░ ▒ ▓ progress bars), geometric shapes (▾ ▸), misc symbols, dingbats
 # (✓ ✕), arrows-B, and the Powerline private-use range.
-RANGES="U+0020-007E,U+00A0-00FF,U+0100-017F,U+2000-206F,U+2190-21FF,U+2200-22FF,U+2300-23FF,U+2500-257F,U+2580-259F,U+25A0-25FF,U+2600-26FF,U+2700-27BF,U+2B00-2BFF,U+E0A0-E0D7"
+RANGES="U+2190-21FF,U+2200-22FF,U+2300-23FF,U+2500-257F,U+2580-259F,U+25A0-25FF,U+2600-26FF,U+2700-27BF,U+2B00-2BFF,U+E0A0-E0D7"
 
 cd "$WORK_DIR"
 gh release download "v$VERSION" -R be5invis/Iosevka -p "PkgWebFont-IosevkaTerm-$VERSION.zip"

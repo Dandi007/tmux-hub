@@ -1,12 +1,13 @@
-/* Iosevka Term (subset) — bundled terminal-cell-width symbol fallback.
+/* Iosevka Term (symbols-only subset) — terminal-cell-width symbol fallback.
  *
- * System monospace fonts stay FIRST in every font stack (see
- * src/web/shared/fonts.ts and --font-mono in style.css), so Apple platforms
- * keep rendering Latin text with SF Mono / Menlo exactly as before. This face
- * only catches glyphs the platform fonts lack — Android's Roboto Mono has no
- * U+23F5 ⏵ (tofu boxes in the Claude Code status line) and its CJK fallback
- * draws U+2192 → full-width, overflowing the single cell xterm allocates and
- * striking through the next character.
+ * The subset deliberately contains NO ASCII/Latin: on every platform, Latin
+ * text keeps rendering with the system monospace ahead of it in the stack
+ * (SF Mono / Menlo on Apple, Roboto Mono on Android) — bundling Latin here
+ * would silently swap Android's body text to Iosevka's condensed letterforms.
+ * This face only catches symbol glyphs the platform fonts lack — Android's
+ * Roboto Mono has no U+23F5 ⏵ (tofu boxes in the Claude Code status line)
+ * and its CJK fallback draws U+2192 → full-width, overflowing the single
+ * cell xterm allocates and striking through the next character.
  *
  * Every glyph in this subset advances exactly 0.5em = one terminal cell.
  * Files are subset from the official Iosevka Term release (OFL 1.1, see
