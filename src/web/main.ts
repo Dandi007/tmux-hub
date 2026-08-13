@@ -1,3 +1,4 @@
+import "./fonts/fonts.css";
 import "./style.css";
 import "./ui/toast.css";
 import "./ui/confirm-modal.css";

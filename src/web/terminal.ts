@@ -7,6 +7,7 @@ import "xterm/css/xterm.css";
 import type { ClientWsMessage, ServerWsMessage } from "@shared/protocol";
 import { decideScrollRestore, snapshotLocalLfb, type RestoreDecision } from "@shared/scroll-restore";
 import { hubWsUrl, refreshSecret } from "./hub-fetch";
+import { TERMINAL_FONT_FAMILY, ensureTerminalFonts } from "./shared/fonts";
 import { perfEnabled, createPerfTelemetry, type PerfTelemetry } from "./perf-telemetry";
 import {
   type ViewportState,
@@ -51,6 +52,10 @@ const SEND_QUEUE_MAX_BYTES  = 65_536;
 
 export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandle> {
   console.log(`[tmux-hub] ${BUILD_MARKER} attaching to ${opts.sessionName}`);
+  // Wait for the bundled symbol-fallback webfont before creating the terminal
+  // so the canvas texture atlas never caches tofu glyphs. Resolves immediately
+  // once loaded (first attach pays at most a ~2s timeout on broken networks).
+  await ensureTerminalFonts();
   // Disposed gate — hoisted to the top so the deferred CanvasAddon load
   // and any straggler ws callbacks can skip when the caller has already
   // torn this attach down (mobile session switch race).
@@ -63,7 +68,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     cursorBlink: false,
     cursorStyle: "underline",          // focused cursor: subtle 1px underline
     cursorInactiveStyle: "none",       // blur state: hide cursor entirely (was 'outline' = the white block)
-    fontFamily: "ui-monospace, Menlo, monospace",
+    fontFamily: TERMINAL_FONT_FAMILY,
     fontSize: 13,
     theme: {
       background: "#1a1a1f",
@@ -134,6 +139,13 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       perf?.setRenderer("dom");
     }
   }, 50);
+
+  // Safety net for the ensureTerminalFonts() timeout path: if the webfont
+  // finishes loading only after cells were already rasterized, drop the canvas
+  // glyph atlas so everything repaints with the correct glyphs.
+  void document.fonts.ready.then(() => {
+    if (!disposed) term.clearTextureAtlas();
+  });
 
   // Intercept DECSCUSR (CSI Ps SP q) so TUI apps cannot force cursorStyle back to
   // block at runtime. Returning true marks the sequence as handled, so xterm's
