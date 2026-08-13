@@ -84,3 +84,7 @@ xterm CanvasAddon 首次绘制即把 glyph 烤进 texture atlas，字体后到�
 - 不给 CJK 打包 webfont（体积不划算，系统 Noto CJK 表现正确）。
 - 不动 emoji 渲染（`⚖` `✏` 等走系统 color emoji，本来就正常）。
 - 不切换 xterm 渲染器、不引入 Unicode 宽度选项调整。
+
+## 修订：v2 符号 only 子集（2026-08-14 真机 dogfood 后）
+
+首版子集含 ASCII/Latin 区段，导致 Android 上正文英文整体切换为 Iosevka 的窄长字形——用户确认「整体视觉怪」即此。v2 把子集裁为**纯符号**（去掉 U+0020-007E、U+00A0-00FF、U+0100-017F、U+2000-206F）：正文回到平台 Roboto Mono，Iosevka Term 仅按 per-glyph fallback 兜底符号区段。符号 glyph（0.5em）小于 Roboto Mono cell（0.6em），落在 cell 内不溢出；box drawing/block elements 实际由 xterm `customGlyphs`（默认开启）程序化绘制，字体仅作 DOM renderer 兜底。
