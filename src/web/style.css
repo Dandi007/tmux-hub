@@ -728,6 +728,7 @@ button.is-danger:hover { filter: brightness(1.15); }
               color var(--duration-fast) var(--ease-out-expo),
               border-color var(--duration-fast) var(--ease-out-expo);
 }
+.header-action > svg { display: inline-block; vertical-align: middle; }
 .header-action:hover { background: var(--color-surface-hi); color: var(--color-text); border-color: transparent; }
 .header-action:active { background: var(--color-surface-active); }
 .header-action.is-danger:hover { background: oklch(30% 0.08 25); color: var(--color-danger); border-color: transparent; }

@@ -37,7 +37,10 @@ export function renderSessionPicker(
   killBtn.type = "button";
   killBtn.className = "header-action is-danger";
   killBtn.setAttribute("aria-label", "关闭当前 session");
-  killBtn.textContent = "⏻";
+  // Inline SVG power icon — the previous "⏻" (U+23FB) text glyph is absent
+  // from Android system fonts and rendered as a tofu box there.
+  killBtn.innerHTML =
+    '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v9"/><path d="M17.2 6.2a7.5 7.5 0 1 1-10.4 0"/></svg>';
 
   const triggerRow = document.createElement("div");
   triggerRow.className = "session-picker__trigger-row";
