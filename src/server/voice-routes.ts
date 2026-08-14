@@ -7,6 +7,9 @@ const logger = createLogger("voice");
 // 音频上限：手机录音几十秒也就几百 KB，25MB 足够且挡住超大 body OOM。
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 
+// hub 用哪张 voice-intake prompt-card。落库时一并记下，换 card 后历史仍可归因。
+export const VOICE_CARD = "hub-polish";
+
 export interface VoiceRecordRow {
   id: number;
   text: string;
@@ -60,10 +63,18 @@ export function buildVoiceRoutes(deps: VoiceRouteDeps): Hono {
     // 本地 hub.secret 直连统一为 "local-secret" 共享桶（单主自用设定）。
     const onDone = (d: IntakeDone) => {
       if (deps.store && uid && d.text?.trim()) {
-        try { deps.store.add({ uid, text: d.text, audioBlobId: d.audio_blob_id, mime, bytes: bytes.byteLength }); }
+        try {
+          // 同时存 ASR 原文与润色结果：这是 prompt 调优唯一的真实语料来源——
+          // 只存润色后文本的话，模型跑偏了也无从复盘、换 prompt 无从回归验证。
+          deps.store.add({
+            uid, text: d.text, rawText: d.raw_text ?? null,
+            card: VOICE_CARD, degraded: d.degraded ?? null,
+            audioBlobId: d.audio_blob_id, mime, bytes: bytes.byteLength,
+          });
+        }
         catch (e) { logger.warn({ err: (e as Error).message }, "voice persist failed"); }
       }
-      logger.info({ bytes: bytes.byteLength, uid, ...d.t }, "voice done");
+      logger.info({ bytes: bytes.byteLength, uid, cleaned: d.cleaned, degraded: d.degraded, ...d.t }, "voice done");
     };
 
     const piped = pipeIntakeSse(upstream.body, onDone);
