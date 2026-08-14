@@ -60,6 +60,20 @@ describe("buildVoiceRoutes · POST /api/voice persistence", () => {
     expect(store.rows[0]).toMatchObject({ uid: "user-1", text: "整理后的文本", audio_blob_id: "blob://B1", mime: "audio/mp4", bytes: 2000 });
   });
 
+  test("X-Voice-Probe: 1 → 走完整链路但不落库（拨测不污染语音历史）", async () => {
+    const store = fakeStore();
+    const app = makeApp(baseDeps({ store }), "user-1");
+    const r = await app.fetch(new Request("http://x/api/voice", {
+      method: "POST",
+      headers: { "content-type": "audio/mp4", "x-voice-probe": "1" },
+      body: audioBytes(),
+    }));
+    expect(r.status).toBe(200);
+    // SSE 仍原样转发，探针据此判定链路好坏。
+    expect(await r.text()).toContain("event: done");
+    expect(store.rows.length).toBe(0);
+  });
+
   test("no store → 转发 SSE，no crash", async () => {
     const app = makeApp(baseDeps({ store: null }), "user-1");
     const r = await app.fetch(new Request("http://x/api/voice", { method: "POST", headers: { "content-type": "audio/mp4" }, body: audioBytes() }));

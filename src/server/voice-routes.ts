@@ -53,6 +53,10 @@ export function buildVoiceRoutes(deps: VoiceRouteDeps): Hono {
     if (bytes.byteLength > MAX_AUDIO_BYTES) return c.json({ error: "audio too large" }, 413);
     if (bytes.byteLength < 1000) return c.json({ error: "audio too short" }, 400);
 
+    // 合成拨测（voice-probe）走的是和真人完全相同的入口——这正是它的价值：
+    // 本次故障就断在 hub→intake 这一跳，任何绕开 hub 的探针都测不到。
+    // 但它不该污染语音历史，故只跳过落库，链路本身一步不减。
+    const isProbe = c.req.header("x-voice-probe") === "1";
     const uid = c.var.identity;
     let upstream: Response;
     try { upstream = await deps.intake(bytes); }
@@ -62,7 +66,7 @@ export function buildVoiceRoutes(deps: VoiceRouteDeps): Hono {
     // done 时按账号保存（best-effort）；注意：经 gate 的请求 identity=真实 uid（隔离），
     // 本地 hub.secret 直连统一为 "local-secret" 共享桶（单主自用设定）。
     const onDone = (d: IntakeDone) => {
-      if (deps.store && uid && d.text?.trim()) {
+      if (deps.store && uid && d.text?.trim() && !isProbe) {
         try {
           // 同时存 ASR 原文与润色结果：这是 prompt 调优唯一的真实语料来源——
           // 只存润色后文本的话，模型跑偏了也无从复盘、换 prompt 无从回归验证。
@@ -74,7 +78,7 @@ export function buildVoiceRoutes(deps: VoiceRouteDeps): Hono {
         }
         catch (e) { logger.warn({ err: (e as Error).message }, "voice persist failed"); }
       }
-      logger.info({ bytes: bytes.byteLength, uid, cleaned: d.cleaned, degraded: d.degraded, ...d.t }, "voice done");
+      logger.info({ bytes: bytes.byteLength, uid, probe: isProbe, cleaned: d.cleaned, degraded: d.degraded, ...d.t }, "voice done");
     };
 
     const piped = pipeIntakeSse(upstream.body, onDone);
