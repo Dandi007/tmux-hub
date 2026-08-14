@@ -1,4 +1,5 @@
 # tmux-hub — Claude Code 项目指引
+> canonical agent 入口见 [AGENTS.md](AGENTS.md)；本文件为 Claude Code 专用补充。
 
 详细的仓库结构、开发流程、测试规范见 [AGENTS.md](AGENTS.md)。
 

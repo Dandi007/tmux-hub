@@ -50,7 +50,7 @@
 
 ## 技术实现
 
-> 完整架构（模块地图、数据流、协议、配置全集、测试隔离）见 **[docs/architecture.md](docs/architecture.md)**。以下是速览。
+> 完整架构（模块地图、数据流、协议、配置全集、测试隔离）见 **[docs/specs/001-architecture.md](docs/specs/001-architecture.md)**。以下是速览。
 
 ### 架构总览
 
@@ -365,4 +365,4 @@ bun run test:e2e            # Playwright E2E（desktop / mobile / PWA / key-conf
 
 详细的测试规范和开发流程见 [AGENTS.md](AGENTS.md)。
 
-架构文档见 [`docs/architecture.md`](docs/architecture.md)；历史设计 spec 与实现计划见 [`docs/superpowers/`](docs/superpowers/)。
+架构文档见 [`docs/specs/001-architecture.md`](docs/specs/001-architecture.md)；历史设计 spec 与实现计划见 [`docs/superpowers/`](docs/superpowers/)。
