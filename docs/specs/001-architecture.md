@@ -1,7 +1,7 @@
 # tmux-hub 架构文档
 
 > 本文描述 tmux-hub 的当前架构（截至 2026-07，main @ d0cb3b9）。面向要读懂或修改代码的人。
-> 产品定位、部署与使用方式见 [README.md](../README.md)；开发流程与测试规范见 [AGENTS.md](../AGENTS.md)。
+> 产品定位、部署与使用方式见 [README.md](../../README.md)；开发流程与测试规范见 [AGENTS.md](../../AGENTS.md)。
 
 ---
 
