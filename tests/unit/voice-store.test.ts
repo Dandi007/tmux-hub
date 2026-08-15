@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { Database } from "bun:sqlite";
 import { VoiceStore } from "../../src/server/voice-store";
 
 let dir: string;
@@ -55,6 +56,58 @@ describe("VoiceStore", () => {
     expect(store.findOwnedBlob("u1", "BLOB-B")).toBeNull(); // not u1's
     expect(store.findOwnedBlob("u2", "BLOB-B")).toEqual({ mime: "audio/webm" });
     expect(store.findOwnedBlob("u1", "NONEXISTENT")).toBeNull();
+  });
+
+  test("stores raw_text / card / degraded alongside the polished text", () => {
+    store.add({
+      uid: "u1", text: "整理后的文本", rawText: "呃那个原始的转写", card: "hub-polish",
+      degraded: null, audioBlobId: "B1", mime: "audio/mp4", bytes: 1,
+    });
+    expect(store.listByUid("u1")[0]).toMatchObject({
+      text: "整理后的文本", raw_text: "呃那个原始的转写", card: "hub-polish", degraded: null,
+    });
+  });
+
+  test("degraded rows record why the polish was rolled back", () => {
+    store.add({
+      uid: "u1", text: "原文", rawText: "原文", card: "hub-polish",
+      degraded: "guard_expanded", audioBlobId: "B1", mime: "audio/mp4", bytes: 1,
+    });
+    expect(store.listByUid("u1")[0].degraded).toBe("guard_expanded");
+  });
+
+  test("new columns default to null (back-compat with pre-migration callers)", () => {
+    store.add({ uid: "u1", text: "只有文本", audioBlobId: null, mime: null, bytes: null });
+    expect(store.listByUid("u1")[0]).toMatchObject({ raw_text: null, card: null, degraded: null });
+  });
+
+  test("migrates an existing pre-migration table without losing rows", () => {
+    const path = join(dir, "legacy.db");
+    // 复刻迁移前的建表语句 + 一行老数据。
+    const legacy = new Database(path);
+    legacy.run(`
+      CREATE TABLE voice_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uid TEXT NOT NULL,
+        text TEXT NOT NULL,
+        audio_blob_id TEXT,
+        mime TEXT,
+        bytes INTEGER,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    legacy.run("INSERT INTO voice_log (uid, text, audio_blob_id, mime, bytes) VALUES ('u1','老记录','B0','audio/mp4',9)");
+    legacy.close();
+
+    const migrated = new VoiceStore(path);
+    const rows = migrated.listByUid("u1");
+    expect(rows.length).toBe(1);
+    expect(rows[0]).toMatchObject({ text: "老记录", raw_text: null, card: null, degraded: null });
+    // 迁移幂等：再开一次不该抛（ALTER TABLE 不能重复执行）。
+    migrated.close();
+    const again = new VoiceStore(path);
+    expect(again.listByUid("u1").length).toBe(1);
+    again.close();
   });
 
   test("persists across reopen (same db file)", () => {

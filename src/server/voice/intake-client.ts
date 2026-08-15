@@ -5,6 +5,11 @@ export interface IntakeDone {
   raw_text: string;
   audio_blob_id: string;
   t: { transcribeMs: number; cleanMs: number; totalMs: number };
+  // 下面两个字段由 voice-intake 新增（老版本不发，故可选）：
+  // cleaned=false 表示 text 就是 ASR 原文；degraded 说明为何回退
+  // （cc-switch 失败，或守卫判定模型在作答而非整理）。
+  cleaned?: boolean;
+  degraded?: string;
 }
 
 export interface IntakeClientDeps { intakeBase: string; fetchFn?: typeof fetch }

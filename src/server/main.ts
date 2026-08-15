@@ -12,7 +12,7 @@ import { tmux } from "./tmux-cmd";
 import { bootstrapTmuxHooks } from "./tmux-bootstrap";
 import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS, IMAGE_DIR, MAX_IMAGE_BYTES, expandHome, SUGGEST_ENABLED, SUGGEST_ENDPOINT, SUGGEST_MODEL, SUGGEST_CAPTURE_LINES, SUGGEST_TIMEOUT_MS, SUGGEST_PROTOCOL, SUGGEST_HISTORY_ENABLED, SUGGEST_HISTORY_PATH, SUGGEST_HISTORY_TOP, VOICE_ENABLED, BLOB_BASE, INTAKE_BASE, UPLOAD_BROKER_ENABLED, UPLOAD_BROKER_BASE, UPLOAD_BROKER_NS, UPLOAD_BROKER_TOKEN } from "./config";
 import { buildSuggestRoutes } from "./suggest-routes";
-import { buildVoiceRoutes } from "./voice-routes";
+import { buildVoiceRoutes, VOICE_CARD } from "./voice-routes";
 import { VoiceStore } from "./voice-store";
 import { blobIdToHex } from "./voice/transcribe";
 import { fetchIntakeSse } from "./voice/intake-client";
@@ -191,7 +191,7 @@ app.route("/", buildSuggestRoutes({
 const voiceStore = VOICE_ENABLED ? new VoiceStore() : null;
 app.route("/", buildVoiceRoutes({
   enabled: VOICE_ENABLED,
-  intake: (bytes) => fetchIntakeSse(bytes, "hub-polish", { intakeBase: INTAKE_BASE }),
+  intake: (bytes) => fetchIntakeSse(bytes, VOICE_CARD, { intakeBase: INTAKE_BASE }),
   store: voiceStore,
   fetchBlob: (blobId) => fetch(`${BLOB_BASE}/blob/${encodeURIComponent(blobIdToHex(blobId))}`),
 }));
