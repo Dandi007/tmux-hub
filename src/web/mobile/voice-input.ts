@@ -142,5 +142,8 @@ export function renderVoiceButton(deps: VoiceDeps): HTMLButtonElement {
   btn.addEventListener("pointerdown", (e) => { e.preventDefault(); tDown = performance.now(); btn.setPointerCapture?.(e.pointerId); void startRec(); });
   btn.addEventListener("pointerup", (e) => { e.preventDefault(); stopRec(); });
   btn.addEventListener("pointercancel", () => stopRec());
+  // 长按抑制：拦截系统呼出的 contextmenu（选中/复制/分享菜单），pointerdown 的
+  // preventDefault 拦不住这个独立手势，必须单独 listen。
+  btn.addEventListener("contextmenu", (e) => e.preventDefault());
   return btn;
 }
