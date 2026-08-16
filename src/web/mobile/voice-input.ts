@@ -142,5 +142,7 @@ export function renderVoiceButton(deps: VoiceDeps): HTMLButtonElement {
   btn.addEventListener("pointerdown", (e) => { e.preventDefault(); tDown = performance.now(); btn.setPointerCapture?.(e.pointerId); void startRec(); });
   btn.addEventListener("pointerup", (e) => { e.preventDefault(); stopRec(); });
   btn.addEventListener("pointercancel", () => stopRec());
+  // 长按会弹出系统菜单（选中/复制/分享），preventDefault on pointerdown 拦不住，需单独抑制。
+  btn.addEventListener("contextmenu", (e) => e.preventDefault());
   return btn;
 }
