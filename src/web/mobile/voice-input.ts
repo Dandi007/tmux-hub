@@ -142,5 +142,7 @@ export function renderVoiceButton(deps: VoiceDeps): HTMLButtonElement {
   btn.addEventListener("pointerdown", (e) => { e.preventDefault(); tDown = performance.now(); btn.setPointerCapture?.(e.pointerId); void startRec(); });
   btn.addEventListener("pointerup", (e) => { e.preventDefault(); stopRec(); });
   btn.addEventListener("pointercancel", () => stopRec());
+  // 移动端长按在部分浏览器走 contextmenu 路径，抑制原生长按菜单/文字选择。
+  btn.addEventListener("contextmenu", (e) => e.preventDefault());
   return btn;
 }
