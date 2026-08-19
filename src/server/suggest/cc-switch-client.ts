@@ -16,6 +16,8 @@ export type CcSwitchConfig = {
   model: string;
   timeoutMs: number;
   protocol?: SuggestProtocol;
+  // Bearer token（New API 网关 15722 必需；cc-switch 15721 无认证，留空即可）。
+  token?: string;
   fetchImpl?: FetchLike;
 };
 
@@ -42,6 +44,8 @@ export function parseResponsesSse(body: string): string {
 export function makeCcSwitchCaller(cfg: CcSwitchConfig): ModelCaller {
   const doFetch: FetchLike = cfg.fetchImpl ?? fetch;
   const protocol: SuggestProtocol = cfg.protocol ?? "chat";
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (cfg.token) headers.authorization = `Bearer ${cfg.token}`;
   return async (messages) => {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), cfg.timeoutMs);
@@ -49,7 +53,7 @@ export function makeCcSwitchCaller(cfg: CcSwitchConfig): ModelCaller {
       if (protocol === "responses") {
         const res = await doFetch(cfg.endpoint, {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers,
           body: JSON.stringify({
             model: cfg.model,
             input: messages.map((m) => ({
@@ -68,7 +72,7 @@ export function makeCcSwitchCaller(cfg: CcSwitchConfig): ModelCaller {
 
       const res = await doFetch(cfg.endpoint, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers,
         body: JSON.stringify({ model: cfg.model, messages, temperature: 0, stream: false }),
         signal: ctrl.signal,
       });
