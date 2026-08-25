@@ -49,7 +49,7 @@ PWA 与桌面网页是同一份代码：装到桌面上就是 `desktop-view`，�
 ```text
 ┌────────────────────────────────────┐
 │  录音中 / 转写中… / 整理中…          │ ← 语音状态条（独占一行，默认隐藏）
-│ [📎] [ 输入... ] [🎤] [🎙]           │ ← 桌面输入栏
+│ [📎] [ 输入... ] [🎤] [🕘]           │ ← 桌面输入栏
 └────────────────────────────────────┘
 ```
 
@@ -61,14 +61,14 @@ PWA 与桌面网页是同一份代码：装到桌面上就是 `desktop-view`，�
 
 ### 3.4 语音历史
 
-🎙 按钮调用现有 `openVoiceHistory()`，overlay 样式（`.voice-history*`）已在 `style.css` 中且非移动端限定，直接可用。
+🕘 按钮调用现有 `openVoiceHistory()`（历史入口刻意不用话筒类图标——与录音的 🎤 并排会变成两个话筒），overlay 样式（`.voice-history*`）已在 `style.css` 中且非移动端限定，直接可用。
 
 ## §4 影响面
 
 | 文件 | 改动 |
 |---|---|
 | `src/web/mobile/voice-input.ts` | hold → toggle；取消文案；移除 `pointerup` / `pointercancel` / `setPointerCapture` |
-| `src/web/desktop/desktop-view.ts` | 装配 🎤 / 🎙 / 状态条 |
+| `src/web/desktop/desktop-view.ts` | 装配 🎤 / 🕘 / 状态条 |
 | `src/web/style.css` | 新增 `.desktop-input-bar__voice-status`；按钮补 `cursor: pointer` |
 | `tests/unit/voice-input-race.test.ts` | 竞态用例改用 toggle 手势表达（意图不变），补「按一下开始、再按一下结束」用例 |
 

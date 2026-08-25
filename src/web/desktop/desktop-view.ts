@@ -215,13 +215,14 @@ export function renderDesktop(root: HTMLElement): void {
     onStatus: setVoiceStatus,
   });
 
-  // 🎙 我的语音历史（文本 + 原始音频回放）。
+  // 🕘 我的语音历史（文本 + 原始音频回放）。图标不能再用 🎙：它和录音的 🎤 并排时
+  // 就是两个话筒，谁是「录」谁是「历史」全靠猜。
   const voiceHistoryBtn = document.createElement("button");
   voiceHistoryBtn.type = "button";
   voiceHistoryBtn.className = "input-bar__attach";
   voiceHistoryBtn.setAttribute("aria-label", "我的语音历史");
   voiceHistoryBtn.title = "我的语音历史";
-  voiceHistoryBtn.textContent = "🎙";
+  voiceHistoryBtn.textContent = "🕘";
   voiceHistoryBtn.addEventListener("click", () => openVoiceHistory());
   inputBar.appendChild(voiceHistoryBtn);
 

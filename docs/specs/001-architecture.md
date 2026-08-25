@@ -150,7 +150,7 @@ src/
 
 ### 7.3 Desktop / Mobile 视图
 
-- **desktop**：`tab-bar`（session 标签 + cc-status 图标 + 右键菜单）+ `terminal-pool`（每 session 一个 slot，仅一个 active，其余保持连接便于秒切）+ 底部输入栏（📎 图片文件、textarea、🎤 语音、🎙 语音历史，Enter 发送）；快捷键 Ctrl/Cmd+T 新建、+W 关闭、+1-9 直达、+Tab/+Shift+Tab 循环；支持直接粘贴剪贴板图片上传（textarea 与 root 两层 paste 监听）。
+- **desktop**：`tab-bar`（session 标签 + cc-status 图标 + 右键菜单）+ `terminal-pool`（每 session 一个 slot，仅一个 active，其余保持连接便于秒切）+ 底部输入栏（📎 图片文件、textarea、🎤 语音、🕘 语音历史，Enter 发送）；快捷键 Ctrl/Cmd+T 新建、+W 关闭、+1-9 直达、+Tab/+Shift+Tab 循环；支持直接粘贴剪贴板图片上传（textarea 与 root 两层 paste 监听）。
 - **mobile**：只读终端 + 独立输入 pill（📎 图片文件、textarea、🎤 语音、↑ 发送）+ special-keys-bar（Esc/Tab/^C/方向键）；session 切换走串行化状态机防竞态；wake-lock 保活；ime-guard 防中文输入法 compositionend 后的 phantom Enter。图片仅支持文件选择，无粘贴。
 - **cc-status**（cc = Claude Code，`web/shared/cc-status.ts`）：从 pane_title（应用经 OSC 转义序列设置的窗口动态标题）识别 Claude Code / Codex agent 状态——✳ 为 idle（💬 待输入）、Braille spinner 为 working（⚡），显示在 tab / picker 上，一眼看出哪个 agent 在等人。
 
