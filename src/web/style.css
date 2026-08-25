@@ -896,6 +896,8 @@ button.is-danger:hover { filter: brightness(1.15); }
 }
 .input-bar__attach:active,
 .input-bar__mic:active { background: var(--color-surface-hi); }
+.input-bar__attach,
+.input-bar__mic { cursor: pointer; }
 .input-bar__mic.rec { background: #e5484d; color: #fff; }
 /* 移动端长按麦克风不触发原生文字选择/放大镜（含内部图标元素） */
 .input-bar__mic,
@@ -945,6 +947,17 @@ button.is-danger:hover { filter: brightness(1.15); }
 }
 .input-bar__send:active { background: #1d4ed8; }
 .desktop-input-bar { padding-bottom: var(--space-1); }
+/* 桌面语音状态条：容器是 flex-wrap，100% basis 让它独占输入栏首行；隐藏时不占位。 */
+.desktop-input-bar__voice-status {
+  flex: 1 0 100%;
+  min-width: 0;
+  padding: 0 var(--space-2) var(--space-1);
+  font-size: 12px;
+  color: var(--color-text-mute);
+}
+.desktop-input-bar__voice-status[hidden] { display: none; }
+.desktop-input-bar__voice-status.is-live { color: var(--color-text); }
+.desktop-input-bar__voice-status.is-error { color: var(--color-danger); }
 
 /* Collapsible keys panel */
 .mobile-keys-panel {

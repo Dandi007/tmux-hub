@@ -1,6 +1,6 @@
-// 🎤 按钮的按下/松手竞态。真实症状：点一下经常没反应，要连点好几次才录上。
-// 根因是 getUserMedia 异步 —— 松手可能发生在开流返回之前，那次 stop 落空，
-// 录音却在松手后才启动，于是麦克风一直开着、状态卡死。
+// 🎤 按钮是「按一下开始、再按一下结束」。竞态出在 getUserMedia 异步上：
+// 取消可能发生在开流返回之前，那次 stop 落空，录音却在取消后才启动，
+// 于是麦克风一直开着、状态卡死 —— 症状是点了没反应，要连点好几次才录上。
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { renderVoiceButton, type VoiceStatus } from "../../src/web/mobile/voice-input";
 
@@ -64,12 +64,12 @@ afterEach(() => {
 });
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
-const last = () => statuses[statuses.length - 1];
+const last = () => statuses[statuses.length - 1]!;
 
-describe("语音按钮 · 按下/松手竞态", () => {
-  test("点一下就松手（开流尚未返回）→ 放弃本次，不留下在录的麦克风", async () => {
+describe("语音按钮 · 点按开始/结束", () => {
+  test("开流尚未返回时再点一次 → 取消本次，不留下在录的麦克风", async () => {
     btn.fire("pointerdown");
-    btn.fire("pointerup");          // 松手早于 getUserMedia resolve
+    btn.fire("pointerdown");        // 取消早于 getUserMedia resolve
     deferredResolve!(fakeStream()); // 授权这时才回来
     await settle();
 
@@ -77,12 +77,12 @@ describe("语音按钮 · 按下/松手竞态", () => {
     expect(recorders.length).toBe(0);
     expect(stoppedTracks).toBe(1);  // 拿到的流当场释放，不泄漏麦克风
     expect(last().s).toBe("idle");
-    expect(last().detail).toContain("按住说话");
+    expect(last().detail).toContain("已取消");
   });
 
-  test("上一条的关键后果：紧接着正常按住仍能录（不会卡死）", async () => {
+  test("上一条的关键后果：紧接着再点一下仍能录（不会卡死）", async () => {
     btn.fire("pointerdown");
-    btn.fire("pointerup");
+    btn.fire("pointerdown");
     deferredResolve!(fakeStream());
     await settle();
 
@@ -91,41 +91,42 @@ describe("语音按钮 · 按下/松手竞态", () => {
     await settle();
 
     expect(recorders.length).toBe(1);
-    expect(recorders[0].startCalls).toBe(1);
+    expect(recorders[0]!.startCalls).toBe(1);
     expect(last().s).toBe("recording");
   });
 
-  test("正常按住再松手 → 录音起来了，也确实停了", async () => {
+  test("点一下开始、再点一下结束 → 录音起来了，也确实停了", async () => {
     btn.fire("pointerdown");
     deferredResolve!(fakeStream());
     await settle();
     expect(last().s).toBe("recording");
 
-    btn.fire("pointerup");
-    expect(recorders[0].stopCalls).toBe(1);
+    btn.fire("pointerdown");
+    expect(recorders[0]!.stopCalls).toBe(1);
     expect(stoppedTracks).toBe(1); // onstop 里释放麦克风
   });
 
-  test("开流在途时连按两次 → 只开一条流（不重复申请麦克风）", async () => {
+  test("开流在途时连按两次 → 只申请一次麦克风", async () => {
     btn.fire("pointerdown");
     btn.fire("pointerdown");
     expect(openedStreams).toBe(1);
   });
 
-  test("录音中再次按下不重入", async () => {
+  test("录音中再次按下 → 结束本次，而不是再开一条流", async () => {
     btn.fire("pointerdown");
     deferredResolve!(fakeStream());
     await settle();
     btn.fire("pointerdown");
     expect(openedStreams).toBe(1);
     expect(recorders.length).toBe(1);
+    expect(recorders[0]!.stopCalls).toBe(1);
   });
 
   test("录得太短 → 明确提示，而不是静默什么都不发生", async () => {
     btn.fire("pointerdown");
     deferredResolve!(fakeStream());
     await settle();
-    btn.fire("pointerup"); // 没有任何 ondataavailable，blob 为空
+    btn.fire("pointerdown"); // 没有任何 ondataavailable，blob 为空
     await settle();
     expect(last().s).toBe("idle");
     expect(last().detail).toContain("太短");

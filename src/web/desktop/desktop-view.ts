@@ -1,6 +1,8 @@
 import { createTabBar } from "./tab-bar";
 import { createTerminalPool } from "./terminal-pool";
 import { renderImageAttachButton } from "../mobile/image-attach";
+import { renderVoiceButton, type VoiceStatus } from "../mobile/voice-input";
+import { openVoiceHistory } from "../mobile/voice-history";
 import { subscribeEvents } from "../sse-client";
 import type { SessionInfo, ServerEvent, ClientWsMessage } from "@shared/protocol";
 import { isGrammarOk } from "@shared/session-name";
@@ -144,6 +146,48 @@ export function renderDesktop(root: HTMLElement): void {
     }
   });
 
+  // 语音状态条：flex-wrap 容器内 flex-basis:100% → 独占输入栏首行，隐藏时不占位。
+  const voiceStatusRow = document.createElement("div");
+  voiceStatusRow.className = "desktop-input-bar__voice-status";
+  voiceStatusRow.hidden = true;
+  voiceStatusRow.setAttribute("role", "status");
+  voiceStatusRow.setAttribute("aria-live", "polite");
+  voiceStatusRow.setAttribute("aria-atomic", "true");
+  inputBar.appendChild(voiceStatusRow);
+
+  let voiceStatusTimer: number | null = null;
+
+  const showVoiceStatus = (text: string, cls: string, liveMode: "polite" | "assertive" = "polite"): void => {
+    voiceStatusRow.className = "desktop-input-bar__voice-status" + (cls ? ` ${cls}` : "");
+    voiceStatusRow.setAttribute("aria-live", liveMode);
+    voiceStatusRow.textContent = text;
+    voiceStatusRow.hidden = false;
+  };
+
+  const hideVoiceStatus = (): void => {
+    voiceStatusRow.hidden = true;
+    voiceStatusRow.textContent = "";
+  };
+
+  // 状态文案与移动端 header 状态条同语义；终态延时消失，运行态常驻。
+  const setVoiceStatus = (s: VoiceStatus, detail = ""): void => {
+    if (voiceStatusTimer !== null) { window.clearTimeout(voiceStatusTimer); voiceStatusTimer = null; }
+    const autoHide = (ms: number): void => {
+      voiceStatusTimer = window.setTimeout(() => { hideVoiceStatus(); voiceStatusTimer = null; }, ms);
+    };
+    if (s === "recording") { showVoiceStatus(detail ? `🎤 ${detail}` : "🎤 录音中，再点一次结束", "is-live"); return; }
+    if (s === "transcribing") { showVoiceStatus("📝 转写中…", "is-live"); return; }
+    if (s === "cleaning") { showVoiceStatus("✨ 整理中…", "is-live"); return; }
+    if (s === "idle") {
+      if (!detail) { hideVoiceStatus(); return; }
+      showVoiceStatus(detail, "");
+      autoHide(2600);
+      return;
+    }
+    showVoiceStatus(detail || "⚠️ 出错了", "is-error", "assertive");
+    autoHide(3200);
+  };
+
   const attachBtn = renderImageAttachButton({
     parent: inputBar,
     getSession: () => openedName,
@@ -152,6 +196,34 @@ export function renderDesktop(root: HTMLElement): void {
   });
   attachBtn.className = "input-bar__attach";
   inputBar.appendChild(ta);
+
+  // 🎤 语音：转写+整理后落框待复核，不自动发送（与移动端同一语义）。
+  renderVoiceButton({
+    parent: inputBar,
+    onText: (text) => {
+      // 在光标处插入而非覆盖：连说多段会累加，不会冲掉前一段（沿用 📎 上传的插入写法）。
+      const start = ta.selectionStart ?? ta.value.length;
+      const end = ta.selectionEnd ?? ta.value.length;
+      const before = ta.value.slice(0, start);
+      const after = ta.value.slice(end);
+      const ins = (before && !/\s$/.test(before) ? " " : "") + text;
+      ta.value = before + ins + after;
+      ta.focus();
+      const caret = before.length + ins.length;
+      ta.setSelectionRange(caret, caret);
+    },
+    onStatus: setVoiceStatus,
+  });
+
+  // 🎙 我的语音历史（文本 + 原始音频回放）。
+  const voiceHistoryBtn = document.createElement("button");
+  voiceHistoryBtn.type = "button";
+  voiceHistoryBtn.className = "input-bar__attach";
+  voiceHistoryBtn.setAttribute("aria-label", "我的语音历史");
+  voiceHistoryBtn.title = "我的语音历史";
+  voiceHistoryBtn.textContent = "🎙";
+  voiceHistoryBtn.addEventListener("click", () => openVoiceHistory());
+  inputBar.appendChild(voiceHistoryBtn);
 
   // Paste file in textarea → upload → insert path into textarea
   ta.addEventListener("paste", (e) => {
