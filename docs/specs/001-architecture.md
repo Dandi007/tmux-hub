@@ -150,7 +150,7 @@ src/
 
 ### 7.3 Desktop / Mobile 视图
 
-- **desktop**：`tab-bar`（session 标签 + cc-status 图标 + 右键菜单）+ `terminal-pool`（每 session 一个 slot，仅一个 active，其余保持连接便于秒切）；快捷键 Ctrl/Cmd+T 新建、+W 关闭、+1-9 直达、+Tab/+Shift+Tab 循环；支持直接粘贴剪贴板图片上传（textarea 与 root 两层 paste 监听）。
+- **desktop**：`tab-bar`（session 标签 + cc-status 图标 + 右键菜单）+ `terminal-pool`（每 session 一个 slot，仅一个 active，其余保持连接便于秒切）+ 底部输入栏（📎 图片文件、textarea、🎤 语音、🎙 语音历史，Enter 发送）；快捷键 Ctrl/Cmd+T 新建、+W 关闭、+1-9 直达、+Tab/+Shift+Tab 循环；支持直接粘贴剪贴板图片上传（textarea 与 root 两层 paste 监听）。
 - **mobile**：只读终端 + 独立输入 pill（📎 图片文件、textarea、🎤 语音、↑ 发送）+ special-keys-bar（Esc/Tab/^C/方向键）；session 切换走串行化状态机防竞态；wake-lock 保活；ime-guard 防中文输入法 compositionend 后的 phantom Enter。图片仅支持文件选择，无粘贴。
 - **cc-status**（cc = Claude Code，`web/shared/cc-status.ts`）：从 pane_title（应用经 OSC 转义序列设置的窗口动态标题）识别 Claude Code / Codex agent 状态——✳ 为 idle（💬 待输入）、Braille spinner 为 working（⚡），显示在 tab / picker 上，一眼看出哪个 agent 在等人。
 
@@ -160,7 +160,7 @@ src/
 - **版本更新**：SW 每 60s 检测更新，发现新版本自动 skipWaiting + reload，解决 PWA 常驻窗口永不刷新的问题。
 - **快捷方式**：Dock/桌面 shortcuts（新会话 / 会话列表）经 `?action=` URL 参数路由。
 
-## 8 语音链路（mobile 🎤）
+## 8 语音链路（🎤 · mobile / desktop / PWA 同一实现）
 
 > 语音与 suggest（§9）两条链路依赖本机另行部署的配套服务（不随本仓库分发）：**voice-intake**（语音编排，:8099）、**ASR**（转写，:8095）、**mp-blob**（音频 blob 存储，:8097）、**cc-switch**（LLM 网关，:15721）。未部署时保持 `TMUX_HUB_VOICE` / `TMUX_HUB_SUGGEST` 关闭即可，不影响核心功能。
 
@@ -171,7 +171,9 @@ MediaRecorder(audio/mp4|webm) → POST /api/voice (X-Hub-Secret + identity)
   → server 旁路拦截 done 事件 → voice.db 落库（uid, text, audio_blob_id）
 ```
 
-转写结果**插入 textarea 不自动发送**（人确认后再发）。历史回看 `GET /api/voice/history`（按 identity 隔离），音频回放经 `GET /api/voice/audio/:id` 代理 mp-blob(:8097)，带 blob 归属校验防越权。整条链路 loopback-only，`TMUX_HUB_VOICE=1` 开关。
+🎤 交互为**按一下开始录音、再按一下结束并转写**（两端同一套手势；开流在途时再按一次 = 取消本次）。转写结果**插入 textarea 不自动发送**（人确认后再发）。
+
+桌面与 PWA 走的是同一份 `renderVoiceButton()`：PWA 装到桌面即 desktop 视图、装到手机即 mobile 视图，SW 对 `/api/` 不拦截，故语音无需任何 PWA 侧专门改动。历史回看 `GET /api/voice/history`（按 identity 隔离），音频回放经 `GET /api/voice/audio/:id` 代理 mp-blob(:8097)，带 blob 归属校验防越权。整条链路 loopback-only，`TMUX_HUB_VOICE=1` 开关。
 
 ## 9 Suggest 链路（NL → shell 命令）
 

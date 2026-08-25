@@ -361,3 +361,91 @@ test.describe("desktop tab-bar", () => {
     ctx.tmuxE2E(["kill-session", "-t", name]);
   });
 });
+
+// 桌面语音输入：按一下开始、再按一下结束 → 转写文本落进输入框待复核。
+// 麦克风与 /api/voice 都在浏览器侧替身化 —— e2e 机器没有真麦克风，也不该真的
+// 打到 voice-intake；但按钮、状态条、文本落位这条用户可感知的链路是真的。
+async function stubMicrophone(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    class FakeRecorder {
+      static isTypeSupported(): boolean { return true; }
+      state = "inactive";
+      ondataavailable: ((e: { data: Blob }) => void) | null = null;
+      onstop: (() => void) | null = null;
+      start(): void { this.state = "recording"; }
+      stop(): void {
+        this.state = "inactive";
+        this.ondataavailable?.({ data: new Blob([new Uint8Array(4096)], { type: "audio/webm" }) });
+        this.onstop?.();
+      }
+    }
+    (window as unknown as { MediaRecorder: unknown }).MediaRecorder = FakeRecorder;
+    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
+      configurable: true,
+      value: async () => ({ getTracks: () => [{ stop() {} }] }),
+    });
+  });
+}
+
+test.describe("desktop voice input", () => {
+  test("mic click starts recording, second click drops transcript into the input box", async ({ page }) => {
+    await stubMicrophone(page);
+    await page.route("**/api/voice", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'event: transcribing\ndata: {}\n\nevent: done\ndata: {"text":"帮我看一下这个报错"}\n\n',
+      }),
+    );
+
+    await openApp(page);
+
+    const mic = page.locator(".desktop-input-bar .input-bar__mic");
+    const status = page.locator(".desktop-input-bar__voice-status");
+    await expect(mic).toBeVisible();
+
+    await mic.click();
+    await expect(mic).toHaveClass(/rec/);
+    await expect(status).toBeVisible();
+    await expect(status).toHaveText(/录音中/);
+
+    // 后端对过短录音直接 400，前端也自带 300ms 下限 —— 说满一句话再结束。
+    await page.waitForTimeout(400);
+    await mic.click();
+
+    const ta = page.locator(".desktop-input-bar .input-bar__textarea");
+    await expect(ta).toHaveValue("帮我看一下这个报错", { timeout: 10_000 });
+    await expect(mic).not.toHaveClass(/rec/);
+  });
+
+  test("voice failure surfaces in the status row instead of failing silently", async ({ page }) => {
+    await stubMicrophone(page);
+    await page.route("**/api/voice", (route) => route.fulfill({ status: 501, body: "voice disabled" }));
+
+    await openApp(page);
+
+    const mic = page.locator(".desktop-input-bar .input-bar__mic");
+    const status = page.locator(".desktop-input-bar__voice-status");
+
+    await mic.click();
+    await expect(mic).toHaveClass(/rec/);
+    await page.waitForTimeout(400);
+    await mic.click();
+
+    await expect(status).toHaveText(/语音未启用/, { timeout: 10_000 });
+    await expect(status).toHaveAttribute("aria-live", "assertive");
+    await expect(page.locator(".desktop-input-bar .input-bar__textarea")).toHaveValue("");
+  });
+
+  test("voice history button opens the history panel", async ({ page }) => {
+    await page.route("**/api/voice/history", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: '{"items":[]}' }),
+    );
+
+    await openApp(page);
+
+    await page.getByRole("button", { name: "我的语音历史" }).click();
+    await expect(page.locator("#voice-history-overlay")).toBeVisible();
+    await expect(page.locator(".voice-history__list")).toHaveText(/还没有语音记录/);
+  });
+});
