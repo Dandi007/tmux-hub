@@ -39,6 +39,27 @@ describe("makeCcSwitchCaller", () => {
     expect(seen.model).toBe("m");
     expect(seen.messages[0].content).toBe("hi");
   });
+  test("配 token → 带 Bearer 头；不配 → 无 authorization 头", async () => {
+    let seenHeaders: Record<string, string> = {};
+    const fetchImpl: FetchLike = async (_url, init) => {
+      seenHeaders = (init as RequestInit).headers as Record<string, string>;
+      return okResponse("ok");
+    };
+    const withToken = makeCcSwitchCaller({
+      endpoint: "http://x/v1/chat/completions", model: "m", timeoutMs: 1000,
+      token: "sk-test", fetchImpl,
+    });
+    await withToken([{ role: "user", content: "hi" }]);
+    expect(seenHeaders.authorization).toBe("Bearer sk-test");
+
+    const noToken = makeCcSwitchCaller({
+      endpoint: "http://x/v1/chat/completions", model: "m", timeoutMs: 1000,
+      fetchImpl,
+    });
+    await noToken([{ role: "user", content: "hi" }]);
+    expect(seenHeaders.authorization).toBeUndefined();
+  });
+
   test("非 2xx → 抛错", async () => {
     const fetchImpl: FetchLike = async () => new Response("nope", { status: 500 });
     const call = makeCcSwitchCaller({

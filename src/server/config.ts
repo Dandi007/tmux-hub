@@ -139,6 +139,8 @@ export const SUGGEST_MODEL = process.env.TMUX_HUB_SUGGEST_MODEL ?? "";
 // 用 gpt/* 时三者须一致：PROTOCOL=responses + ENDPOINT=.../v1/responses + MODEL=gpt/<model>。
 export const SUGGEST_PROTOCOL: "chat" | "responses" =
   process.env.TMUX_HUB_SUGGEST_PROTOCOL === "responses" ? "responses" : "chat";
+// Bearer token：New API 网关 (15722) 必需；cc-switch (15721) 无认证可留空。
+export const SUGGEST_TOKEN = process.env.TMUX_HUB_SUGGEST_TOKEN ?? "";
 // 喂给模型的 capture-pane 尾行数。
 export const SUGGEST_CAPTURE_LINES = parsePositiveInt(
   process.env.TMUX_HUB_SUGGEST_CAPTURE_LINES, 40, "TMUX_HUB_SUGGEST_CAPTURE_LINES",
