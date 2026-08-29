@@ -1,0 +1,13 @@
+{
+ "development_id": "dev-fg-8351de554d39",
+ "generation": 1,
+ "acceptance_commands": [
+  [
+   "bash",
+   "-lc",
+   "bun install && bun test tests/unit/metrics.test.ts"
+  ]
+ ],
+ "setup_commands": [],
+ "acceptance_env": {}
+}
