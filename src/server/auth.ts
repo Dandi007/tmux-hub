@@ -27,6 +27,7 @@ export function _resetSecretForTest(): void {
 // edge in production, so this is not weakening the trust boundary.
 const PUBLIC_PATHS = new Set([
   "/system/health",
+  "/metrics",
   "/manifest.webmanifest",
   "/sw.js",
 ]);
