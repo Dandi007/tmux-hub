@@ -1,0 +1,17 @@
+{
+ "development_id": "dev-fg-8351de554d39",
+ "attempt": 1,
+ "passed": true,
+ "results": [
+  {
+   "command": [
+    "bash",
+    "-lc",
+    "bun install && bun test tests/unit/metrics.test.ts"
+   ],
+   "exit_code": 0,
+   "stdout_tail": "bun install v1.3.14 (0d9b296a)\n\nChecked 389 installs across 443 packages (no changes) [109.00ms]\nbun test v1.3.14 (0d9b296a)\n",
+   "stderr_tail": "\ntests/unit/metrics.test.ts:\n{\"level\":30,\"time\":\"2026-08-29T12:08:34.686Z\",\"name\":\"tmux-hub\",\"module\":\"config\",\"templates\":[],\"msg\":\"templates loaded\"}\n{\"level\":30,\"time\":\"2026-08-29T12:08:34.688Z\",\"name\":\"tmux-hub\",\"module\":\"managed-db\",\"path\":\"/tmp/tmux-hub-metrics-OKLN1G/managed-sessions.db\",\"msg\":\"managed sessions db opened\"}\n{\"level\":50,\"time\":\"2026-08-29T12:08:34.705Z\",\"name\":\"tmux-hub\",\"module\":\"registry\",\"msg\":\"tmux server unreachable\"}\n{\"level\":40,\"time\":\"2026-08-29T12:08:34.710Z\",\"name\":\"tmux-hub\",\"module\":\"main\",\"err\":{\"type\":\"Error\",\"message\":\"tmux set-hook -g client-attached resize-window -A failed (1): error connecting to /tmp/tmux-1000//tmp/tmux-hub-metrics-OKLN1G/test.sock (No such file or directory)\",\"stack\":\"Error: tmux set-hook -g client-attached resize-window -A failed (1): error connecting to /tmp/tmux-1000//tmp/tmux-hub-metrics-OKLN1G/test.sock (No such file or directory)\\n    at tmuxOk (/data/worktrees/tmux-hub-h0-dev_fleet_tmuxhub_metrics_01_20260829/src/server/tmux-cmd.ts:30:15)\\n    at async bootstrapTmuxHooks (/data/worktrees/tmux-hub-h0-dev_fleet_tmuxhub_metrics_01_20260829/src/server/tmux-bootstrap.ts:13:9)\\n    at processTicksAndRejections (native:7:39)\"},\"msg\":\"bootstrap tmux hooks failed\"}\n{\"level\":30,\"time\":\"2026-08-29T12:08:34.712Z\",\"name\":\"tmux-hub\",\"module\":\"main\",\"host\":\"127.0.0.1\",\"port\":31520,\"staticDir\":\"/data/worktrees/tmux-hub-h0-dev_fleet_tmuxhub_metrics_01_20260829/dist/web\",\"staticServing\":false,\"imageDir\":\"/home/uther/Pictures/tmux-hub\",\"logFile\":\"/tmp/tmux-hub-test-Nju7XT/logs/server.log\",\"msg\":\"server starting\"}\n(pass) GET /metrics > 200 text/plain body contains tmux_hub_up 1 (public, no auth header) [4.30ms]\n(pass) GET /metrics > regression: GET /system/health still reachable [0.26ms]\n\n 2 pass\n 0 fail\n 4 expect() calls\nRan 2 tests across 1 file. [204.00ms]\n"
+  }
+ ]
+}
