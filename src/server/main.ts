@@ -101,9 +101,13 @@ for (const s of registry.snapshot()) {
   });
 }
 
-const app = new Hono();
+export const app = new Hono();
 app.use("*", authGate);
 
+// Process-local /metrics for loopback Prometheus scraping: public read-only,
+// zero dependencies, never touches the tmux registry/session data plane, and
+// never 5xxes on data-plane failures — process aliveness is Prometheus `up`.
+app.get("/metrics", (c) => c.text("tmux_hub_up 1", { headers: { "content-type": "text/plain; charset=utf-8" } }));
 app.get("/system/health", (c) =>
   c.json({ ok: true, tmux: registry.isServerReachable(), uptime: process.uptime() }),
 );
@@ -267,6 +271,10 @@ logger.info({
   logFile: LOG_FILE,
 }, "server starting");
 
+// Only bind the HTTP/WS server when run directly (`bun run src/server/main.ts`).
+// When imported as a module (tests, other entrypoints) Bun.serve stays dormant —
+// module consumers interact with the exported `app` instead.
+if (import.meta.main) {
 Bun.serve({
   hostname: HUB_HOST,
   port: HUB_PORT,
@@ -446,3 +454,4 @@ Bun.serve({
     },
   },
 });
+}
