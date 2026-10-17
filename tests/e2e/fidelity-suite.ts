@@ -9,19 +9,14 @@
 // 实测）。它只为秒级回滚而保留，所以不对它跑 oracle。suite 写成函数，以便以后
 // 给别的 project 复用。
 import { writeFileSync } from "node:fs";
-import type { Page, TestType, Expect } from "@playwright/test";
+import type { Page, TestType, Expect, PlaywrightTestArgs, PlaywrightWorkerArgs } from "@playwright/test";
+import type { TerminalProbe } from "../../src/web/terminal";
 import { bindSecret } from "./helpers";
 
 type Ctx = {
   tmuxE2E: (args: string[]) => string;
   createSession: (templateId?: string) => Promise<string>;
 };
-
-type Probe = { state: string; cols: number; rows: number; screen: () => string[] };
-
-declare global {
-  interface Window { __tmuxHubTerms?: Record<string, Probe> }
-}
 
 function normalize(lines: string[]): string[] {
   const out = lines.map((l) => l.replace(/\s+$/, ""));
@@ -31,7 +26,7 @@ function normalize(lines: string[]): string[] {
 
 async function browserView(page: Page, name: string): Promise<{ size: string; lines: string[]; state: string; resyncs: number } | null> {
   return page.evaluate((n) => {
-    const p = window.__tmuxHubTerms?.[n] as unknown as (Probe & { resyncs: number }) | undefined;
+    const p = window.__tmuxHubTerms?.[n];
     if (!p) return null;
     return { size: `${p.cols}x${p.rows}`, lines: p.screen(), state: p.state, resyncs: p.resyncs };
   }, name);
@@ -60,7 +55,7 @@ function writeVimSource(): string {
   return path;
 }
 
-export function defineFidelitySuite(test: TestType<{ ctx: Ctx }, object>, expect: Expect): void {
+export function defineFidelitySuite(test: TestType<PlaywrightTestArgs & { ctx: Ctx }, PlaywrightWorkerArgs>, expect: Expect): void {
   async function expectInSync(page: Page, ctx: Ctx, name: string, why: string): Promise<void> {
     let last = "";
     await expect.poll(async () => {
@@ -93,7 +88,7 @@ export function defineFidelitySuite(test: TestType<{ ctx: Ctx }, object>, expect
     await expect.poll(async () => {
       await page.evaluate((n) => window.__tmuxHub?.openSession?.(n), name);
       return page.evaluate((n) => {
-        const p = window.__tmuxHubTerms?.[n] as unknown as { state: string; visible: boolean } | undefined;
+        const p = window.__tmuxHubTerms?.[n];
         return p ? `${p.state}/${p.visible}` : "missing";
       }, name);
     }, { timeout: 10_000 }).toBe("connected/true");
@@ -117,7 +112,7 @@ export function defineFidelitySuite(test: TestType<{ ctx: Ctx }, object>, expect
       await expectInSync(page, ctx, name, "after streaming");
 
       // Output produced while the socket is down must show up after reconnect.
-      await page.evaluate((n) => (window.__tmuxHubTerms![n] as unknown as { dropSocket: () => void }).dropSocket(), name);
+      await page.evaluate((n) => window.__tmuxHubTerms![n]!.dropSocket(), name);
       await runAndWait(ctx, name, `sh ${writeGenerator("gap", 50)}`, "gap 050");
       await expectInSync(page, ctx, name, "after reconnect");
 
@@ -148,14 +143,14 @@ export function defineFidelitySuite(test: TestType<{ ctx: Ctx }, object>, expect
       await runAndWait(ctx, name, `clear; sh ${writeGenerator("hist", 200)}`, "hist 200");
       await openSession(page, name);
       await expectInSync(page, ctx, name, "before scroll");
-      const resyncs = () => page.evaluate((k) => (window.__tmuxHubTerms![k] as unknown as { resyncs: number }).resyncs, name);
+      const resyncs = () => page.evaluate((k) => window.__tmuxHubTerms![k]!.resyncs, name);
       // Layout settling right after attach can send one more resize (and so a
       // resync whose restore would undo a scroll made before it lands): wait
       // until the count has been stable for a second.
       let prev = -1;
       await expect.poll(async () => { const n = await resyncs(); const stable = n === prev; prev = n; return stable; }, { timeout: 10_000, intervals: [1000] }).toBe(true);
-      await page.evaluate((n) => (window.__tmuxHubTerms![n] as unknown as { scrollLines: (k: number) => void }).scrollLines(-60), name);
-      const lfb = (n: string) => page.evaluate((k) => (window.__tmuxHubTerms![k] as unknown as { linesFromBottom: number }).linesFromBottom, n);
+      await page.evaluate((n) => window.__tmuxHubTerms![n]!.scrollLines(-60), name);
+      const lfb = (n: string) => page.evaluate((k) => window.__tmuxHubTerms![k]!.linesFromBottom, n);
       expect(await lfb(name)).toBe(60);
       const before = await resyncs();
       await page.setViewportSize({ width: 900, height: 600 });
@@ -175,7 +170,7 @@ export function defineFidelitySuite(test: TestType<{ ctx: Ctx }, object>, expect
       await runAndWait(ctx, name, `vim -u NONE -n ${file}`, "vim 行 1 ");
       await expectInSync(page, ctx, name, "vim started while attached");
       ctx.tmuxE2E(["send-keys", "-t", name, "20G", ""]);
-      await page.evaluate((n) => (window.__tmuxHubTerms![n] as unknown as { dropSocket: () => void }).dropSocket(), name);
+      await page.evaluate((n) => window.__tmuxHubTerms![n]!.dropSocket(), name);
       ctx.tmuxE2E(["send-keys", "-t", name, "Gdd", ""]);
       await expectInSync(page, ctx, name, "vim after reconnect");
       ctx.tmuxE2E(["send-keys", "-t", name, ":q!", "Enter"]);
@@ -198,19 +193,19 @@ export function defineFidelitySuite(test: TestType<{ ctx: Ctx }, object>, expect
       // (by design, INV-4) overwritten by the pending restore.
       const reconnect = async (): Promise<void> => {
         const before = await probe<number>("replays");
-        await page.evaluate((n) => (window.__tmuxHubTerms![n] as unknown as { dropSocket: () => void }).dropSocket(), name);
+        await page.evaluate((n) => window.__tmuxHubTerms![n]!.dropSocket(), name);
         await expect.poll(() => probe<number>("replays"), { timeout: 10_000 }).toBeGreaterThan(before);
       };
 
-      await page.evaluate((n) => (window.__tmuxHubTerms![n] as unknown as { scrollLines: (k: number) => void }).scrollLines(-60), name);
+      await page.evaluate((n) => window.__tmuxHubTerms![n]!.scrollLines(-60), name);
       expect(await probe<number>("linesFromBottom")).toBe(60);
       await reconnect();
       await expectInSync(page, ctx, name, "after reconnect (scrolled up)");
       await expect.poll(() => probe<number>("linesFromBottom"), { timeout: 5_000 }).toBe(60);
 
-      await page.evaluate((n) => (window.__tmuxHubTerms![n] as unknown as { scrollLines: (k: number) => void }).scrollLines(60), name);
+      await page.evaluate((n) => window.__tmuxHubTerms![n]!.scrollLines(60), name);
       expect(await probe<number>("linesFromBottom")).toBe(0);
-      await page.evaluate((n) => (window.__tmuxHubTerms![n] as unknown as { dropSocket: () => void }).dropSocket(), name);
+      await page.evaluate((n) => window.__tmuxHubTerms![n]!.dropSocket(), name);
       await runAndWait(ctx, name, `sh ${writeGenerator("rgap", 20)}`, "rgap 020");
       await expectInSync(page, ctx, name, "after reconnect (at bottom, output while down)");
       await expect.poll(() => probe<number>("linesFromBottom"), { timeout: 5_000 }).toBe(0);
@@ -229,7 +224,7 @@ export function defineFidelitySuite(test: TestType<{ ctx: Ctx }, object>, expect
       // snapshot landing during the check would repaint the screen from tmux
       // and mask the bug. Let the post-attach layout resize settle first, and
       // require that no snapshot arrived.
-      const counters = () => page.evaluate((k) => { const p = window.__tmuxHubTerms![k] as unknown as { resyncs: number; replays: number }; return `${p.resyncs}/${p.replays}`; }, name);
+      const counters = () => page.evaluate((k) => { const p = window.__tmuxHubTerms![k]!; return `${p.resyncs}/${p.replays}`; }, name);
       let prev = "";
       await expect.poll(async () => { const c = await counters(); const stable = c === prev; prev = c; return stable; }, { timeout: 10_000, intervals: [1000] }).toBe(true);
       // ⚡ (U+26A1) and 💬 (U+1F4AC) then jump to an absolute column: lands right

@@ -10,6 +10,7 @@ const s = (name: string, activity = 0, attached = 0, windows = 1, cols = 80, row
   cols,
   rows,
   grammar_ok: false,
+  pane_title: "",
 });
 
 describe("diffSessions", () => {
