@@ -15,6 +15,9 @@
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { scrubAmbientHubEnv } from "./scrub-env";
+
+scrubAmbientHubEnv();
 
 const root = mkdtempSync(join(tmpdir(), "tmux-hub-test-"));
 
@@ -39,3 +42,7 @@ for (const [key, value] of Object.entries({
 if (process.env.TMUX_HUB_SOCKET === "tmux-hub") {
   throw new Error("[test-preload] TMUX_HUB_SOCKET is the production socket; aborting test run");
 }
+
+// Snapshot for tests/unit/test-isolation.test.ts: test files mutate process.env
+// in-process, so the isolation check must look at the env as preload left it.
+(globalThis as { __preloadEnv?: Record<string, string | undefined> }).__preloadEnv = { ...process.env };

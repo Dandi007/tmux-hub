@@ -2,6 +2,11 @@ import { defineConfig, devices } from "@playwright/test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { scrubAmbientHubEnv } from "./tests/helpers/scrub-env";
+
+// webServer and workers inherit this process's env: without the scrub, a run
+// from a hub-spawned shell boots the test hub with prod HOST / voice.db / image dir.
+scrubAmbientHubEnv();
 
 const E2E_PORT = "3201";
 const E2E_EMU_PORT = "3202";
