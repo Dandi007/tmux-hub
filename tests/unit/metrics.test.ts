@@ -45,6 +45,23 @@ describe("GET /metrics", () => {
     expect(body).toContain("tmux_hub_up 1");
   });
 
+  test("exposes process and connection gauges", async () => {
+    const body = await (await fetchApp("/metrics")).text();
+    const val = (name: string): number | undefined => {
+      const m = body.match(new RegExp(`^${name} (\\S+)$`, "m"));
+      return m ? Number(m[1]) : undefined;
+    };
+    expect(val("process_resident_memory_bytes")).toBeGreaterThan(0);
+    expect(val("process_heap_used_bytes")).toBeGreaterThan(0);
+    expect(val("process_uptime_seconds")).toBeGreaterThan(0);
+    if (process.platform === "linux") expect(val("process_open_fds")).toBeGreaterThan(0);
+    expect(val("tmux_hub_ws_connections")).toBe(0);
+    expect(val("tmux_hub_sse_clients")).toBe(0);
+    expect(val("tmux_hub_sessions")).toBeGreaterThanOrEqual(0);
+    expect(val("tmux_hub_broadcasters")).toBeGreaterThanOrEqual(0);
+    expect(val("tmux_hub_broadcaster_subscribers")).toBeGreaterThanOrEqual(0);
+  });
+
   test("regression: GET /system/health still reachable", async () => {
     const r = await fetchApp("/system/health");
     expect(r.status).toBe(200);
