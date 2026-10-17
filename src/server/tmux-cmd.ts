@@ -1,4 +1,5 @@
 import { createLogger } from "./logger";
+import { tmuxChildEnv } from "./tmux-env";
 
 const logger = createLogger("tmux-cmd");
 
@@ -14,6 +15,7 @@ export async function tmux(args: string[]): Promise<TmuxResult> {
   const proc = Bun.spawn(["tmux", ...finalArgs], {
     stdout: "pipe",
     stderr: "pipe",
+    env: tmuxChildEnv(),
   });
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
