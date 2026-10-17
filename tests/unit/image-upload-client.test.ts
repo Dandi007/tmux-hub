@@ -1,10 +1,15 @@
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, mock, afterEach } from "bun:test";
 import {
   uploadDirectToHub,
   uploadFileForSession,
   uploadFilesSequential,
   uploadViaBroker,
 } from "../../src/web/upload/image-upload";
+
+// Some cases stub the global fetch (direct-to-storage leg); restore it so the
+// stub does not leak into test files that run later in the same process.
+const realFetch = globalThis.fetch;
+afterEach(() => { globalThis.fetch = realFetch; });
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
