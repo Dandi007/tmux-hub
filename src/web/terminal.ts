@@ -1,5 +1,6 @@
 import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
+import { Unicode11Addon } from "xterm-addon-unicode11";
 import { CanvasAddon } from "xterm-addon-canvas";
 import { attachMomentumScroll } from "./momentum-scroll";
 import { showToast } from "./ui/toast";
@@ -125,9 +126,18 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     // (pbcopy) — unreachable from the browser. See the mouseup→clipboard wiring
     // below for the second half (actually copying the selection locally).
     macOptionClickForcesSelection: true,
+    // `term.unicode` (Unicode11Addon, below) is a proposed API in xterm 5.
+    allowProposedApi: true,
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
+  // Character widths must match tmux's (Unicode 9+): xterm's default Unicode 6
+  // table makes emoji such as ⚡ 💬 one column wide while tmux and the apps
+  // (Claude Code's Ink) count two. Text an app then places by absolute column
+  // (CHA/CUP — Ink's partial redraws) lands one column off per emoji and never
+  // heals (RSI round 9, seen live on dogfood).
+  term.loadAddon(new Unicode11Addon());
+  term.unicode.activeVersion = "11";
 
   const el = document.createElement("div");
   el.className = "terminal-host";
