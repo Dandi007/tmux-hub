@@ -4,15 +4,20 @@
 //   1) lifecycle: /metrics ws / SSE / subscriber counts must return to baseline,
 //      fds must not drift, broadcasters must equal sessions (soak-judge.ts);
 //   2) fidelity (with --socket): each tab's xterm screen == tmux capture-pane.
+//   3) hub restart (with --socket and --restart-cmd): keep one page open, run
+//      the command (e.g. restart the hub service), wait for every tab to
+//      reconnect, then check fidelity again on that same page.
 // Exit code 1 on any problem. Prints the gauge curve every 10 cycles.
 //
 //   bun run scripts/diag/soak.ts --cycles 150 --socket hub-dogfood
 //   bun run scripts/diag/soak.ts --url http://127.0.0.1:3101 --secret ~/.config/tmux-hub/hub.secret
+//   bun run scripts/diag/soak.ts --cycles 0 --socket hub-dogfood \
+//     --restart-cmd "systemctl --user restart tmux-hub-dogfood.service"
 import { chromium, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { parseArgs } from "node:util";
-import { parseMetrics, judgeSoak, type Metrics } from "./soak-judge";
+import { parseMetrics, judgeSoak, screenDiff, type Metrics } from "./soak-judge";
 
 const { values: opt } = parseArgs({
   options: {
@@ -20,6 +25,7 @@ const { values: opt } = parseArgs({
     secret: { type: "string", default: "~/.config/tmux-hub/dogfood.secret" },
     cycles: { type: "string", default: "40" },
     socket: { type: "string" },
+    "restart-cmd": { type: "string" },
   },
 });
 const URL = opt.url!;
@@ -58,29 +64,57 @@ for (let i = 1; i <= CYCLES; i++) {
 
 const problems: string[] = [];
 if (opt.socket) {
-  const norm = (ls: string[]) => { const o = ls.map((l) => l.replace(/\s+$/, "")); while (o.length && o.at(-1) === "") o.pop(); return o; };
   const tmux = (...a: string[]) => Bun.spawnSync(["tmux", "-L", opt.socket!, ...a]).stdout.toString();
+  // Open each tab in turn on the same page; a tab is in sync once its probe is
+  // connected + visible and its screen equals capture-pane (retried: a resize
+  // resync may still be landing).
+  const checkFidelity = async (page: Page, names: string[], label: string): Promise<void> => {
+    for (const name of names) {
+      let diff = -1;
+      for (let t = 0; t < 20 && diff !== 0; t++) {
+        await page.evaluate((n) => window.__tmuxHub?.openSession?.(n), name);
+        await sleep(500);
+        const v = await page.evaluate((n) => {
+          const p = window.__tmuxHubTerms?.[n];
+          return p && p.state === "connected" && p.visible ? { size: `${p.cols}x${p.rows}`, lines: p.screen() } : null;
+        }, name);
+        if (!v) continue;
+        const size = tmux("display", "-p", "-t", name, "#{pane_width}x#{pane_height}").trim();
+        diff = v.size !== size ? Infinity : screenDiff(v.lines, tmux("capture-pane", "-p", "-t", name).split("\n"));
+      }
+      console.log(label, name, diff === 0 ? "ok" : `diffRows=${diff}`);
+      if (diff !== 0) problems.push(`${label} ${name}: diffRows=${diff}`);
+    }
+  };
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   const page = await ctx.newPage();
   await openApp(page, "/?debug=term");
   const names = await page.locator(".tab-bar__tab").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.session ?? ""));
-  for (const name of names) {
-    let diff = -1;
-    for (let t = 0; t < 20 && diff !== 0; t++) {
-      await page.evaluate((n) => window.__tmuxHub?.openSession?.(n), name);
+  await checkFidelity(page, names, "fidelity");
+  if (opt["restart-cmd"]) {
+    const replays = () => page.evaluate((ns) => ns.map((n) => window.__tmuxHubTerms?.[n]?.replays ?? -1), names);
+    const replaysBefore = await replays();
+    const before = await (await fetch(`${URL}/system/health`)).json() as { uptime: number };
+    const r = Bun.spawnSync(["sh", "-c", opt["restart-cmd"]]);
+    console.log("restart", r.exitCode === 0 ? "ok" : `exit=${r.exitCode} ${r.stderr.toString().trim()}`);
+    // Back up = health answers with a fresh uptime.
+    let up = false;
+    for (let t = 0; t < 60 && !up; t++) {
       await sleep(500);
-      const v = await page.evaluate((n) => {
-        const p = window.__tmuxHubTerms?.[n];
-        return p && p.state === "connected" && p.visible ? { size: `${p.cols}x${p.rows}`, lines: p.screen() } : null;
-      }, name);
-      if (!v) continue;
-      const size = tmux("display", "-p", "-t", name, "#{pane_width}x#{pane_height}").trim();
-      const tl = norm(tmux("capture-pane", "-p", "-t", name).split("\n"));
-      const bl = norm(v.lines);
-      diff = v.size !== size ? Infinity : tl.reduce((n, l, k) => n + (l !== bl[k] ? 1 : 0), Math.max(0, bl.length - tl.length));
+      try {
+        const h = await (await fetch(`${URL}/system/health`)).json() as { ok: boolean; uptime: number };
+        up = h.ok && h.uptime < before.uptime;
+      } catch { /* still down */ }
     }
-    console.log("fidelity", name, diff === 0 ? "ok" : `diffRows=${diff}`);
-    if (diff !== 0) problems.push(`fidelity ${name}: diffRows=${diff}`);
+    if (!up) problems.push("hub did not come back after --restart-cmd");
+    else {
+      await checkFidelity(page, names, "after-restart");
+      // Every tab must have gone through a reconnect replay, not kept a stale view.
+      const replaysAfter = await replays();
+      names.forEach((n, i) => {
+        if (!(replaysAfter[i]! > replaysBefore[i]!)) problems.push(`after-restart ${n}: no reconnect replay (${replaysBefore[i]} -> ${replaysAfter[i]})`);
+      });
+    }
   }
   await ctx.close();
 }
