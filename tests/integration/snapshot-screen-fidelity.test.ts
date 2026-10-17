@@ -87,3 +87,16 @@ test.skipIf(!HAS_TMUX)("a pane without history", async () => {
   await waitFor(() => T(["capture-pane", "-p", "-t", "nohist:0.0"]).includes("hello\n$"));
   await checkPane("nohist", 60, 10);
 });
+
+// tmux 3.6 does NOT re-join rows that wrapped at a narrower width when the
+// window is widened: they stay split on its screen. `capture-pane -J` joined
+// them anyway, so the restore stream had fewer visible rows than tmux and the
+// whole screen landed shifted (phone-width sessions, RSI round 19).
+test.skipIf(!HAS_TMUX)("rows wrapped at a narrower width stay split after widening", async () => {
+  newPane("widen", 45, 10);
+  T(["send-keys", "-t", "widen:0.0", "printf 'pre 061 中文全角（括号）：标点 ascii-61 │ ─┼─ end\\n'", "Enter"]);
+  await waitFor(() => T(["capture-pane", "-p", "-t", "widen:0.0"]).includes(" end\n$"));
+  T(["resize-window", "-t", "widen", "-x", "56", "-y", "10"]);
+  await waitFor(() => T(["display-message", "-p", "-t", "widen:0.0", "#{pane_width}"]).trim() === "56");
+  await checkPane("widen", 56, 10);
+});

@@ -140,6 +140,19 @@ export default defineConfig({
       },
     },
     {
+      // Fidelity oracle at phone size, in the mobile view. Chromium, because
+      // the iPhone projects need WebKit (not installable on the CI runner).
+      // deviceScaleFactor 1: CDP DPR emulation makes xterm's canvas misdraw
+      // (it doesn't affect the buffer the oracle reads, but keeps traces sane).
+      name: "emulator-mobile",
+      testMatch: /emulator-fidelity\.e2e\.ts/,
+      use: {
+        ...devices["Pixel 7"],
+        deviceScaleFactor: 1,
+        baseURL: `http://127.0.0.1:${E2E_EMU_PORT}`,
+      },
+    },
+    {
       name: "mobile-suggest",
       testMatch: /mobile-suggest\.e2e\.ts/,
       use: { ...devices["iPhone 14"] },

@@ -165,15 +165,18 @@ export class SessionBroadcaster {
   }
 
   // Authoritative restore stream for the visible screen + scrollback, sourced
-  // from `tmux capture-pane` — which tmux reflows to the pane's CURRENT size —
-  // rather than replaying the width-frozen pipe-pane log. Replaying history
-  // authored at a different width corrupts a non-alt-screen TUI (wide rules
-  // wrap and overlay text, in-place redraw frames stack). capture-pane sidesteps
-  // that entirely: the snapshot always matches the live pane size the client was
-  // just pinned to. `-J` joins wrapped lines so the client re-wraps to its own
-  // width; `-e` keeps SGR colors. DEC private modes are not captured by tmux,
-  // so we append the emulator's shadow-tracked modes. Falls back to the
-  // emulator serialize if capture fails.
+  // from `tmux capture-pane` rather than replaying the width-frozen pipe-pane
+  // log. Replaying history authored at a different width corrupts a
+  // non-alt-screen TUI (wide rules wrap and overlay text, in-place redraw
+  // frames stack). capture-pane gives tmux's own grid at the live pane size the
+  // client was just pinned to. The visible screen is captured row for row (no
+  // `-J`): tmux 3.6 does not re-join rows that wrapped at a narrower width when
+  // the window is widened, so joining them would hand the client fewer rows
+  // than tmux shows and shift the whole screen (phone-width sessions). History
+  // keeps `-J` so the client re-wraps scrollback to its own width. `-e` keeps
+  // SGR colors. DEC private modes are not captured by tmux, so we append the
+  // emulator's shadow-tracked modes. Falls back to the emulator serialize if
+  // capture fails.
   //
   // History and the visible screen are captured and placed separately. One
   // capture of both cannot be laid out reliably: the runner trims trailing
@@ -191,7 +194,7 @@ export class SessionBroadcaster {
     const target = `${this.session}:0.0`;
     try {
       const geo = await this.paneGeometry();
-      const vis = await this.run(["capture-pane", "-e", "-p", "-J", "-t", target]);
+      const vis = await this.run(["capture-pane", "-e", "-p", "-t", target]);
       if (vis.code === 0) {
         let out = "\x1bc";
         const hist = geo ? Math.min(geo.history, SNAPSHOT_SCROLLBACK_LINES) : 0;
