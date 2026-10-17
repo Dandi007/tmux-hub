@@ -135,55 +135,39 @@ test.describe("desktop tab-bar", () => {
     ctx.tmuxE2E(["kill-session", "-t", b]);
   });
 
-  test("Ctrl+Tab cycles to the next tab and wraps around", async ({ page, ctx }) => {
-    const a = await ctx.createSession();
-    const b = await ctx.createSession();
-    const c = await ctx.createSession();
+  // The first snapshot orders tabs by activity (most recent first), not by
+  // creation, so the cycle order is read from the rendered tab bar.
+  async function tabOrder(page: Page): Promise<string[]> {
+    return page.locator(".tab-bar__tab").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.session ?? ""));
+  }
 
-    await openApp(page);
+  for (const { title, chord, step } of [
+    { title: "Ctrl+Tab cycles to the next tab and wraps around", chord: "Control+Tab", step: 1 },
+    { title: "Ctrl+Shift+Tab cycles to the previous tab and wraps around", chord: "Control+Shift+Tab", step: -1 },
+  ]) {
+    test(title, async ({ page, ctx }) => {
+      const created = [await ctx.createSession(), await ctx.createSession(), await ctx.createSession()];
 
-    await expect(tab(page, a)).toBeVisible({ timeout: 10_000 });
-    await tab(page, a).click();
-    await expect(tab(page, a)).toHaveClass(/is-active/, { timeout: 5_000 });
+      await openApp(page);
 
-    await page.keyboard.press("Control+Tab");
-    await expect(tab(page, b)).toHaveClass(/is-active/, { timeout: 5_000 });
+      for (const n of created) await expect(tab(page, n)).toBeVisible({ timeout: 10_000 });
+      const order = await tabOrder(page);
+      expect(order).toEqual(expect.arrayContaining(created));
 
-    await page.keyboard.press("Control+Tab");
-    await expect(tab(page, c)).toHaveClass(/is-active/, { timeout: 5_000 });
+      const start = order.indexOf(created[0]!);
+      await tab(page, created[0]!).click();
+      await expect(tab(page, created[0]!)).toHaveClass(/is-active/, { timeout: 5_000 });
 
-    await page.keyboard.press("Control+Tab");
-    await expect(tab(page, a)).toHaveClass(/is-active/, { timeout: 5_000 });
+      // One full lap: every tab in order, ending back where it started (wrap).
+      for (let i = 1; i <= order.length; i++) {
+        await page.keyboard.press(chord);
+        const want = order[(((start + step * i) % order.length) + order.length) % order.length]!;
+        await expect(tab(page, want)).toHaveClass(/is-active/, { timeout: 5_000 });
+      }
 
-    ctx.tmuxE2E(["kill-session", "-t", a]);
-    ctx.tmuxE2E(["kill-session", "-t", b]);
-    ctx.tmuxE2E(["kill-session", "-t", c]);
-  });
-
-  test("Ctrl+Shift+Tab cycles to the previous tab and wraps around", async ({ page, ctx }) => {
-    const a = await ctx.createSession();
-    const b = await ctx.createSession();
-    const c = await ctx.createSession();
-
-    await openApp(page);
-
-    await expect(tab(page, a)).toBeVisible({ timeout: 10_000 });
-    await tab(page, a).click();
-    await expect(tab(page, a)).toHaveClass(/is-active/, { timeout: 5_000 });
-
-    await page.keyboard.press("Control+Shift+Tab");
-    await expect(tab(page, c)).toHaveClass(/is-active/, { timeout: 5_000 });
-
-    await page.keyboard.press("Control+Shift+Tab");
-    await expect(tab(page, b)).toHaveClass(/is-active/, { timeout: 5_000 });
-
-    await page.keyboard.press("Control+Shift+Tab");
-    await expect(tab(page, a)).toHaveClass(/is-active/, { timeout: 5_000 });
-
-    ctx.tmuxE2E(["kill-session", "-t", a]);
-    ctx.tmuxE2E(["kill-session", "-t", b]);
-    ctx.tmuxE2E(["kill-session", "-t", c]);
-  });
+      for (const n of created) ctx.tmuxE2E(["kill-session", "-t", n]);
+    });
+  }
 
   test("+ button launches a new managed zsh session", async ({ page, ctx }) => {
     await openApp(page);
