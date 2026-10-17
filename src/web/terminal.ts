@@ -39,6 +39,13 @@ export type TerminalProbe = {
   /** Visible screen rows as text (trailing blanks trimmed). */
   screen: () => string[];
   dropSocket: () => void;
+  /** Viewport distance from the buffer bottom (0 = following the tail). */
+  readonly linesFromBottom: number;
+  /** Count of server `resync` messages handled (resize re-snapshots). */
+  readonly resyncs: number;
+  scrollLines: (n: number) => void;
+  /** Same visibility test the scroll-restore decision uses (hidden pool slot → deferred). */
+  readonly visible: boolean;
 };
 
 declare global {
@@ -508,6 +515,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // 初值 0：安静躺在底部的 client 永远不上报，不会用 0 覆盖别的设备存的位置；
   // 只有真实滚动（值变化）才写。1s 轮询兼顾 momentum/拖动/键盘所有滚动来源。
   let lastReportedLfb = 0;
+  let resyncCount = 0; // fidelity probe only
   // scrollposRestoredOnce tracks whether we have applied the first scrollpos
   // delivery for this attach lifetime. First delivery = fresh attach（v2 起
   // 一律显式钉底，INV-5）；re-deliveries arrive on reconnect（只信本地快照）。
@@ -615,6 +623,16 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                 }
                 return;
               }
+              if (kind === "resync") {
+                // 服务端在 resize 生效后重发对齐 snapshot（RIS 会清空 buffer），
+                // 随后照常发 scrollpos 作为 replay-done。按 reconnect 处理：先快照
+                // 本地 lfb（INV-1），关上报（INV-4），scrollpos 到达后按
+                // reconnect 语义恢复落点。
+                saveLocalLfbForReplay();
+                predictions.length = 0;
+                resyncCount++;
+                return;
+              }
               if (kind === "scrollpos") {
                 // Server sends this unconditionally after every replay。v2 起
                 // client 只把它当 replay-done 信号（v2-3：DB 记忆消费退役，
@@ -687,11 +705,11 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     const r = term.rows > 0 ? term.rows : (opts.rows ?? 50);
     const base = await hubWsUrl(`/ws/sessions/${encodeURIComponent(opts.sessionName)}`);
     const sep = base.includes("?") ? "&" : "?";
-    return `${base}${sep}cols=${c}&rows=${r}`;
+    return `${base}${sep}cols=${c}&rows=${r}&resync=1`;
   };
 
-  const enterReconnecting = (): void => {
-    if (disposed) return;
+  // 重放（reconnect 或 resize resync）前即时快照本地 lfb，并关闭上报。
+  const saveLocalLfbForReplay = (): void => {
     // 断线瞬间即时快照本地 lfb——这是 reconnect 恢复的唯一真值来源（INV-1），
     // 不用 1s 轮询的滞后值 lastReportedLfb 做任何判断。alt-screen（claude
     // code / vim）无 scrollback 语义，取 0。
@@ -713,6 +731,11 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     // INV-4: reconnect replay 期间 RIS 会把 baseY/viewportY 归零，任何采样都是
     // 噪声——关闭上报，直到下一次 scrollpos 决策执行完再打开。
     reportingEnabled = false;
+  };
+
+  const enterReconnecting = (): void => {
+    if (disposed) return;
+    saveLocalLfbForReplay();
     console.log(`[tmux-hub] entering reconnect for ${opts.sessionName}`);
     stopHeartbeat();
     try { ws.onmessage = null; ws.onclose = null; ws.onerror = null; ws.close(); } catch {}
@@ -874,6 +897,10 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       return lines;
     },
     dropSocket: () => { try { ws.close(); } catch {} },
+    get linesFromBottom() { const b = term.buffer.active; return Math.max(0, b.baseY - b.viewportY); },
+    get resyncs() { return resyncCount; },
+    scrollLines: (n: number) => term.scrollLines(n),
+    get visible() { return isTermVisible(); },
   } : null;
   if (probe) (window.__tmuxHubTerms ??= {})[opts.sessionName] = probe;
 

@@ -38,6 +38,10 @@ export type ClientWsMessage =
   | { kind: "scrollpos"; linesFromBottom: number };
 
 export type ServerWsMessage =
+  // After an applied resize (client opted in with `?resync=1`): the server is
+  // about to re-send an aligned snapshot (RIS + capture), followed by the usual
+  // scrollpos replay-done message. The client treats it like a reconnect.
+  | { kind: "resync" }
   | { kind: "pong"; ts: number }
   | { kind: "viewport"; cols: number; rows: number; owner: "native" | "web" }
   // Scroll position recovery: server sends restored scroll position to client after attach,

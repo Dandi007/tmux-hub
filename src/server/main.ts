@@ -27,6 +27,7 @@ import { TemplateRunner, TemplateError, launchSession, formatTs14 } from "./temp
 import { ManagedSessionDb } from "./managed-db";
 import { listSessions } from "./session-registry";
 import { createLogger, LOG_FILE } from "./logger";
+import { ResyncScheduler } from "./resize-resync";
 
 const logger = createLogger("main");
 
@@ -260,6 +261,12 @@ type WsData = {
   // The session's broadcaster, set after attach so resize messages can keep the
   // emulator grid aligned with the pane.
   broadcaster?: SessionBroadcaster;
+  // Client opted in (`?resync=1`) to an aligned snapshot after each applied
+  // resize, announced by a `{kind:"resync"}` message. Opt-in so a stale page
+  // that does not know the message never gets it written into its terminal.
+  resyncCapable: boolean;
+  resync?: ResyncScheduler;
+  closed?: boolean;
 };
 
 function clampInt(v: number, lo: number, hi: number, fallback: number): number {
@@ -305,7 +312,8 @@ Bun.serve({
       const cols = clampInt(Number(url.searchParams.get("cols")), 20, 500, WINDOW_COLS);
       const rows = clampInt(Number(url.searchParams.get("rows")), 5, 200, WINDOW_ROWS);
       const connId = crypto.randomUUID().slice(0, 8);
-      const data: WsData = { sessionName, cols, rows, connId, unsubs: [] };
+      const resyncCapable = url.searchParams.get("resync") === "1";
+      const data: WsData = { sessionName, cols, rows, connId, unsubs: [], resyncCapable };
       if (server.upgrade(req, { data })) return undefined;
       logger.error({ session: sessionName, connId }, "ws upgrade failed at server.upgrade()");
       return new Response("upgrade failed", { status: 426 });
@@ -378,24 +386,42 @@ Bun.serve({
           sse.emit({ event: "replay_truncated", payload: { name: sessionName } });
         }
       });
-      const unsubData = await b.attachWithReplay((chunk) => { try { ws.send(chunk); } catch {} }, paneCols, paneRows);
-      ws.data.unsubs.push(unsubEvents, unsubData);
       // Scroll memory + replay-done signal: sent AFTER replay bytes so the
       // client can apply it behind a parse barrier. 无条件发送——语义升级为
       // "replay-done 信号 + 记忆值"：client 的恢复决策（decideScrollRestore）
       // 需要稳定触发点，lfb=0/无记忆时 reconnect 回底同样依赖这条消息；
       // snapshot 是流式字节，client 侧没有结束标记可依赖。旧 client 对
       // lfb=0 消息天然忽略（其 shouldRestore 含 lfb > 0 条件），兼容。
-      try {
-        const lfb = managedDb.getScrollPos(sessionName);
-        ws.send(JSON.stringify({ kind: "scrollpos", linesFromBottom: lfb ?? 0 }));
-      } catch (e) {
-        logger.warn({ session: sessionName, connId, err: e }, "scrollpos restore send failed");
+      const sendReplayDone = (): void => {
+        try {
+          const lfb = managedDb.getScrollPos(sessionName);
+          ws.send(JSON.stringify({ kind: "scrollpos", linesFromBottom: lfb ?? 0 }));
+        } catch (e) {
+          logger.warn({ session: sessionName, connId, err: e }, "scrollpos restore send failed");
+        }
+      };
+      const sendData = (chunk: Uint8Array): void => { try { ws.send(chunk); } catch {} };
+      let unsubData: (() => void) | null = null;
+      const attached = b.attachWithReplay(sendData, paneCols, paneRows);
+      if (ws.data.resyncCapable && !ws.data.closed) {
+        // Same replay-done contract as the attach: the client snapshots its
+        // scroll position on `resync` and restores it on the trailing scrollpos.
+        ws.data.resync = new ResyncScheduler(paneCols, paneRows, attached, async (c, r) => {
+          await b.resync(sendData, c, r, () => { try { ws.send(JSON.stringify({ kind: "resync" })); } catch {} });
+          // resync re-subscribes; a close that raced it already ran the unsubs.
+          if (ws.data.closed) { unsubData?.(); return; }
+          sendReplayDone();
+        });
       }
+      unsubData = await attached;
+      ws.data.unsubs.push(unsubEvents, unsubData);
+      sendReplayDone();
     },
     async close(ws: ServerWebSocket<WsData>, code: number, reason: string) {
       const { sessionName, connId } = ws.data;
       logger.info({ session: sessionName, connId, code, reason: reason || undefined }, "ws close");
+      ws.data.closed = true;
+      ws.data.resync?.dispose();
       const { unsubs } = ws.data;
       for (const fn of unsubs) try { fn(); } catch {}
       ws.data.unsubs.length = 0;
@@ -445,6 +471,7 @@ Bun.serve({
           // Web resize applied → pane changed size; keep the emulator grid aligned
           // so later snapshots stay coherent at the new width.
           ws.data.broadcaster?.syncEmulatorSize(result.cols, result.rows);
+          ws.data.resync?.resized(result.cols, result.rows);
         }
       }).catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : String(e);
