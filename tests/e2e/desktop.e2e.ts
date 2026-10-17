@@ -169,6 +169,39 @@ test.describe("desktop tab-bar", () => {
     });
   }
 
+  // A hidden pool tab must not resize its pane on window resize / focus: that
+  // re-pins (and re-snapshots) every session at once and steals sessions that
+  // another device is viewing. It catches up when activated.
+  test("window resize only resizes the visible tab; hidden tab catches up on activation", async ({ page, ctx }) => {
+    const a = await ctx.createSession();
+    const b = await ctx.createSession();
+    const size = (n: string) => ctx.tmuxE2E(["display", "-p", "-t", n, "#{window_width}x#{window_height}"]).trim();
+
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await openApp(page);
+    for (const n of [a, b]) await expect(tab(page, n)).toBeVisible({ timeout: 10_000 });
+    // Activate b and switch straight back: b's catch-up resize must not be
+    // lost to the switch (activation sends immediately, not debounced).
+    await tab(page, b).click();
+    await tab(page, a).click();
+    await expect(tab(page, a)).toHaveClass(/is-active/, { timeout: 5_000 });
+    await expect.poll(() => size(a) === size(b) ? size(a) : "differ", { timeout: 5_000 }).not.toBe("differ");
+    const before = size(b);
+
+    await page.setViewportSize({ width: 1000, height: 650 });
+    await expect.poll(() => size(a), { timeout: 5_000 }).not.toBe(before);
+    const after = size(a);
+    // Give a would-be hidden resize ample time (150ms debounce + server) to land.
+    await page.waitForTimeout(1_000);
+    expect(size(b)).toBe(before);
+
+    await tab(page, b).click();
+    await expect.poll(() => size(b), { timeout: 5_000 }).toBe(after);
+
+    ctx.tmuxE2E(["kill-session", "-t", a]);
+    ctx.tmuxE2E(["kill-session", "-t", b]);
+  });
+
   test("+ button launches a new managed zsh session", async ({ page, ctx }) => {
     await openApp(page);
 
