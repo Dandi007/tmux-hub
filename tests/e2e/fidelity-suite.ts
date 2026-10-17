@@ -181,6 +181,41 @@ export function defineFidelitySuite(test: TestType<{ ctx: Ctx }, object>, expect
       ctx.tmuxE2E(["send-keys", "-t", name, ":q!", "Enter"]);
     });
 
+    // scroll-restore 的 reconnect 路径（INV-1/INV-3）：断线前向上翻着的，重连
+    // 后回到同一位置；断线前跟底的，重连后仍跟底，并看到断线期间的新输出。
+    test("reconnect restores a scrolled-up viewport and keeps a bottom one at the bottom", async ({ page, ctx }) => {
+      const name = await ctx.createSession();
+      await runAndWait(ctx, name, `clear; sh ${writeGenerator("rhist", 200)}`, "rhist 200");
+      await openSession(page, name);
+      await expectInSync(page, ctx, name, "before scroll");
+      const probe = <T,>(k: string) => page.evaluate(([n, key]) => (window.__tmuxHubTerms![n] as unknown as Record<string, unknown>)[key], [name, k] as const) as Promise<T>;
+      // Wait out the layout-settle resize after attach (see the resize resync test).
+      let prev = -1;
+      await expect.poll(async () => { const n = await probe<number>("resyncs"); const stable = n === prev; prev = n; return stable; }, { timeout: 10_000, intervals: [1000] }).toBe(true);
+
+      // "connected" flips on ws open, before the replay and its scroll restore
+      // land; wait for the replay itself, or a scroll made in between is
+      // (by design, INV-4) overwritten by the pending restore.
+      const reconnect = async (): Promise<void> => {
+        const before = await probe<number>("replays");
+        await page.evaluate((n) => (window.__tmuxHubTerms![n] as unknown as { dropSocket: () => void }).dropSocket(), name);
+        await expect.poll(() => probe<number>("replays"), { timeout: 10_000 }).toBeGreaterThan(before);
+      };
+
+      await page.evaluate((n) => (window.__tmuxHubTerms![n] as unknown as { scrollLines: (k: number) => void }).scrollLines(-60), name);
+      expect(await probe<number>("linesFromBottom")).toBe(60);
+      await reconnect();
+      await expectInSync(page, ctx, name, "after reconnect (scrolled up)");
+      await expect.poll(() => probe<number>("linesFromBottom"), { timeout: 5_000 }).toBe(60);
+
+      await page.evaluate((n) => (window.__tmuxHubTerms![n] as unknown as { scrollLines: (k: number) => void }).scrollLines(60), name);
+      expect(await probe<number>("linesFromBottom")).toBe(0);
+      await page.evaluate((n) => (window.__tmuxHubTerms![n] as unknown as { dropSocket: () => void }).dropSocket(), name);
+      await runAndWait(ctx, name, `sh ${writeGenerator("rgap", 20)}`, "rgap 020");
+      await expectInSync(page, ctx, name, "after reconnect (at bottom, output while down)");
+      await expect.poll(() => probe<number>("linesFromBottom"), { timeout: 5_000 }).toBe(0);
+    });
+
     // Regression（第 4 轮修复）：刚起的 shell 还在画第一个 prompt 时 attach，
     // 同样命中 attach 时 snapshot 与在途字节重叠的问题（prompt 被画多次）。
     test("fresh shell attach while the first prompt is still being drawn", async ({ page, ctx }) => {
