@@ -44,8 +44,8 @@ jobs:
       # Scope notes:
       # - mobile / mobile-suggest projects need webkit (iPhone 14 device):
       #   not installable on this platform → not run in CI (backlog).
-      - name: E2E tests (desktop + emulator, chromium)
-        run: bunx playwright test tests/e2e --project=desktop --project=emulator
+      - name: E2E tests (desktop + emulator + emulator-mobile, chromium)
+        run: bunx playwright test tests/e2e --project=desktop --project=emulator --project=emulator-mobile
 
       - name: Stop tmux server
         if: always()

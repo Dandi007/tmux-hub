@@ -81,10 +81,17 @@ export function defineFidelitySuite(test: TestType<PlaywrightTestArgs & { ctx: C
   async function openSession(page: Page, name: string): Promise<void> {
     await page.goto("/?debug=term");
     await bindSecret(page);
+    // Both views restore the last-opened session once their list loads; make
+    // that our session, so a late restore cannot switch away from it (the
+    // mobile view has a single terminal: switching closes our probe).
+    await page.evaluate((n) => localStorage.setItem("tmux-hub.last-session", n), name);
     await page.reload();
-    // The desktop view restores the last-opened session once its list loads,
-    // which can land after this call and leave our tab hidden (scroll-restore
-    // then defers to activation). Re-open until our slot is the visible one.
+    // Opening a session the hub has not listed yet gets the ws rejected (410);
+    // wait until the list (desktop tab / mobile picker item) shows it.
+    await expect(page.locator(`[data-session="${name}"]`).first()).toBeAttached({ timeout: 10_000 });
+    // The desktop view can still restore after this call and leave our tab
+    // hidden (scroll-restore then defers to activation). Re-open until our
+    // slot is the visible one.
     await expect.poll(async () => {
       await page.evaluate((n) => window.__tmuxHub?.openSession?.(n), name);
       return page.evaluate((n) => {
@@ -167,7 +174,7 @@ export function defineFidelitySuite(test: TestType<PlaywrightTestArgs & { ctx: C
       await runAndWait(ctx, name, "clear; echo shell-ready", "shell-ready");
       await openSession(page, name);
       await expectInSync(page, ctx, name, "shell before vim");
-      await runAndWait(ctx, name, `vim -u NONE -n ${file}`, "vim 行 1 ");
+      await runAndWait(ctx, name, `vim -u NONE -n --cmd "set shortmess+=F" ${file}`, "vim 行 1 ");
       await expectInSync(page, ctx, name, "vim started while attached");
       ctx.tmuxE2E(["send-keys", "-t", name, "20G", ""]);
       await page.evaluate((n) => window.__tmuxHubTerms![n]!.dropSocket(), name);
@@ -248,7 +255,7 @@ export function defineFidelitySuite(test: TestType<PlaywrightTestArgs & { ctx: C
     test("alt-screen (vim) attach that resizes a running TUI", async ({ page, ctx }) => {
       const name = await ctx.createSession();
       const file = writeVimSource();
-      await runAndWait(ctx, name, `vim -u NONE -n ${file}`, "vim 行 1 ");
+      await runAndWait(ctx, name, `vim -u NONE -n --cmd "set shortmess+=F" ${file}`, "vim 行 1 ");
       await openSession(page, name);
       await expectInSync(page, ctx, name, "vim attach");
       ctx.tmuxE2E(["send-keys", "-t", name, ":q!", "Enter"]);
