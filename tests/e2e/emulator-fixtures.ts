@@ -7,11 +7,14 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { makeCreateSession } from "./helpers";
 
 type Ctx = {
   socket: string;
   tmuxTmpdir: string;
   tmuxE2E: (args: string[]) => string;
+  /** Managed launch on the emulator hub — see fixtures.ts createSession. */
+  createSession: (templateId?: string) => Promise<string>;
 };
 
 type E2EEnv = {
@@ -40,7 +43,7 @@ function loadEmuEnv(): E2EEnv {
 
 export const test = base.extend<{ ctx: Ctx }>({
   ctx: async ({}, use) => {
-    const { socket, tmuxTmpdir } = loadEmuEnv();
+    const { socket, tmuxTmpdir, port } = loadEmuEnv();
     if (!existsSync(tmuxTmpdir)) mkdirSync(tmuxTmpdir, { recursive: true });
 
     const env = { ...process.env, TMUX_TMPDIR: tmuxTmpdir };
@@ -56,7 +59,9 @@ export const test = base.extend<{ ctx: Ctx }>({
       return (r.stdout ?? "").trimEnd();
     };
 
-    await use({ socket, tmuxTmpdir, tmuxE2E });
+    const createSession = makeCreateSession(`http://127.0.0.1:${port}`);
+
+    await use({ socket, tmuxTmpdir, tmuxE2E, createSession });
   },
 });
 

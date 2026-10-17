@@ -129,7 +129,7 @@ export default defineConfig({
     },
     {
       name: "emulator",
-      testMatch: /emulator-tui\.e2e\.ts/,
+      testMatch: /emulator-(tui|fidelity)\.e2e\.ts/,
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1440, height: 900 },
