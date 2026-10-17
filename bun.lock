@@ -10,6 +10,7 @@
         "hono": "^4.12.21",
         "pino": "^10.3.1",
         "xterm-addon-canvas": "^0.5.0",
+        "xterm-addon-unicode11": "0.6.0",
         "xterm-addon-webgl": "^0.16.0",
         "yaml": "^2.9.0",
         "zod": "^4.4.3",
@@ -887,6 +888,8 @@
     "xterm-addon-canvas": ["xterm-addon-canvas@0.5.0", "", { "peerDependencies": { "xterm": "^5.0.0" } }, "sha512-QOo/eZCMrCleAgMimfdbaZCgmQRWOml63Ued6RwQ+UTPvQj3Av9QKx3xksmyYrDGRO/AVRXa9oNuzlYvLdmoLQ=="],
 
     "xterm-addon-fit": ["xterm-addon-fit@0.8.0", "", { "peerDependencies": { "xterm": "^5.0.0" } }, "sha512-yj3Np7XlvxxhYF/EJ7p3KHaMt6OdwQ+HDu573Vx1lRXsVxOcnVJs51RgjZOouIZOczTsskaS+CpXspK81/DLqw=="],
+
+    "xterm-addon-unicode11": ["xterm-addon-unicode11@0.6.0", "", { "peerDependencies": { "xterm": "^5.0.0" } }, "sha512-5pkb8YoS/deRtNqQRw8t640mu+Ga8B2MG3RXGQu0bwgcfr8XiXIRI880TWM49ICAHhTmnOLPzIIBIjEnCq7k2A=="],
 
     "xterm-addon-webgl": ["xterm-addon-webgl@0.16.0", "", { "peerDependencies": { "xterm": "^5.0.0" } }, "sha512-E8cq1AiqNOv0M/FghPT+zPAEnvIQRDbAbkb04rRYSxUym69elPWVJ4sv22FCLBqM/3LcrmBLl/pELnBebVFKgA=="],
 
