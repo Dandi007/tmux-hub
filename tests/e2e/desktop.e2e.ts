@@ -172,6 +172,34 @@ test.describe("desktop tab-bar", () => {
   // A hidden pool tab must not resize its pane on window resize / focus: that
   // re-pins (and re-snapshots) every session at once and steals sessions that
   // another device is viewing. It catches up when activated.
+  // Page load attaches every pool slot; the hidden ones must not pin their
+  // session on ws open either (another device may own that size right now).
+  test("page load does not pin hidden tabs; activation does", async ({ page, ctx }) => {
+    const b = await ctx.createSession();
+    const a = await ctx.createSession();
+    const size = (n: string) => ctx.tmuxE2E(["display", "-p", "-t", n, "#{window_width}x#{window_height}"]).trim();
+    // Warm-up load so the registry lists both sessions, then leave the page.
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await openApp(page);
+    for (const n of [a, b]) await expect(tab(page, n)).toBeVisible({ timeout: 10_000 });
+    await page.evaluate((n) => localStorage.setItem("tmux-hub.last-session", n), a);
+    await page.goto("about:blank");
+
+    // "Another device" pins b small; the next load restores a as last session.
+    ctx.tmuxE2E(["resize-window", "-t", b, "-x", "100", "-y", "30"]);
+    await page.goto("/");
+    await expect(tab(page, a)).toHaveClass(/is-active/, { timeout: 10_000 });
+    await expect.poll(() => size(a), { timeout: 5_000 }).not.toBe("100x30");
+    await page.waitForTimeout(1_000);
+    expect(size(b)).toBe("100x30");
+
+    await tab(page, b).click();
+    await expect.poll(() => size(b), { timeout: 5_000 }).toBe(size(a));
+
+    ctx.tmuxE2E(["kill-session", "-t", a]);
+    ctx.tmuxE2E(["kill-session", "-t", b]);
+  });
+
   test("window resize only resizes the visible tab; hidden tab catches up on activation", async ({ page, ctx }) => {
     const a = await ctx.createSession();
     const b = await ctx.createSession();
