@@ -9,6 +9,7 @@ import { decideScrollRestore, snapshotLocalLfb, type RestoreDecision } from "@sh
 import { hubWsUrl, refreshSecret } from "./hub-fetch";
 import { TERMINAL_FONT_FAMILY, ensureTerminalFonts } from "./shared/fonts";
 import { perfEnabled, createPerfTelemetry, type PerfTelemetry } from "./perf-telemetry";
+import { debugEnabled } from "./shared/debug-flags";
 import {
   type ViewportState,
   handleViewportMessage,
@@ -30,6 +31,21 @@ export type TerminalHandle = {
   readonly state: TerminalState;
   onStateChange: (cb: (state: TerminalState, attempt?: number) => void) => void;
 };
+
+export type TerminalProbe = {
+  readonly state: TerminalState;
+  readonly cols: number;
+  readonly rows: number;
+  /** Visible screen rows as text (trailing blanks trimmed). */
+  screen: () => string[];
+  dropSocket: () => void;
+};
+
+declare global {
+  interface Window {
+    __tmuxHubTerms?: Record<string, TerminalProbe>;
+  }
+}
 
 export type AttachOptions = {
   sessionName: string;
@@ -840,6 +856,27 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   let ws = new WebSocket(initUrl);
   wireWs(ws);
 
+  // ── Fidelity probe (opt-in via ?debug=term) ───────────────────────
+  // Read-only view of what xterm actually holds, for the E2E oracle that diffs
+  // it against `tmux capture-pane -p` (the canvas renderer has no text DOM).
+  // dropSocket closes the live WS so the real reconnect path runs
+  // (socket.onclose → enterReconnecting), exactly like a network drop.
+  const probe: TerminalProbe | null = debugEnabled("term") ? {
+    get state() { return currentState; },
+    get cols() { return term.cols; },
+    get rows() { return term.rows; },
+    screen: () => {
+      const buf = term.buffer.active;
+      const lines: string[] = [];
+      for (let y = 0; y < term.rows; y++) {
+        lines.push(buf.getLine(buf.baseY + y)?.translateToString(true) ?? "");
+      }
+      return lines;
+    },
+    dropSocket: () => { try { ws.close(); } catch {} },
+  } : null;
+  if (probe) (window.__tmuxHubTerms ??= {})[opts.sessionName] = probe;
+
   ws.addEventListener("open", () => {
     startHeartbeat();
     setTimeout(() => {
@@ -920,6 +957,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     },
     close: () => {
       disposed = true;
+      if (probe && window.__tmuxHubTerms?.[opts.sessionName] === probe) {
+        delete window.__tmuxHubTerms[opts.sessionName];
+      }
       perf?.stop();
       stopHeartbeat();
       clearInterval(scrollPosTimer);

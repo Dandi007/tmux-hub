@@ -15,16 +15,13 @@
 // `{ kind: "telemetry", payload }` and logged by the server, so the operator can
 // read real per-device numbers from the hub logs.
 
+import { debugEnabled } from "./shared/debug-flags";
+
 export type PerfSink = (payload: Record<string, unknown>) => void;
 
 /** True when the page was opened with `?debug=perf` (comma-list aware). */
 export function perfEnabled(): boolean {
-  try {
-    const v = new URLSearchParams(location.search).get("debug") ?? "";
-    return v.split(",").map((s) => s.trim()).includes("perf");
-  } catch {
-    return false;
-  }
+  return debugEnabled("perf");
 }
 
 function percentile(values: number[], p: number): number {
