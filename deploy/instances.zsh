@@ -180,7 +180,7 @@ case "${1:-}" in
     echo "=== deploy-prod: checkout $ACCEPTED_TAG → build → restart tmux-hub.service ==="
     echo "worktree: $PROD_WT"
     cd "$PROD_WT"
-    git fetch --force origin "refs/tags/$ACCEPTED_TAG:refs/tags/$ACCEPTED_TAG"
+    git fetch --force origin "refs/tags/${ACCEPTED_TAG}:refs/tags/$ACCEPTED_TAG"
     git checkout --detach "$ACCEPTED_TAG"
     bun install --frozen-lockfile
     bun run build
@@ -194,7 +194,7 @@ case "${1:-}" in
     ;;
 
   drift)
-    git -C "$PROD_WT" fetch -q --force origin "refs/tags/$ACCEPTED_TAG:refs/tags/$ACCEPTED_TAG"
+    git -C "$PROD_WT" fetch -q --force origin "refs/tags/${ACCEPTED_TAG}:refs/tags/$ACCEPTED_TAG"
     base=$(git -C "$PROD_WT" rev-parse "$ACCEPTED_TAG^{commit}")
     head=$(git -C "$DOGFOOD_WT" rev-parse HEAD)
     n=$(git -C "$PROD_WT" rev-list --count --first-parent "$base..$head")
