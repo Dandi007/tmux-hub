@@ -113,7 +113,7 @@ describe("uploadFileForSession（直传优先 + 降级）", () => {
       seen.push(input);
       return input.endsWith("/upload-init") ? json(INIT) : json({ ok: true, path: "/abs/tos.png" });
     });
-    globalThis.fetch = mock(async () => new Response(null, { status: 204 })) as typeof fetch;
+    globalThis.fetch = mock(async () => new Response(null, { status: 204 })) as unknown as typeof fetch;
 
     expect(await uploadFileForSession("sess1", file(), fetcher)).toBe("/abs/tos.png");
     expect(seen.some((s) => s.endsWith("/upload-image"))).toBe(false);
@@ -139,7 +139,7 @@ describe("uploadFileForSession（直传优先 + 降级）", () => {
     });
     globalThis.fetch = mock(async () => {
       throw new Error("network unreachable");
-    }) as unknown as typeof fetch;
+    }) as unknown as unknown as typeof fetch;
 
     expect(await uploadFileForSession("sess1", file(), fetcher)).toBe("/abs/legacy.png");
     expect(seen[seen.length - 1]).toBe("/sessions/sess1/upload-image");
