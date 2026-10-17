@@ -58,9 +58,10 @@ export const test = base.extend<{ ctx: Ctx }>({
       return (r.stdout ?? "").trimEnd();
     };
 
-    const createSession = makeCreateSession(`http://127.0.0.1:${port}`);
+    const { createSession, cleanup } = makeCreateSession(`http://127.0.0.1:${port}`);
 
     await use({ socket, tmuxTmpdir, port, tmuxE2E, createSession });
+    await cleanup();
   },
 });
 

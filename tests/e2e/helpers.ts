@@ -13,9 +13,18 @@ export async function bindSecret(page: Page): Promise<void> {
  * Create a session the way a real user does — through the hub's managed
  * launch path (`POST /templates/:id/run`) on the hub at `baseUrl`. Returns the
  * server-assigned session name (`<templateId>-<ts14>`).
+ *
+ * `cleanup()` kills every session it created, through the same API a user's
+ * close button uses; fixtures call it after each test. The e2e tmux server is
+ * reused per checkout, so leftovers piled up across runs, and every page load
+ * opens a ws per session — a few hundred made attach tests time out.
  */
-export function makeCreateSession(baseUrl: string): (templateId?: string) => Promise<string> {
+export function makeCreateSession(baseUrl: string): {
+  createSession: (templateId?: string) => Promise<string>;
+  cleanup: () => Promise<void>;
+} {
   let secret: string | null = null;
+  const created = new Set<string>();
   const getSecret = async (): Promise<string> => {
     if (secret) return secret;
     const r = await fetch(`${baseUrl}/system/auth-check`);
@@ -41,6 +50,7 @@ export function makeCreateSession(baseUrl: string): (templateId?: string) => Pro
       if (r.status === 201) {
         const body = (await r.json()) as { name?: string };
         if (!body.name) throw new Error(`createSession(${templateId}): 201 without name`);
+        created.add(body.name);
         return body.name;
       }
       if (r.status === 409) {
@@ -52,5 +62,18 @@ export function makeCreateSession(baseUrl: string): (templateId?: string) => Pro
     }
     throw new Error(`createSession(${templateId}) failed: name kept colliding (409)`);
   };
-  return createSession;
+
+  // Best effort: a session the test already killed (or renamed) is just gone.
+  const cleanup = async (): Promise<void> => {
+    const names = [...created];
+    created.clear();
+    if (names.length === 0) return;
+    const s = await getSecret();
+    await Promise.all(names.map((name) =>
+      fetch(`${baseUrl}/sessions/${encodeURIComponent(name)}/kill`, {
+        method: "POST",
+        headers: { "x-hub-secret": s, "x-hub-confirm": "kill" },
+      }).catch(() => undefined)));
+  };
+  return { createSession, cleanup };
 }
