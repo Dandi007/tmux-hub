@@ -29,11 +29,11 @@ function normalize(lines: string[]): string[] {
   return out;
 }
 
-async function browserView(page: Page, name: string): Promise<{ size: string; lines: string[]; state: string } | null> {
+async function browserView(page: Page, name: string): Promise<{ size: string; lines: string[]; state: string; resyncs: number } | null> {
   return page.evaluate((n) => {
-    const p = window.__tmuxHubTerms?.[n];
+    const p = window.__tmuxHubTerms?.[n] as unknown as (Probe & { resyncs: number }) | undefined;
     if (!p) return null;
-    return { size: `${p.cols}x${p.rows}`, lines: p.screen(), state: p.state };
+    return { size: `${p.cols}x${p.rows}`, lines: p.screen(), state: p.state, resyncs: p.resyncs };
   }, name);
 }
 
@@ -75,7 +75,7 @@ export function defineFidelitySuite(test: TestType<{ ctx: Ctx }, object>, expect
         for (let i = 0; i < Math.max(bl.length, tl.length); i++) {
           if (bl[i] !== tl[i]) diff.push(`  row ${i}\n    tmux:  ${JSON.stringify(tl[i])}\n    xterm: ${JSON.stringify(bl[i])}`);
         }
-        last = `state=${b.state} size xterm=${b.size} tmux=${t.size}\n${[...diff.slice(0, 3), "  ...", ...diff.slice(-5)].join("\n")}`;
+        last = `state=${b.state} resyncs=${b.resyncs} size xterm=${b.size} tmux=${t.size}\n${[...diff.slice(0, 3), "  ...", ...diff.slice(-5)].join("\n")}`;
       }
       return same;
     }, { message: `xterm screen != tmux capture-pane (${why})`, timeout: 10_000, intervals: [100, 250, 500] })
@@ -87,8 +87,16 @@ export function defineFidelitySuite(test: TestType<{ ctx: Ctx }, object>, expect
     await page.goto("/?debug=term");
     await bindSecret(page);
     await page.reload();
-    await page.evaluate((n) => window.__tmuxHub?.openSession?.(n), name);
-    await expect.poll(() => browserView(page, name).then((b) => b?.state), { timeout: 10_000 }).toBe("connected");
+    // The desktop view restores the last-opened session once its list loads,
+    // which can land after this call and leave our tab hidden (scroll-restore
+    // then defers to activation). Re-open until our slot is the visible one.
+    await expect.poll(async () => {
+      await page.evaluate((n) => window.__tmuxHub?.openSession?.(n), name);
+      return page.evaluate((n) => {
+        const p = window.__tmuxHubTerms?.[n] as unknown as { state: string; visible: boolean } | undefined;
+        return p ? `${p.state}/${p.visible}` : "missing";
+      }, name);
+    }, { timeout: 10_000 }).toBe("connected/true");
   }
 
   async function runAndWait(ctx: Ctx, name: string, cmd: string, marker: string): Promise<void> {
@@ -119,10 +127,10 @@ export function defineFidelitySuite(test: TestType<{ ctx: Ctx }, object>, expect
       await expectInSync(page, ctx, name, "after reload");
     });
 
-    // KNOWN BUG（backlog P1「resize 后屏幕错位」）：约 1/6 概率，resize 后再输出时
-    // xterm 比 tmux 多出一行（zsh PROMPT_SP 的 "%" 行），此后整屏错一行且不自愈。
-    // 推测 xterm.js 与 tmux 对软换行空格行的 reflow 不一致，光标行分叉。修复后去掉 fixme。
-    test.fixme("resize: xterm screen == capture-pane after the pane follows the browser", async ({ page, ctx }) => {
+    // Regression（第 5 轮修复）：resize 后 xterm 与 tmux 各自 reflow，光标行分叉
+    // （约 1/10），之后的输出整屏错一行，不会自愈。服务端在 resize 生效后重发对齐
+    // snapshot（resync）。
+    test("resize: xterm screen == capture-pane after the pane follows the browser", async ({ page, ctx }) => {
       const name = await ctx.createSession();
       await runAndWait(ctx, name, `clear; sh ${writeGenerator("wide", 80)}`, "wide 080");
       await openSession(page, name);
@@ -131,6 +139,29 @@ export function defineFidelitySuite(test: TestType<{ ctx: Ctx }, object>, expect
       await expectInSync(page, ctx, name, "after resize");
       await runAndWait(ctx, name, `sh ${writeGenerator("narrow", 30)}`, "narrow 030");
       await expectInSync(page, ctx, name, "output after resize");
+    });
+
+    // resync 以 RIS 开头，会清空 buffer；client 必须像 reconnect 一样保住用户的
+    // 滚动位置，不能跳回底部或顶部。
+    test("resize resync keeps a scrolled-up viewport scrolled up", async ({ page, ctx }) => {
+      const name = await ctx.createSession();
+      await runAndWait(ctx, name, `clear; sh ${writeGenerator("hist", 200)}`, "hist 200");
+      await openSession(page, name);
+      await expectInSync(page, ctx, name, "before scroll");
+      const resyncs = () => page.evaluate((k) => (window.__tmuxHubTerms![k] as unknown as { resyncs: number }).resyncs, name);
+      // Layout settling right after attach can send one more resize (and so a
+      // resync whose restore would undo a scroll made before it lands): wait
+      // until the count has been stable for a second.
+      let prev = -1;
+      await expect.poll(async () => { const n = await resyncs(); const stable = n === prev; prev = n; return stable; }, { timeout: 10_000, intervals: [1000] }).toBe(true);
+      await page.evaluate((n) => (window.__tmuxHubTerms![n] as unknown as { scrollLines: (k: number) => void }).scrollLines(-60), name);
+      const lfb = (n: string) => page.evaluate((k) => (window.__tmuxHubTerms![k] as unknown as { linesFromBottom: number }).linesFromBottom, n);
+      expect(await lfb(name)).toBe(60);
+      const before = await resyncs();
+      await page.setViewportSize({ width: 900, height: 600 });
+      await expect.poll(resyncs, { timeout: 10_000 }).toBeGreaterThan(before);
+      await expectInSync(page, ctx, name, "after resize resync");
+      await expect.poll(() => lfb(name), { timeout: 5_000 }).toBe(60);
     });
 
     test("alt-screen (vim) at a stable size survives reconnect", async ({ page, ctx }) => {

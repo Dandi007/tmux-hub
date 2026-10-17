@@ -110,7 +110,7 @@ test("snapshot ends by restoring tmux's cursor position", async () => {
   const run = async (args: string[]) => {
     if (args[0] === "capture-pane") return { stdout: "PROMPT", stderr: "", code: 0 };
     if (args[0] === "display-message" && args.some((a) => a.includes("cursor_x"))) {
-      return { stdout: "5 3\n", stderr: "", code: 0 };
+      return { stdout: "5 3 0 40\n", stderr: "", code: 0 };
     }
     return { stdout: "", stderr: "", code: 0 };
   };
@@ -123,5 +123,76 @@ test("snapshot ends by restoring tmux's cursor position", async () => {
   const snap = frames.join("");
   expect(snap).toContain("PROMPT");
   expect(snap.endsWith("\x1b[4;6H")).toBe(true);
+  await b.stop({ deleteLog: true });
+});
+
+// resync re-delivers an aligned snapshot to an already-attached subscriber:
+// announce() first (so the client saves its scroll position), then the
+// snapshot, then live bytes keep flowing to the same subscriber.
+test("resync re-sends a snapshot to an attached subscriber, announced first", async () => {
+  const { SessionBroadcaster } = await import("../../src/server/output-broadcaster");
+  let captures = 0;
+  const run = async (args: string[]) => {
+    if (args[0] === "capture-pane") { captures++; return { stdout: `SNAP_${captures}`, stderr: "", code: 0 }; }
+    return { stdout: "", stderr: "", code: 0 };
+  };
+  const b = new SessionBroadcaster("align-5", run as any, true);
+  await b.start();
+  const frames: string[] = [];
+  const send = (c: Uint8Array | string) => frames.push(dec(c));
+  const unsub = await b.attachWithReplay(send, 120, 40);
+  await b.resync(send, 90, 30, () => frames.push("ANNOUNCE"));
+  const all = frames.join("|");
+  expect(all.indexOf("ANNOUNCE")).toBeGreaterThan(all.indexOf("SNAP_1"));
+  expect(all.indexOf("SNAP_2")).toBeGreaterThan(all.indexOf("ANNOUNCE"));
+  expect(b.subscriberCount()).toBe(1);
+
+  appendFileSync(b.logPath, "LIVE_AFTER_RESYNC");
+  await waitFor(() => frames.join("").includes("LIVE_AFTER_RESYNC"));
+  expect(frames.join("")).toContain("LIVE_AFTER_RESYNC");
+
+  // A detached subscriber is not resurrected by a late resync.
+  unsub();
+  await b.resync(send, 80, 30, () => frames.push("LATE"));
+  expect(frames).not.toContain("LATE");
+  expect(b.subscriberCount()).toBe(0);
+  await b.stop({ deleteLog: true });
+});
+
+// The legacy byte-replay path cannot produce a reflowed snapshot; replaying
+// the width-frozen log would be worse than the drift, so resync is a no-op.
+test("resync is a no-op on the legacy (emulator off) path", async () => {
+  const { SessionBroadcaster } = await import("../../src/server/output-broadcaster");
+  const b = new SessionBroadcaster("align-6", (async () => ({ stdout: "", stderr: "", code: 0 })) as any, false);
+  await b.start();
+  const frames: string[] = [];
+  const send = (c: Uint8Array | string) => frames.push(dec(c));
+  await b.attachWithReplay(send, 120, 40);
+  const before = frames.length;
+  await b.resync(send, 90, 30, () => frames.push("ANNOUNCE"));
+  expect(frames.length).toBe(before);
+  await b.stop({ deleteLog: true });
+});
+
+// capture-pane terminates EVERY line with "\n", including the last visible
+// row. Converted verbatim, that final CRLF scrolls the client one extra line:
+// the whole restored screen sits one row too high (top row pushed into
+// scrollback, blank bottom row) while the CUP still points at tmux's row.
+// Seen as a doubled zsh prompt after a resize resync (xterm-headless repro:
+// baseY = history + 1). The body must end without a line terminator.
+test("the snapshot body does not end with a line terminator", async () => {
+  const { SessionBroadcaster } = await import("../../src/server/output-broadcaster");
+  const run = async (args: string[]) => {
+    if (args[0] === "capture-pane") return { stdout: "HIST\nROW0\nROW1\n", stderr: "", code: 0 };
+    if (args[0] === "display-message") return { stdout: "0 1\n", stderr: "", code: 0 };
+    return { stdout: "", stderr: "", code: 0 };
+  };
+  const b = new SessionBroadcaster("align-7", run as any, true);
+  await b.start();
+  const frames: string[] = [];
+  await b.attachWithReplay((c: Uint8Array | string) => frames.push(dec(c)), 120, 2);
+  const snap = frames.join("");
+  expect(snap).toContain("HIST\r\nROW0\r\nROW1");
+  expect(snap).not.toContain("ROW1\r\n");
   await b.stop({ deleteLog: true });
 });

@@ -167,24 +167,42 @@ export class SessionBroadcaster {
   // wrap and overlay text, in-place redraw frames stack). capture-pane sidesteps
   // that entirely: the snapshot always matches the live pane size the client was
   // just pinned to. `-J` joins wrapped lines so the client re-wraps to its own
-  // width; `-e` keeps SGR colors. capture-pane emits LF-separated lines, so we
-  // convert to CRLF before feeding xterm (no implicit carriage return otherwise).
-  // DEC private modes are not captured by tmux, so we append the emulator's
-  // shadow-tracked modes. Falls back to the emulator serialize if capture fails.
+  // width; `-e` keeps SGR colors. DEC private modes are not captured by tmux,
+  // so we append the emulator's shadow-tracked modes. Falls back to the
+  // emulator serialize if capture fails.
+  //
+  // History and the visible screen are captured and placed separately. One
+  // capture of both cannot be laid out reliably: the runner trims trailing
+  // blank rows, so a mostly blank screen came back short, nothing scrolled the
+  // history off and it was drawn ON the screen (a fresh zsh after a resize
+  // showed its PROMPT_SP line and old prompts above the live prompt). Instead:
+  // history lines, then enough LFs to push all of it into scrollback, then
+  // home and the visible rows, then modes and an absolute CUP to tmux's cursor
+  // (after the capture the client cursor is anywhere, and a replayed DECSTBM
+  // homes it; live output with relative moves would land on the wrong row).
+  // Geometry is read first, inside attachWithReplay's alignment window, so all
+  // of it describes the same instant.
   private async captureSnapshot(cols: number, rows: number): Promise<string> {
     const emu = this.ensureEmulator(cols, rows); // keep shadow primed + live-fed for modes
+    const target = `${this.session}:0.0`;
     try {
-      const r = await this.run([
-        "capture-pane", "-e", "-p", "-J",
-        "-t", `${this.session}:0.0`,
-        "-S", `-${SNAPSHOT_SCROLLBACK_LINES}`,
-      ]);
-      if (r.code === 0) {
-        const body = r.stdout.replace(/\r?\n/g, "\r\n");
-        return "\x1bc" + body + emu.serializeModes() + (await this.cursorRestore());
+      const geo = await this.paneGeometry();
+      const vis = await this.run(["capture-pane", "-e", "-p", "-J", "-t", target]);
+      if (vis.code === 0) {
+        let out = "\x1bc";
+        const hist = geo ? Math.min(geo.history, SNAPSHOT_SCROLLBACK_LINES) : 0;
+        if (geo && hist > 0) {
+          const h = await this.run(["capture-pane", "-e", "-p", "-J", "-t", target, "-S", `-${hist}`, "-E", "-1"]);
+          if (h.code === 0 && h.stdout !== "") {
+            out += toCrlf(h.stdout) + "\r\n" + "\n".repeat(Math.max(0, geo.height - 1)) + "\x1b[H";
+          }
+        }
+        out += toCrlf(vis.stdout) + emu.serializeModes();
+        if (geo) out += `\x1b[${geo.cursorY + 1};${geo.cursorX + 1}H`;
+        return out;
       }
       logger.warn(
-        { session: this.session, code: r.code, stderr: r.stderr },
+        { session: this.session, code: vis.code, stderr: vis.stderr },
         "capture-pane failed; falling back to emulator snapshot",
       );
     } catch (e) {
@@ -193,19 +211,18 @@ export class SessionBroadcaster {
     return emu.snapshot();
   }
 
-  // After the capture body the client cursor sits below the last line, and a
-  // replayed DECSTBM homes it — neither is the app's cursor. Live output that
-  // moves relatively (zsh redrawing its prompt on the attach pin's SIGWINCH)
-  // would land on the wrong row, so end the restore stream with an absolute
-  // CUP to tmux's cursor. Read right after the capture, inside the alignment
-  // window of attachWithReplay, so the two describe the same instant.
-  private async cursorRestore(): Promise<string> {
+  private async paneGeometry(): Promise<{ cursorX: number; cursorY: number; history: number; height: number } | null> {
     try {
-      const r = await this.run(["display-message", "-p", "-t", `${this.session}:0.0`, "#{cursor_x} #{cursor_y}"]);
-      const m = /^(\d+) (\d+)/.exec(r.stdout.trim());
-      if (r.code === 0 && m) return `\x1b[${Number(m[2]) + 1};${Number(m[1]) + 1}H`;
-    } catch { /* fall through: no cursor restore */ }
-    return "";
+      const r = await this.run([
+        "display-message", "-p", "-t", `${this.session}:0.0`,
+        "#{cursor_x} #{cursor_y} #{history_size} #{pane_height}",
+      ]);
+      const m = /^(\d+) (\d+) (\d+) (\d+)/.exec(r.stdout.trim());
+      if (r.code === 0 && m) {
+        return { cursorX: Number(m[1]), cursorY: Number(m[2]), history: Number(m[3]), height: Number(m[4]) };
+      }
+    } catch { /* fall through: no history, no cursor restore */ }
+    return null;
   }
 
   // Replay buffered history (tail of log file up to REPLAY_CAP bytes) then
@@ -283,6 +300,19 @@ export class SessionBroadcaster {
     return () => { this.subscribers.delete(send); };
   }
 
+  // Re-deliver an aligned snapshot to an already-attached subscriber (after a
+  // web resize, see resize-resync.ts). `announce` runs once the subscriber is
+  // detached from the live stream and before the snapshot, so the caller can
+  // tell the client a reset is coming. A subscriber that detached meanwhile is
+  // left alone. The legacy byte-replay path has no reflowed snapshot to offer,
+  // and replaying the width-frozen log would be worse than the drift: no-op.
+  async resync(send: Subscriber, paneCols: number, paneRows: number, announce: () => void): Promise<void> {
+    if (!this.emulatorEnabled || !this.subscribers.has(send)) return;
+    this.subscribers.delete(send);
+    announce();
+    await this.attachWithReplay(send, paneCols, paneRows);
+  }
+
   // Re-size the live emulator to track a pane resize (client viewport change).
   // No-op until the emulator is lazily built on first attach — the next attach
   // builds it at the then-current pane size anyway.
@@ -351,6 +381,13 @@ export class SessionBroadcaster {
       for (const l of this.eventListeners) l({ kind: "error", message: String(e) });
     }
   }
+}
+
+// capture-pane output → xterm input: LF-separated lines need CRLF (no implicit
+// carriage return), and the terminator after the last line would scroll the
+// client one extra row, so it is dropped.
+function toCrlf(s: string): string {
+  return s.replace(/\r?\n$/, "").replace(/\r?\n/g, "\r\n");
 }
 
 function shellQuote(s: string): string {
