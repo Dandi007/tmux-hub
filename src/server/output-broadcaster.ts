@@ -44,6 +44,13 @@ function trashLog(logPath: string): void {
 
 type Subscriber = (chunk: Uint8Array) => void;
 
+// Attach snapshot alignment (see attachWithReplay): how long after a capture
+// the pipe-pane → log → poll path must stay silent for the capture to count,
+// and how many captures to try before tolerating the overlap. The path's lag
+// is one 5ms poll tick plus the sink's write, so 30ms leaves ample margin.
+const ALIGN_SETTLE_MS = 30;
+const ALIGN_MAX_CAPTURES = 5;
+
 export type BroadcasterEvent =
   | { kind: "replay_truncated" }
   | { kind: "stopped" }
@@ -174,7 +181,7 @@ export class SessionBroadcaster {
       ]);
       if (r.code === 0) {
         const body = r.stdout.replace(/\r?\n/g, "\r\n");
-        return "\x1bc" + body + emu.serializeModes();
+        return "\x1bc" + body + emu.serializeModes() + (await this.cursorRestore());
       }
       logger.warn(
         { session: this.session, code: r.code, stderr: r.stderr },
@@ -184,6 +191,21 @@ export class SessionBroadcaster {
       logger.warn({ session: this.session, err: e }, "capture-pane threw; falling back to emulator snapshot");
     }
     return emu.snapshot();
+  }
+
+  // After the capture body the client cursor sits below the last line, and a
+  // replayed DECSTBM homes it — neither is the app's cursor. Live output that
+  // moves relatively (zsh redrawing its prompt on the attach pin's SIGWINCH)
+  // would land on the wrong row, so end the restore stream with an absolute
+  // CUP to tmux's cursor. Read right after the capture, inside the alignment
+  // window of attachWithReplay, so the two describe the same instant.
+  private async cursorRestore(): Promise<string> {
+    try {
+      const r = await this.run(["display-message", "-p", "-t", `${this.session}:0.0`, "#{cursor_x} #{cursor_y}"]);
+      const m = /^(\d+) (\d+)/.exec(r.stdout.trim());
+      if (r.code === 0 && m) return `\x1b[${Number(m[2]) + 1};${Number(m[1]) + 1}H`;
+    } catch { /* fall through: no cursor restore */ }
+    return "";
   }
 
   // Replay buffered history (tail of log file up to REPLAY_CAP bytes) then
@@ -199,22 +221,39 @@ export class SessionBroadcaster {
       this.subscribers.add(send);
       return () => { this.subscribers.delete(send); };
     }
-    const pending: Uint8Array[] = [];
+    let pending: Uint8Array[] = [];
     const tap = (chunk: Uint8Array): void => { pending.push(chunk); };
     // Register the tap BEFORE capturing so every live byte emitted after this
-    // point lands in `pending`; the capture reflects state at/after this moment,
-    // so the overlap is at most a few self-correcting bytes and there is no gap.
+    // point lands in `pending` and there is no gap.
     this.subscribers.add(tap);
 
     const enc = new TextEncoder();
     try {
       if (this.emulatorEnabled) {
         // Authoritative snapshot from tmux capture-pane (correctly reflowed to
-        // the live pane size); live bytes during the async capture are buffered
-        // by `tap` and flushed below in order.
+        // the live pane size). Bytes tmux had already rendered when the capture
+        // ran may still be in flight through pipe-pane → log → poll; flushing
+        // them after the snapshot applies them twice, and relative moves
+        // (CR/LF, CUU, zsh PROMPT_SP) then shift the screen for good — e.g. a
+        // TUI redrawing after the attach pin. So a capture only counts once no
+        // byte showed up from just before it to ALIGN_SETTLE_MS after it;
+        // otherwise drop those bytes (the next capture contains them) and
+        // retry. A pane that never goes quiet falls back to the last capture
+        // plus its trailing bytes (the overlap is then tolerated, not dropped).
         const cols = normalizeDim(paneCols, WINDOW_COLS);
         const rows = normalizeDim(paneRows, WINDOW_ROWS);
-        const snap = await this.captureSnapshot(cols, rows);
+        let snap = "";
+        for (let attempt = 1; attempt <= ALIGN_MAX_CAPTURES; attempt++) {
+          this.poll();
+          pending = [];
+          snap = await this.captureSnapshot(cols, rows);
+          await new Promise((r) => setTimeout(r, ALIGN_SETTLE_MS));
+          this.poll();
+          if (pending.length === 0) break;
+          if (attempt === ALIGN_MAX_CAPTURES) {
+            logger.debug({ session: this.session, attempts: attempt }, "attach snapshot never quiet; delivering overlap");
+          }
+        }
         send(enc.encode(snap));
       } else {
         const upTo = this.offset;
