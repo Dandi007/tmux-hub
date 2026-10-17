@@ -216,6 +216,29 @@ export function defineFidelitySuite(test: TestType<{ ctx: Ctx }, object>, expect
       await expect.poll(() => probe<number>("linesFromBottom"), { timeout: 5_000 }).toBe(0);
     });
 
+    // 宽字符宽度（第 9 轮）：tmux 与 Claude Code（Ink）按 Unicode 9+ 把 emoji
+    // 算作 2 列，xterm.js 默认 Unicode 6 宽度表算作 1 列。应用按绝对列号定位
+    // （CHA / CUP，Ink 的局部重绘就是这样）时，xterm 里后面的内容错开一列，
+    // 不会自愈（dogfood 上 CC 会话的 ⚡/💬 行实测出现）。
+    test("emoji widths match tmux when the app positions by column", async ({ page, ctx }) => {
+      const name = await ctx.createSession();
+      await runAndWait(ctx, name, "clear; echo shell-ready", "shell-ready");
+      await openSession(page, name);
+      await expectInSync(page, ctx, name, "before emoji");
+      // The live stream must render it right by itself: a resync/replay
+      // snapshot landing during the check would repaint the screen from tmux
+      // and mask the bug. Let the post-attach layout resize settle first, and
+      // require that no snapshot arrived.
+      const counters = () => page.evaluate((k) => { const p = window.__tmuxHubTerms![k] as unknown as { resyncs: number; replays: number }; return `${p.resyncs}/${p.replays}`; }, name);
+      let prev = "";
+      await expect.poll(async () => { const c = await counters(); const stable = c === prev; prev = c; return stable; }, { timeout: 10_000, intervals: [1000] }).toBe(true);
+      // ⚡ (U+26A1) and 💬 (U+1F4AC) then jump to an absolute column: lands right
+      // after the glyph only if both sides agree it is 2 columns wide.
+      await runAndWait(ctx, name, "printf '\\342\\232\\241\\033[3GA \\360\\237\\222\\254\\033[7GB end-%s\\n' emoji", "end-emoji");
+      await expectInSync(page, ctx, name, "after emoji + CHA");
+      expect(await counters()).toBe(prev);
+    });
+
     // Regression（第 4 轮修复）：刚起的 shell 还在画第一个 prompt 时 attach，
     // 同样命中 attach 时 snapshot 与在途字节重叠的问题（prompt 被画多次）。
     test("fresh shell attach while the first prompt is still being drawn", async ({ page, ctx }) => {

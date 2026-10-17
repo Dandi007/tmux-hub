@@ -14,6 +14,7 @@ import {
   WINDOW_ROWS,
 } from "./config";
 import { SessionEmulator } from "./session-emulator";
+import { TitleSeqFilter } from "./title-seq-filter";
 import { mkdirSync, openSync, readSync, closeSync, existsSync, unlinkSync, statSync, renameSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
@@ -71,6 +72,9 @@ export class SessionBroadcaster {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
   private pollChunk = new Uint8Array(65536);
+  // Live bytes go through this before anyone sees them (xterm.js would print
+  // screen's window-name sequence; see title-seq-filter.ts). The log keeps raw.
+  private titleFilter = new TitleSeqFilter();
 
   // emulatorEnabled defaults to the module-level config flag (production wiring);
   // it is an explicit constructor seam only so tests can pin the path
@@ -351,6 +355,19 @@ export class SessionBroadcaster {
     this.eventListeners.clear();
   }
 
+  private emit(chunk: Uint8Array): void {
+    if (chunk.length === 0) return;
+    const wasTruncated = this.ring.truncated();
+    this.ring.append(chunk);
+    if (this.emulator) this.emulator.write(chunk);
+    if (!wasTruncated && this.ring.truncated()) {
+      for (const l of this.eventListeners) l({ kind: "replay_truncated" });
+    }
+    for (const sub of this.subscribers) {
+      try { sub(chunk); } catch { /* swallow subscriber errors */ }
+    }
+  }
+
   private poll(): void {
     if (this.fd === null) return;
     try {
@@ -360,22 +377,17 @@ export class SessionBroadcaster {
         this.offset = st.size;
         return;
       }
+      let read = false;
       while (true) {
         const n = readSync(this.fd, this.pollChunk, 0, this.pollChunk.length, this.offset);
         if (n <= 0) break;
+        read = true;
         this.offset += n;
-        const chunk = new Uint8Array(this.pollChunk.subarray(0, n));
-        const wasTruncated = this.ring.truncated();
-        this.ring.append(chunk);
-        if (this.emulator) this.emulator.write(chunk);
-        if (!wasTruncated && this.ring.truncated()) {
-          for (const l of this.eventListeners) l({ kind: "replay_truncated" });
-        }
-        for (const sub of this.subscribers) {
-          try { sub(chunk); } catch { /* swallow subscriber errors */ }
-        }
+        this.emit(this.titleFilter.push(this.pollChunk.subarray(0, n)));
         if (n < this.pollChunk.length) break;
       }
+      // A lone ESC the filter held at a chunk end is released on an idle tick.
+      if (!read) this.emit(this.titleFilter.flush());
     } catch (e) {
       logger.error({ session: this.session, err: e }, "poll read error");
       for (const l of this.eventListeners) l({ kind: "error", message: String(e) });
