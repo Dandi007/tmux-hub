@@ -1,5 +1,6 @@
 import { Terminal } from "@xterm/headless";
 import { SerializeAddon } from "@xterm/addon-serialize";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { ModeShadow } from "./mode-shadow";
 
 // xterm's _core.writeSync is marked deprecated but is the only way to achieve
@@ -35,6 +36,10 @@ export class SessionEmulator {
     this.term = new Terminal({ cols, rows, scrollback: scrollbackLines, allowProposedApi: true });
     this.serializer = new SerializeAddon();
     this.term.loadAddon(this.serializer);
+    // Same width table as tmux and the web client (src/web/terminal.ts): emoji
+    // like ⚡ are 2 columns, so absolute-column redraws land where tmux puts them.
+    this.term.loadAddon(new Unicode11Addon());
+    this.term.unicode.activeVersion = "11";
     this.shadow = new ModeShadow();
     this.shadow.attach(this.term);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -62,3 +62,13 @@ test("dispose is idempotent and write-after-dispose is a no-op", () => {
   e.dispose();
   expect(() => e.write(enc.encode("y"))).not.toThrow();
 });
+
+// tmux 3.6 / Claude Code (Ink) treat emoji like ⚡ as 2 columns (Unicode 11).
+// The emulator must agree, or absolute-column redraws (CHA) land one cell off.
+test("wide emoji occupy 2 columns (Unicode 11), matching tmux", () => {
+  const e = new SessionEmulator(80, 24, 1000);
+  e.write(enc.encode("⚡\x1b[3Gy"));
+  const snap = e.snapshot();
+  expect(snap).toContain("⚡y");
+  expect(snap).not.toContain("⚡ y");
+});
