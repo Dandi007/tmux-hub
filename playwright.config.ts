@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,7 +17,9 @@ const E2E_EMU_PORT = "3202";
 // and DO inherit env vars from the runner. We use a fixed-path env file (one per
 // checkout dir) so reloads and workers all read the same JSON. Single-checkout
 // invariant — distinct checkouts get distinct files via cwd hash.
-const cwdHash = Buffer.from(process.cwd()).toString("base64url").slice(0, 12);
+// Hash the whole cwd: a base64 prefix of it was "/data/cod" for every worktree,
+// so all worktrees shared one E2E env file and tmux server.
+const cwdHash = createHash("sha256").update(process.cwd()).digest("hex").slice(0, 12);
 const E2E_ENV_FILE = join(tmpdir(), `tmux-hub-e2e-env-${cwdHash}.json`);
 // Separate env file for the emulator project so it gets its own socket/dirs/port.
 export const E2E_EMU_ENV_FILE = join(tmpdir(), `tmux-hub-e2e-emu-env-${cwdHash}.json`);

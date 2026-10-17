@@ -2,6 +2,7 @@
 // the emulator hub's env file (separate socket, port, dirs, TMUX_HUB_EMULATOR=1).
 // The env file path is set in playwright.config.ts as TMUX_HUB_E2E_EMU_ENV_FILE
 // and inherited by worker processes.
+import { createHash } from "node:crypto";
 import { test as base, expect } from "@playwright/test";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, existsSync, readFileSync } from "node:fs";
@@ -31,7 +32,7 @@ function loadEmuEnv(): E2EEnv {
     return JSON.parse(readFileSync(fromVar, "utf8")) as E2EEnv;
   }
   // Fallback: derive the path the same way playwright.config.ts does
-  const cwdHash = Buffer.from(process.cwd()).toString("base64url").slice(0, 12);
+  const cwdHash = createHash("sha256").update(process.cwd()).digest("hex").slice(0, 12);
   const envFile = join(tmpdir(), `tmux-hub-e2e-emu-env-${cwdHash}.json`);
   if (!existsSync(envFile)) {
     throw new Error(
