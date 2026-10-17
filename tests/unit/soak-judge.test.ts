@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { parseMetrics, judgeSoak } from "../../scripts/diag/soak-judge";
+import { parseMetrics, judgeSoak, screenDiff } from "../../scripts/diag/soak-judge";
 
 const text = (o: Record<string, number>) =>
   "tmux_hub_up 1\n" + Object.entries(o).map(([k, v]) => `# HELP ${k} x\n# TYPE ${k} gauge\n${k} ${v}`).join("\n") + "\n";
@@ -41,5 +41,16 @@ describe("judgeSoak", () => {
   test("missing gauge is reported, not silently passed", () => {
     const { tmux_hub_sse_clients: _, ...end } = base;
     expect(judgeSoak(base, end).join()).toContain("tmux_hub_sse_clients");
+  });
+});
+
+describe("screenDiff", () => {
+  test("equal screens modulo trailing blanks and blank tail rows", () => {
+    expect(screenDiff(["a  ", "b", ""], ["a", "b"])).toBe(0);
+  });
+  test("counts differing rows on either side", () => {
+    expect(screenDiff(["a", "x", "c"], ["a", "b", "c"])).toBe(1);
+    expect(screenDiff(["a", "b", "extra"], ["a", "b"])).toBe(1);
+    expect(screenDiff(["a"], ["a", "b", "c"])).toBe(2);
   });
 });

@@ -32,3 +32,17 @@ export function judgeSoak(base: Metrics, end: Metrics): string[] {
   }
   return problems;
 }
+
+// Rows that differ between the browser's xterm screen and `capture-pane -p`,
+// ignoring trailing blanks and blank tail rows (capture-pane trims them).
+export function screenDiff(xterm: string[], tmux: string[]): number {
+  const norm = (ls: string[]) => {
+    const o = ls.map((l) => l.replace(/\s+$/, ""));
+    while (o.length && o.at(-1) === "") o.pop();
+    return o;
+  };
+  const a = norm(xterm), b = norm(tmux);
+  let n = 0;
+  for (let k = 0; k < Math.max(a.length, b.length); k++) if (a[k] !== b[k]) n++;
+  return n;
+}
