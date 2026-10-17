@@ -50,3 +50,12 @@ describe("GET /metrics", () => {
     expect(r.status).toBe(200);
   });
 });
+
+describe("GET /system/health", () => {
+  test("reports the commit the process was started from", async () => {
+    const r = await fetchApp("/system/health");
+    const body = (await r.json()) as { commit: string };
+    const head = Bun.spawnSync(["git", "rev-parse", "HEAD"]).stdout.toString().trim();
+    expect(body.commit).toBe(head);
+  });
+});
