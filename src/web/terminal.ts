@@ -43,6 +43,8 @@ export type TerminalProbe = {
   readonly linesFromBottom: number;
   /** Count of server `resync` messages handled (resize re-snapshots). */
   readonly resyncs: number;
+  /** Count of completed replays (scrollpos restore decision executed or deferred). */
+  readonly replays: number;
   scrollLines: (n: number) => void;
   /** Same visibility test the scroll-restore decision uses (hidden pool slot → deferred). */
   readonly visible: boolean;
@@ -516,6 +518,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // 只有真实滚动（值变化）才写。1s 轮询兼顾 momentum/拖动/键盘所有滚动来源。
   let lastReportedLfb = 0;
   let resyncCount = 0; // fidelity probe only
+  let replayCount = 0; // fidelity probe only
   // scrollposRestoredOnce tracks whether we have applied the first scrollpos
   // delivery for this attach lifetime. First delivery = fresh attach（v2 起
   // 一律显式钉底，INV-5）；re-deliveries arrive on reconnect（只信本地快照）。
@@ -674,6 +677,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                   // INV-4: 决策执行完（含 action none / alt-screen 跳过）才放开
                   // 上报 gate。
                   reportingEnabled = true;
+                  replayCount++;
                 });
                 return;
               }
@@ -899,6 +903,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     dropSocket: () => { try { ws.close(); } catch {} },
     get linesFromBottom() { const b = term.buffer.active; return Math.max(0, b.baseY - b.viewportY); },
     get resyncs() { return resyncCount; },
+    get replays() { return replayCount; },
     scrollLines: (n: number) => term.scrollLines(n),
     get visible() { return isTermVisible(); },
   } : null;
