@@ -806,11 +806,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       setState("connected");
       flushSendQueue();
       startHeartbeat();
-      const c = term.cols;
-      const r = term.rows;
-      if (c > 0 && r > 0 && shouldSendResize(viewportState)) {
-        queuedSend({ kind: "resize", cols: c, rows: r });
-      }
+      sendResizeIfVisible();
     };
 
     socket.onclose = (ev) => {
@@ -846,16 +842,23 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   };
 
   // ── Resize ─────────────────────────────────────────────────────────
+  // A hidden desktop-pool slot never pins its pane: a window resize / focus would
+  // otherwise re-pin and re-snapshot every session at once, and steal sessions
+  // another device is viewing. The slot catches up in handle.fit() when the
+  // pool activates it. Mobile has a single, visible terminal: unaffected.
+  const sendResizeIfVisible = (): void => {
+    const c = term.cols;
+    const r = term.rows;
+    if (c > 0 && r > 0 && isTermVisible() && shouldSendResize(viewportState)) {
+      queuedSend({ kind: "resize", cols: c, rows: r });
+    }
+  };
   let resizeTimer: ReturnType<typeof setTimeout> | null = null;
   const publishResize = () => {
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       resizeTimer = null;
-      const c = term.cols;
-      const r = term.rows;
-      if (c > 0 && r > 0 && shouldSendResize(viewportState)) {
-        queuedSend({ kind: "resize", cols: c, rows: r });
-      }
+      sendResizeIfVisible();
     }, 150);
   };
 
@@ -922,11 +925,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   ws.addEventListener("open", () => {
     startHeartbeat();
     setTimeout(() => {
-      const c = term.cols;
-      const r = term.rows;
-      if (c > 0 && r > 0 && ws.readyState === WebSocket.OPEN && shouldSendResize(viewportState)) {
-        queuedSend({ kind: "resize", cols: c, rows: r });
-      }
+      if (ws.readyState === WebSocket.OPEN) sendResizeIfVisible();
     }, 100);
   });
 
@@ -967,6 +966,10 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     fit: () => {
       if (disposed) return;
       try { fit.fit(); } catch {}
+      // Pool activation: pin the pane to this (now visible) slot — catches up a
+      // resize deferred while hidden, and makes "latest active client wins" hold
+      // for tab switches too. Same size → server-side no-op (no resync).
+      publishResize();
       // 消费挂起的落点决策（INV-5 hidden-slot 补丁）：pool activate 把 slot
       // 置为可见后会调 fit()——此时 renderer 恢复，scrollToBottom/scrollLines
       // 才可靠。hidden 期间用户无法滚动该 slot，这里消费不会覆盖用户意图。
@@ -989,12 +992,8 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       if (result.action.type === "resize") {
         // Native detached → web reclaims ownership, fit and send resize
         try { fit.fit(); } catch {}
-        const c = term.cols;
-        const r = term.rows;
-        if (c > 0 && r > 0 && shouldSendResize(viewportState)) {
-          queuedSend({ kind: "resize", cols: c, rows: r });
-        }
-        console.log(`[tmux-hub] viewport reclaimed by web: ${c}x${r}`);
+        sendResizeIfVisible();
+        console.log(`[tmux-hub] viewport reclaimed by web: ${term.cols}x${term.rows}`);
       }
     },
     close: () => {
