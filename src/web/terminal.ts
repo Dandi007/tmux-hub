@@ -719,7 +719,11 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     const r = term.rows > 0 ? term.rows : (opts.rows ?? 50);
     const base = await hubWsUrl(`/ws/sessions/${encodeURIComponent(opts.sessionName)}`);
     const sep = base.includes("?") ? "&" : "?";
-    return `${base}${sep}cols=${c}&rows=${r}&resync=1`;
+    // Checked after the await: the pool marks the active slot in the same tick
+    // it starts attaching. A hidden slot asks the server not to pin the pane on
+    // open (same rule as sendResizeIfVisible); activation pins it via fit().
+    const pin = isTermVisible() ? "" : "&pin=0";
+    return `${base}${sep}cols=${c}&rows=${r}&resync=1${pin}`;
   };
 
   // 重放（reconnect 或 resize resync）前即时快照本地 lfb，并关闭上报。

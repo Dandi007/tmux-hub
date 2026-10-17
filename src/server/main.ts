@@ -279,6 +279,9 @@ type WsData = {
   // resize, announced by a `{kind:"resync"}` message. Opt-in so a stale page
   // that does not know the message never gets it written into its terminal.
   resyncCapable: boolean;
+  // false: a hidden desktop-pool slot — attach at the pane's current size
+  // without pinning it (the client pins on activation with a resize message).
+  pin: boolean;
   resync?: ResyncScheduler;
   closed?: boolean;
 };
@@ -327,7 +330,8 @@ Bun.serve({
       const rows = clampInt(Number(url.searchParams.get("rows")), 5, 200, WINDOW_ROWS);
       const connId = crypto.randomUUID().slice(0, 8);
       const resyncCapable = url.searchParams.get("resync") === "1";
-      const data: WsData = { sessionName, cols, rows, connId, unsubs: [], resyncCapable };
+      const pin = url.searchParams.get("pin") !== "0";
+      const data: WsData = { sessionName, cols, rows, connId, unsubs: [], resyncCapable, pin };
       if (server.upgrade(req, { data })) return undefined;
       logger.error({ session: sessionName, connId }, "ws upgrade failed at server.upgrade()");
       return new Response("upgrade failed", { status: 426 });
@@ -354,7 +358,23 @@ Bun.serve({
         logger.warn({ session: sessionName, connId, err: e }, "getNativeAttachCount failed, assuming native attached");
         attachCount = 1; // fail-safe: treat as native attached
       }
-      if (attachCount === 0) {
+      // The pane's current size, for when this client does not pin it.
+      const queryPaneSize = async (): Promise<{ cols: number; rows: number } | null> => {
+        try {
+          const sizeOut = await tmux(["display-message", "-p", "-t", `${sessionName}:0`, "#{window_width}|#{window_height}"]);
+          if (sizeOut.code !== 0) return null;
+          const parts = sizeOut.stdout.split("|").map(Number);
+          const nc = parts[0] ?? NaN;
+          const nr = parts[1] ?? NaN;
+          if (Number.isFinite(nc) && Number.isFinite(nr) && nc > 0 && nr > 0) return { cols: nc, rows: nr };
+          logger.warn({ session: sessionName, raw: sizeOut.stdout }, "viewport query returned invalid size");
+        } catch (e) {
+          logger.warn({ session: sessionName, err: e }, "viewport query failed");
+        }
+        return null;
+      };
+
+      if (attachCount === 0 && ws.data.pin) {
         try { await pinViewport(sessionName, cols, rows); }
         catch (e) {
           logger.warn({ session: sessionName, connId, err: e }, "viewport pin failed");
@@ -362,25 +382,20 @@ Bun.serve({
         }
         // R3: send viewport message — web owns
         try { ws.send(JSON.stringify({ kind: "viewport", cols, rows, owner: "web" })); } catch {}
+      } else if (attachCount === 0) {
+        // Hidden slot: web still owns (it may pin later), but snapshot at the
+        // pane's real size so the attach stays aligned until then.
+        const size = await queryPaneSize();
+        if (size) { paneCols = size.cols; paneRows = size.rows; }
+        try { ws.send(JSON.stringify({ kind: "viewport", cols: paneCols, rows: paneRows, owner: "web" })); } catch {}
       } else {
         logger.debug({ session: sessionName, attachCount }, "native client attached, skipping viewport pin");
         // R3: send viewport message — native owns, query current size
-        try {
-          const sizeOut = await tmux(["display-message", "-p", "-t", `${sessionName}:0`, "#{window_width}|#{window_height}"]);
-          if (sizeOut.code === 0) {
-            const parts = sizeOut.stdout.split("|").map(Number);
-            const nc = parts[0] ?? NaN;
-            const nr = parts[1] ?? NaN;
-            if (Number.isFinite(nc) && Number.isFinite(nr) && nc > 0 && nr > 0) {
-              paneCols = nc;
-              paneRows = nr;
-              try { ws.send(JSON.stringify({ kind: "viewport", cols: nc, rows: nr, owner: "native" })); } catch {}
-            } else {
-              logger.warn({ session: sessionName, raw: sizeOut.stdout }, "viewport query returned invalid size");
-            }
-          }
-        } catch (e) {
-          logger.warn({ session: sessionName, err: e }, "viewport query for native owner failed");
+        const size = await queryPaneSize();
+        if (size) {
+          paneCols = size.cols;
+          paneRows = size.rows;
+          try { ws.send(JSON.stringify({ kind: "viewport", cols: size.cols, rows: size.rows, owner: "native" })); } catch {}
         }
       }
 
