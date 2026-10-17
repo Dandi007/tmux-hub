@@ -968,8 +968,10 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       try { fit.fit(); } catch {}
       // Pool activation: pin the pane to this (now visible) slot — catches up a
       // resize deferred while hidden, and makes "latest active client wins" hold
-      // for tab switches too. Same size → server-side no-op (no resync).
-      publishResize();
+      // for tab switches too. Same size → server-side no-op (no resync). Sent
+      // now, not debounced: a quick switch away would hide the slot before a
+      // debounced send fires, and the catch-up would be lost.
+      sendResizeIfVisible();
       // 消费挂起的落点决策（INV-5 hidden-slot 补丁）：pool activate 把 slot
       // 置为可见后会调 fit()——此时 renderer 恢复，scrollToBottom/scrollLines
       // 才可靠。hidden 期间用户无法滚动该 slot，这里消费不会覆盖用户意图。

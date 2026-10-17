@@ -180,8 +180,9 @@ test.describe("desktop tab-bar", () => {
     await page.setViewportSize({ width: 1400, height: 900 });
     await openApp(page);
     for (const n of [a, b]) await expect(tab(page, n)).toBeVisible({ timeout: 10_000 });
+    // Activate b and switch straight back: b's catch-up resize must not be
+    // lost to the switch (activation sends immediately, not debounced).
     await tab(page, b).click();
-    await expect(tab(page, b)).toHaveClass(/is-active/, { timeout: 5_000 });
     await tab(page, a).click();
     await expect(tab(page, a)).toHaveClass(/is-active/, { timeout: 5_000 });
     await expect.poll(() => size(a) === size(b) ? size(a) : "differ", { timeout: 5_000 }).not.toBe("differ");

@@ -12,7 +12,7 @@ E2E 复现：两个 tab，a 激活、b 隐藏，窗口缩小后 b 的 tmux windo
 ## 设计（`src/web/terminal.ts`）
 
 - 新增 `sendResizeIfVisible()`：仅当 `isTermVisible()`（INV-5/6 共用的可见性判定）且 `shouldSendResize`（web 拥有 viewport）时才发 resize。窗口 resize 的 debounce、重连 onopen、首次 ws open 的 100ms 补发、native 释放后 web reclaim 都改为走它。
-- `handle.fit()`（pool activate 时调用）在 fit 后 `publishResize()`：补上隐藏期间延后的尺寸，tab 切换也满足「latest active client wins」。尺寸没变时服务端 `ResyncScheduler` 不会标 dirty，不会产生 resync。
+- `handle.fit()`（pool activate 时调用）在 fit 后立即 `sendResizeIfVisible()`（不走 debounce：快速切走会让 slot 在 debounce 触发前就隐藏，补发会丢失；CI 上第一版就这样红过，本地复现 2/5）：补上隐藏期间延后的尺寸，tab 切换也满足「latest active client wins」。尺寸没变时服务端 `ResyncScheduler` 不会标 dirty，不会产生 resync。
 - mobile 视图只有一个可见 terminal，行为不变；页面整体隐藏（visibilityState hidden）时同样不发，回到前台由已有的 visibilitychange reassert 补发。
 
 不在本次范围：服务端在 ws open 时按 URL 里的 cols/rows 给 pane pin 尺寸（隐藏 slot 首次连接或重连时仍会 pin 一次）。它发生在连接建立时而不是焦点或 resize 时，影响较小，记入 backlog。
