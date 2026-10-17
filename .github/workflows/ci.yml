@@ -33,11 +33,8 @@ jobs:
       - name: Lint tests
         run: bun run lint:tests
 
-      # hub-tui / viewport-ownership are pre-existing broken (they fail in any
-      # environment, tracked since 2026-07-05) — excluded until fixed so CI
-      # guards everything else. Do NOT add new files to this exclusion.
       - name: Unit & integration tests
-        run: bun test --bail tests/unit $(ls tests/integration/*.test.ts | grep -vE 'hub-tui|viewport-ownership')
+        run: bun test --bail tests/unit tests/integration
 
       # NO `playwright install` here: playwright provides no browser downloads
       # for this runner's platform (ubuntu 26.04). Chromium is pre-provisioned
@@ -47,10 +44,8 @@ jobs:
       # Scope notes:
       # - mobile / mobile-suggest projects need webkit (iPhone 14 device):
       #   not installable on this platform → not run in CI (backlog).
-      # - "Ctrl+Tab / Ctrl+Shift+Tab cycles" tests are known-broken (merged
-      #   while CI was down, fail headless) → excluded (backlog).
       - name: E2E tests (desktop + emulator, chromium)
-        run: bunx playwright test tests/e2e --project=desktop --project=emulator --grep-invert "cycles to the (next|previous) tab"
+        run: bunx playwright test tests/e2e --project=desktop --project=emulator
 
       - name: Stop tmux server
         if: always()
