@@ -46,13 +46,15 @@ test("attach snapshot is seeded from capture-pane, not from log replay", async (
   await b.stop({ deleteLog: true });
 });
 
-// The capture must request scrollback history (so reattach shows context), and
+// History is captured separately from the visible screen (see captureSnapshot):
+// the pane's history_size bounds a `-S -<N> -E -1` capture, and both captures
 // target the session's pane. Pins the capture-pane contract.
 test("capture-pane is invoked with scrollback and the session pane target", async () => {
   const { SessionBroadcaster } = await import("../../src/server/output-broadcaster");
   const calls: string[][] = [];
   const run = async (args: string[]) => {
     calls.push(args);
+    if (args[0] === "display-message") return { stdout: "0 0 50 40", stderr: "", code: 0 };
     if (args[0] === "capture-pane") return { stdout: "X", stderr: "", code: 0 };
     return { stdout: "", stderr: "", code: 0 };
   };
@@ -65,16 +67,17 @@ test("capture-pane is invoked with scrollback and the session pane target", asyn
   }
   await b.attachWithReplay(() => {}, 300, 77);
 
-  const cap = calls.find((a) => a[0] === "capture-pane");
-  expect(cap).toBeDefined();
-  expect(cap).toContain("-e"); // include escape sequences (color/SGR)
-  expect(cap).toContain("-p"); // print to stdout
-  // scrollback start: -S -<N>
-  const sIdx = cap!.indexOf("-S");
-  expect(sIdx).toBeGreaterThanOrEqual(0);
-  expect(Number(cap![sIdx + 1])).toBeLessThan(0); // negative = lines back into history
-  // targets this session's pane
-  expect(cap!.some((a) => a.includes("cap-seed-2"))).toBe(true);
+  const caps = calls.filter((a) => a[0] === "capture-pane");
+  for (const cap of caps) {
+    expect(cap).toContain("-e"); // include escape sequences (color/SGR)
+    expect(cap).toContain("-p"); // print to stdout
+    expect(cap.some((a) => a.includes("cap-seed-2"))).toBe(true); // this session's pane
+  }
+  const hist = caps.find((a) => a.includes("-S"));
+  expect(hist).toBeDefined();
+  expect(hist![hist!.indexOf("-S") + 1]).toBe("-50"); // bounded by history_size
+  expect(hist![hist!.indexOf("-E") + 1]).toBe("-1"); // history only, not the screen
+  expect(caps.some((a) => !a.includes("-S"))).toBe(true); // the visible screen
 
   await b.stop({ deleteLog: true });
 });
