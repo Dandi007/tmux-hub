@@ -29,7 +29,7 @@ export class SseHub {
   emit(event: ServerEvent) {
     const bytes = new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`);
     for (const c of this.clients) {
-      try { c.controller.enqueue(bytes); } catch { /* client gone */ }
+      try { c.controller.enqueue(bytes); } catch { this.clients.delete(c); /* stream closed without cancel */ }
     }
   }
 
