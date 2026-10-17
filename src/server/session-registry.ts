@@ -75,7 +75,35 @@ export async function listSessions(runner: TmuxRunner = tmux): Promise<SessionIn
       pane_title: pane_title || "",
     };
   });
-  return Promise.all(sessions.map(enrichCodexTitle));
+  return Promise.all(sessions.map((s) => enrichCodexTitle(s).then((e) => enrichClaudeTitle(e, runner))));
+}
+
+// Claude Code 2.1.x keeps its title at "✳ <task>" for the whole turn —
+// thinking, streaming and tool runs alike — so ✳ alone reads as "idle" while
+// the agent is busy (RSI round 8: 404/404 samples during a working turn). The
+// spinner status line drawn above the input box is the reliable signal; when
+// it is there, swap the marker for a Braille frame so every client (including
+// pages already open) shows it as working.
+const CLAUDE_WORKING_MARKER = "⠋";
+
+async function enrichClaudeTitle(info: SessionInfo, runner: TmuxRunner): Promise<SessionInfo> {
+  if (info.pane_title.charAt(0) !== "✳") return info;
+  const r = await runner(["capture-pane", "-p", "-t", `${info.name}:0.0`]);
+  if (r.code !== 0 || !isClaudeWorkingScreen(r.stdout)) return info;
+  return { ...info, pane_title: CLAUDE_WORKING_MARKER + info.pane_title.slice(1) };
+}
+
+// "✽ Swooping… (2m 43s · ↓ 2.7k tokens)", "· Swooping… (running PostToolUse
+// hooks… 1/2)", "✳ Propagating… (0s · esc to interrupt)". The finished form
+// ("✻ Baked for 48s · done 9:36 PM") has no ellipsis + parenthesis. Only the
+// bottom of the screen counts: the line sits just above the input box (with a
+// task list at most in between), and an old one in the scrollback is history.
+const CLAUDE_SPINNER_LINE = /^[·✢✳✶✻✽*] \S.*…\s+\((\d+[smh]|running|esc to interrupt)/;
+const CLAUDE_SPINNER_WINDOW = 25;
+
+export function isClaudeWorkingScreen(screen: string): boolean {
+  const lines = screen.split("\n").filter((l) => l.trim() !== "");
+  return lines.slice(-CLAUDE_SPINNER_WINDOW).some((l) => CLAUDE_SPINNER_LINE.test(l));
 }
 
 function isCodexSessionName(name: string): boolean {
