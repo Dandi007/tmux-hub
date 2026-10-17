@@ -22,9 +22,11 @@ beforeAll(async () => {
 //   and an inherited TMUX makes attach refuse to nest.
 // - util-linux `script` only takes the command via -c; the positional form is
 //   BSD/macOS. Without the branch the Linux run never attached at all.
+// - CI runners have no TERM; tmux attach then exits with "open terminal failed:
+//   terminal does not support clear", so TERM is set explicitly.
 function spawnAttach() {
   const { socket, tmpdir: sockDir } = setupIsolatedTmux();
-  const env: Record<string, string | undefined> = { ...process.env, TMUX_TMPDIR: sockDir };
+  const env: Record<string, string | undefined> = { ...process.env, TMUX_TMPDIR: sockDir, TERM: "xterm-256color" };
   delete env.TMUX;
   const argv = process.platform === "linux"
     ? ["script", "-q", "-c", `tmux -L ${socket} attach -t ${S}`, "/dev/null"]

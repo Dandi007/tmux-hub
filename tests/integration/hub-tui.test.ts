@@ -206,6 +206,7 @@ expect {
           TMUX_HUB_SOCKET: SOCKET,
           TMUX_HUB_DB_PATH: DB_PATH,
           TMUX: "",  // Explicitly clear TMUX so attach-session is used
+          TERM: "xterm-256color",  // CI has no TERM; tmux attach refuses to open the terminal without one
         },
       },
     );
