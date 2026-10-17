@@ -428,6 +428,14 @@ export class BroadcasterRegistry {
 
   has(session: string): boolean { return this.map.has(session); }
 
+  size(): number { return this.map.size; }
+
+  subscriberTotal(): number {
+    let n = 0;
+    for (const b of this.map.values()) n += b.subscriberCount();
+    return n;
+  }
+
   async stop(session: string, opts: { deleteLog?: boolean } = {}): Promise<void> {
     const b = this.map.get(session);
     if (!b) return;

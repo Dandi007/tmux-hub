@@ -28,6 +28,7 @@ import { ManagedSessionDb } from "./managed-db";
 import { listSessions } from "./session-registry";
 import { createLogger, LOG_FILE } from "./logger";
 import { ResyncScheduler } from "./resize-resync";
+import { renderMetrics, openFdCount } from "./metrics";
 
 const logger = createLogger("main");
 
@@ -108,7 +109,20 @@ app.use("*", authGate);
 // Process-local /metrics for loopback Prometheus scraping: public read-only,
 // zero dependencies, never touches the tmux registry/session data plane, and
 // never 5xxes on data-plane failures — process aliveness is Prometheus `up`.
-app.get("/metrics", (c) => c.text("tmux_hub_up 1", { headers: { "content-type": "text/plain; charset=utf-8" } }));
+// Gauges are in-memory reads only (no tmux calls), for leak watching.
+let wsConnections = 0;
+const METRIC_GAUGES = [
+  { name: "process_resident_memory_bytes", help: "Resident set size in bytes.", value: () => process.memoryUsage().rss },
+  { name: "process_heap_used_bytes", help: "JS heap used in bytes.", value: () => process.memoryUsage().heapUsed },
+  { name: "process_open_fds", help: "Open file descriptors (Linux only).", value: openFdCount },
+  { name: "process_uptime_seconds", help: "Seconds since process start.", value: () => process.uptime() },
+  { name: "tmux_hub_sessions", help: "Sessions in the registry snapshot.", value: () => registry.snapshot().length },
+  { name: "tmux_hub_ws_connections", help: "Open terminal websockets.", value: () => wsConnections },
+  { name: "tmux_hub_sse_clients", help: "Connected SSE clients.", value: () => sse.clientCount() },
+  { name: "tmux_hub_broadcasters", help: "Live session broadcasters.", value: () => broadcasters.size() },
+  { name: "tmux_hub_broadcaster_subscribers", help: "Data subscribers across all broadcasters.", value: () => broadcasters.subscriberTotal() },
+];
+app.get("/metrics", (c) => c.text(renderMetrics(METRIC_GAUGES), { headers: { "content-type": "text/plain; charset=utf-8" } }));
 // 进程启动时钉住的代码版本：部署后据此核对「在跑的是不是刚部署的 commit」。
 const COMMIT = (() => {
   const r = Bun.spawnSync(["git", "rev-parse", "HEAD"], { cwd: dirname(fileURLToPath(import.meta.url)) });
@@ -322,6 +336,7 @@ Bun.serve({
   },
   websocket: {
     async open(ws: ServerWebSocket<WsData>) {
+      wsConnections++;
       const { sessionName, cols, rows, connId } = ws.data;
       logger.info({ session: sessionName, cols, rows, connId }, "ws open");
 
@@ -418,6 +433,7 @@ Bun.serve({
       sendReplayDone();
     },
     async close(ws: ServerWebSocket<WsData>, code: number, reason: string) {
+      wsConnections--;
       const { sessionName, connId } = ws.data;
       logger.info({ session: sessionName, connId, code, reason: reason || undefined }, "ws close");
       ws.data.closed = true;
