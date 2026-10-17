@@ -7,10 +7,11 @@
 
 | 轴 | macOS | NUC (Linux) |
 |---|---|---|
-| 实例 | prod + dogfood 双实例（金丝雀） | 仅 prod 单实例 |
+| 实例 | prod + dogfood 双实例（金丝雀） | prod + dogfood 双实例（金丝雀） |
 | 进程管理 | `svc` | systemd user unit `tmux-hub.service` |
-| prod checkout | `~/code/tmux-hub`（钉已验证 commit） | `/data/code/self/tmux-hub`（跟 main） |
-| 部署命令 | `deploy-dogfood` → 验证 → `promote` | `zsh deploy/instances.zsh deploy-prod` |
+| prod checkout | `~/code/tmux-hub`（钉已验证 commit） | `/data/code/self/tmux-hub`（detached，钉 `accepted` tag） |
+| dogfood checkout | `~/code/worktrees/tmux-hub/dogfood-live` | `/data/code/worktrees/tmux-hub/dogfood-live`（detached，跟 origin/main） |
+| 部署命令 | `deploy-dogfood` → 验证 → `promote` | `deploy-dogfood` → 验证 → `promote`（前移 `accepted` 即人类验收）；`drift` 查差距 |
 | 重启 | `svc restart tmux-hub` | `systemctl --user restart tmux-hub.service` |
 | 状态 | `svc status all` | `systemctl --user status tmux-hub.service` |
 | 日志 | `svc logs tmux-hub` | `journalctl --user -u tmux-hub.service` |
@@ -34,9 +35,16 @@ macOS 用 `svc`，NUC 用 `systemctl --user`。
 
 ### NUC (Linux)
 
-1. worktree 开发、commit、push，PR 合并进 main
-2. `cd /data/code/self/tmux-hub && zsh deploy/instances.zsh deploy-prod`
-   （等价于 pull origin/main → `bun install --frozen-lockfile` → `bun run build` → restart → health check）
+**dogfood 跟 main 头，prod 只部署 `accepted` tag。** 合入 main 不会进 prod。
+
+```bash
+zsh deploy/instances.zsh deploy-dogfood          # origin/main → build → restart tmux-hub-dogfood.service → 核对运行 commit
+zsh deploy/instances.zsh drift                   # dogfood 领先 accepted 几个合入、期间部署几次、各是什么
+zsh deploy/instances.zsh promote [<ref>]         # 人类验收：accepted 前移到 dogfood HEAD（或 ref）并推远端 → deploy-prod
+zsh deploy/instances.zsh deploy-prod             # 重新部署当前 accepted（不前移）
+```
+
+dogfood 实例：`3102` · socket `hub-dogfood` · env `~/.config/tmux-hub/dogfood.env`（systemd 不展开 `$HOME`，写绝对路径）· unit 模板 `deploy/systemd/tmux-hub-dogfood.service` · 子域 `hub-dogfood.qinglinzhang.top`（gate app `hub-dogfood`）。
 
 ### macOS（金丝雀流程）
 

@@ -1,0 +1,24 @@
+# NUC dogfood 实例 unit。安装：
+#   install -m 0644 deploy/systemd/tmux-hub-dogfood.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now tmux-hub-dogfood.service
+# dogfood.env 由 systemd EnvironmentFile 读取，不展开 $HOME / ~：路径一律写绝对路径。
+[Unit]
+Description=tmux-hub dogfood（跟 main 头的金丝雀实例）
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# 只杀 bun 主进程，保留 hub-dogfood tmux server 及其 session（loop agent 跑在里面）。
+KillMode=process
+Environment=PATH=%h/.bun/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=%h/.config/tmux-hub/dogfood.env
+WorkingDirectory=/data/code/worktrees/tmux-hub/dogfood-live
+ExecStart=%h/.bun/bin/bun run start
+Restart=always
+RestartSec=3
+LimitNOFILE=16384
+
+[Install]
+WantedBy=default.target

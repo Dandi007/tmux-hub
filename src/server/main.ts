@@ -108,8 +108,13 @@ app.use("*", authGate);
 // zero dependencies, never touches the tmux registry/session data plane, and
 // never 5xxes on data-plane failures — process aliveness is Prometheus `up`.
 app.get("/metrics", (c) => c.text("tmux_hub_up 1", { headers: { "content-type": "text/plain; charset=utf-8" } }));
+// 进程启动时钉住的代码版本：部署后据此核对「在跑的是不是刚部署的 commit」。
+const COMMIT = (() => {
+  const r = Bun.spawnSync(["git", "rev-parse", "HEAD"], { cwd: dirname(fileURLToPath(import.meta.url)) });
+  return r.exitCode === 0 ? r.stdout.toString().trim() : "unknown";
+})();
 app.get("/system/health", (c) =>
-  c.json({ ok: true, tmux: registry.isServerReachable(), uptime: process.uptime() }),
+  c.json({ ok: true, tmux: registry.isServerReachable(), uptime: process.uptime(), commit: COMMIT }),
 );
 app.get("/templates", (c) =>
   c.json(templates.map((t) => ({ id: t.id, name: t.name, cwd_choices: t.cwd_choices }))),
