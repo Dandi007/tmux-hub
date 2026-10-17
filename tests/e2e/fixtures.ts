@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { test as base, expect } from "@playwright/test";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, existsSync, readFileSync } from "node:fs";
@@ -33,7 +34,7 @@ type E2EEnv = {
 };
 
 function loadE2EEnv(): E2EEnv {
-  const cwdHash = Buffer.from(process.cwd()).toString("base64url").slice(0, 12);
+  const cwdHash = createHash("sha256").update(process.cwd()).digest("hex").slice(0, 12);
   const envFile = process.env.TMUX_HUB_E2E_ENV_FILE ?? join(tmpdir(), `tmux-hub-e2e-env-${cwdHash}.json`);
   if (!existsSync(envFile)) {
     throw new Error(`E2E env file not found at ${envFile} — run via playwright.config.ts`);

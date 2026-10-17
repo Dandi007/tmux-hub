@@ -136,8 +136,8 @@ export function defineFidelitySuite(test: TestType<{ ctx: Ctx }, object>, expect
     test("alt-screen (vim) at a stable size survives reconnect", async ({ page, ctx }) => {
       const name = await ctx.createSession();
       const file = writeVimSource();
-      // Idle shell first: attaching while zsh is still drawing its first prompt
-      // hits the attach-resize race tracked by the fixme below.
+      // Idle shell first so this test isolates reconnect, not attach-resize
+      // (covered by the two attach tests below).
       await runAndWait(ctx, name, "clear; echo shell-ready", "shell-ready");
       await openSession(page, name);
       await expectInSync(page, ctx, name, "shell before vim");
@@ -150,11 +150,18 @@ export function defineFidelitySuite(test: TestType<{ ctx: Ctx }, object>, expect
       ctx.tmuxE2E(["send-keys", "-t", name, ":q!", "Enter"]);
     });
 
-    // KNOWN BUG（backlog P1「attach 时运行中的 TUI 被 resize 后错位」）：vim 约 1/25，
-    // 刚起的 zsh 更高（prompt 被画多次）。
-    // vim 在默认 200x50 下运行，浏览器 attach 把 pane 钉到自身尺寸，vim 随之重绘；
-    // xterm 整屏错位（顶行显示第 18 行、底部空白），且不会自愈。修复后去掉 fixme。
-    test.fixme("alt-screen (vim) attach that resizes a running TUI", async ({ page, ctx }) => {
+    // Regression（第 4 轮修复）：刚起的 shell 还在画第一个 prompt 时 attach，
+    // 同样命中 attach 时 snapshot 与在途字节重叠的问题（prompt 被画多次）。
+    test("fresh shell attach while the first prompt is still being drawn", async ({ page, ctx }) => {
+      const name = await ctx.createSession();
+      await openSession(page, name);
+      await expectInSync(page, ctx, name, "fresh shell attach");
+    });
+
+    // Regression（第 4 轮修复）：vim 在默认 200x50 下运行，浏览器 attach 把 pane
+    // 钉到自身尺寸，vim 随之重绘；重绘字节若在 capture-pane 之后才经 pipe-pane
+    // 到达，会被叠加在 snapshot 上重放一次，整屏错位（顶行显示第 18 行）。
+    test("alt-screen (vim) attach that resizes a running TUI", async ({ page, ctx }) => {
       const name = await ctx.createSession();
       const file = writeVimSource();
       await runAndWait(ctx, name, `vim -u NONE -n ${file}`, "vim 行 1 ");
