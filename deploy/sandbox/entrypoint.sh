@@ -42,10 +42,12 @@ setpriv --reuid=hub --regid=hub --init-groups --inh-caps=-all -- \
   env -i "${hub_env[@]}" bun run /opt/tmux-hub/src/server/main.ts &
 hub_pid=$!
 
-trap 'kill -TERM "$hub_pid" 2>/dev/null; as_agent tmux -S "$SOCK" kill-server 2>/dev/null; exit 0' TERM INT
+# root 没有 CAP_KILL，不能直接给 hub/agent 的进程发信号：降权成属主再发，存活看 /proc。
+as_hub() { setpriv --reuid=hub --regid=hub --init-groups --inh-caps=-all -- "$@"; }
+trap 'as_hub kill -TERM "$hub_pid" 2>/dev/null; as_agent tmux -S "$SOCK" kill-server 2>/dev/null; exit 0' TERM INT
 
 # hub 退出 → 容器退出，交给 restart 策略；tmux server 被 pane 里的进程杀掉 → 原地拉起。
-while kill -0 "$hub_pid" 2>/dev/null; do
+while [ -d "/proc/$hub_pid" ]; do
   tmux_alive || { echo "tmux server gone, restarting" >&2; start_tmux; }
   sleep 5 & wait $! || true
 done
