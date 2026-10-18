@@ -8,7 +8,6 @@ FROM debian:trixie-slim
 # 构建期走宿主 mihomo（--network host）；不进最终镜像的 ENV。
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
-ARG TMUX_HUB_COMMIT=unknown
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
@@ -32,6 +31,8 @@ RUN bun install --frozen-lockfile && bun run build
 COPY sandbox/entrypoint.sh /usr/local/sbin/entrypoint.sh
 COPY sandbox/templates.yaml /etc/tmux-hub/templates.yaml
 
+# 放在最后：commit 每次都变，放前面会让 apt / bun install 层的缓存全部失效。
+ARG TMUX_HUB_COMMIT=unknown
 ENV LANG=C.UTF-8 \
     TMUX_HUB_COMMIT=${TMUX_HUB_COMMIT}
 
