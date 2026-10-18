@@ -28,6 +28,7 @@ import { ManagedSessionDb } from "./managed-db";
 import { listSessions } from "./session-registry";
 import { createLogger, LOG_FILE } from "./logger";
 import { ResyncScheduler } from "./resize-resync";
+import { adoptUnsubs } from "./ws-attach";
 import { renderMetrics, openFdCount } from "./metrics";
 
 const logger = createLogger("main");
@@ -444,7 +445,7 @@ Bun.serve({
         });
       }
       unsubData = await attached;
-      ws.data.unsubs.push(unsubEvents, unsubData);
+      if (!adoptUnsubs(ws.data, unsubEvents, unsubData)) return;
       sendReplayDone();
     },
     async close(ws: ServerWebSocket<WsData>, code: number, reason: string) {
