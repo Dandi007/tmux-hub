@@ -630,9 +630,11 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                 const result = handleViewportMessage(msg, viewportState);
                 viewportState = result.next;
                 if (result.action.type === "resize") {
-                  // Native owns: adopt server's viewport size
+                  // Native client or another page sized the pane: adopt its size
                   term.resize(result.action.cols, result.action.rows);
-                  console.log(`[tmux-hub] viewport locked to native: ${result.action.cols}x${result.action.rows}`);
+                  console.log(`[tmux-hub] viewport adopted (${msg.owner}${msg.peer ? ", peer" : ""}): ${result.action.cols}x${result.action.rows}`);
+                } else if (result.action.type === "reclaim") {
+                  reassertViewport();
                 }
                 return;
               }

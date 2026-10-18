@@ -43,7 +43,9 @@ export type ServerWsMessage =
   // scrollpos replay-done message. The client treats it like a reconnect.
   | { kind: "resync" }
   | { kind: "pong"; ts: number }
-  | { kind: "viewport"; cols: number; rows: number; owner: "native" | "web" }
+  // owner "web" + peer: another page pinned the pane to cols×rows (adopt it, a
+  // resync follows). released: the page that last pinned it left (reclaim).
+  | { kind: "viewport"; cols: number; rows: number; owner: "native" | "web"; peer?: true; released?: true }
   // Scroll position recovery: server sends restored scroll position to client after attach,
   // allowing cross-device memory of user's viewing location in buffer history.
   | { kind: "scrollpos"; linesFromBottom: number };

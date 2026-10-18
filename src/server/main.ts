@@ -29,6 +29,7 @@ import { listSessions } from "./session-registry";
 import { createLogger, LOG_FILE } from "./logger";
 import { ResyncScheduler } from "./resize-resync";
 import { adoptUnsubs } from "./ws-attach";
+import { SessionPeers } from "./session-peers";
 import { renderMetrics, openFdCount } from "./metrics";
 
 const logger = createLogger("main");
@@ -119,6 +120,7 @@ const METRIC_GAUGES = [
   { name: "process_uptime_seconds", help: "Seconds since process start.", value: () => process.uptime() },
   { name: "tmux_hub_sessions", help: "Sessions in the registry snapshot.", value: () => registry.snapshot().length },
   { name: "tmux_hub_ws_connections", help: "Open terminal websockets.", value: () => wsConnections },
+  { name: "tmux_hub_ws_peers", help: "Terminal websockets registered as session peers.", value: () => peers.size() },
   { name: "tmux_hub_sse_clients", help: "Connected SSE clients.", value: () => sse.clientCount() },
   { name: "tmux_hub_broadcasters", help: "Live session broadcasters.", value: () => broadcasters.size() },
   { name: "tmux_hub_broadcaster_subscribers", help: "Data subscribers across all broadcasters.", value: () => broadcasters.subscriberTotal() },
@@ -287,6 +289,19 @@ type WsData = {
   closed?: boolean;
 };
 
+// Web pages per session. A pin by one page re-sizes the pane under the others:
+// they adopt the new size and get an aligned resync; when the pinning page
+// leaves, they are told to reclaim.
+const peers = new SessionPeers<ServerWebSocket<WsData>>();
+function pinnedBy(ws: ServerWebSocket<WsData>, cols: number, rows: number): void {
+  const { sessionName } = ws.data;
+  peers.pinned(sessionName, ws);
+  for (const p of peers.others(sessionName, ws)) {
+    try { p.send(JSON.stringify({ kind: "viewport", cols, rows, owner: "web", peer: true })); } catch {}
+    p.data.resync?.resized(cols, rows);
+  }
+}
+
 function clampInt(v: number, lo: number, hi: number, fallback: number): number {
   if (!Number.isFinite(v) || v <= 0) return fallback;
   return Math.max(lo, Math.min(hi, Math.floor(v)));
@@ -376,7 +391,7 @@ Bun.serve({
       };
 
       if (attachCount === 0 && ws.data.pin) {
-        try { await pinViewport(sessionName, cols, rows); }
+        try { await pinViewport(sessionName, cols, rows); pinnedBy(ws, cols, rows); }
         catch (e) {
           logger.warn({ session: sessionName, connId, err: e }, "viewport pin failed");
           try { ws.send(`[hub] viewport pin failed: ${(e as Error).message}\n`); } catch {}
@@ -446,6 +461,7 @@ Bun.serve({
       }
       unsubData = await attached;
       if (!adoptUnsubs(ws.data, unsubEvents, unsubData)) return;
+      peers.add(sessionName, ws);
       sendReplayDone();
     },
     async close(ws: ServerWebSocket<WsData>, code: number, reason: string) {
@@ -454,6 +470,11 @@ Bun.serve({
       logger.info({ session: sessionName, connId, code, reason: reason || undefined }, "ws close");
       ws.data.closed = true;
       ws.data.resync?.dispose();
+      if (peers.remove(sessionName, ws)) {
+        for (const p of peers.others(sessionName, ws)) {
+          try { p.send(JSON.stringify({ kind: "viewport", cols: ws.data.cols, rows: ws.data.rows, owner: "web", released: true })); } catch {}
+        }
+      }
       const { unsubs } = ws.data;
       for (const fn of unsubs) try { fn(); } catch {}
       ws.data.unsubs.length = 0;
@@ -504,6 +525,7 @@ Bun.serve({
           // so later snapshots stay coherent at the new width.
           ws.data.broadcaster?.syncEmulatorSize(result.cols, result.rows);
           ws.data.resync?.resized(result.cols, result.rows);
+          pinnedBy(ws, result.cols, result.rows);
         }
       }).catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : String(e);
