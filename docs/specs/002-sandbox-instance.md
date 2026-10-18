@@ -1,6 +1,6 @@
 # 002 · hub-sandbox：Docker 隔离的 tmux-hub 实例
 
-> 状态：草案，待评审（2026-10-18）
+> 状态：已实现，NUC 本机验收通过；待 mihomo 上线与 edge 部署（2026-10-18）
 > 关联改动：tmux-hub（本 PR）· proxy-infra（mihomo listener）· edge-gateway（Caddy 站点 + gate-id app）
 
 ---
@@ -56,7 +56,7 @@ graph LR
       H["tmux-hub（user hub）"] -->|"tmux -S"| T["tmux server（user agent）"]
       T --> PANE["pane：shell / claude"]
     end
-    PANE -->|"仅 192.168.250.1:7898"| M["mihomo listener sandbox<br/>sub-rules: sandbox"]
+    PANE -->|"仅 192.168.250.1:7898"| M["mihomo listener hub-sandbox<br/>sub-rules: hub-sandbox"]
   end
   M -->|"私网/回环/tailnet"| X["REJECT"]
   M -->|"国内"| D["DIRECT"]
@@ -67,8 +67,8 @@ graph LR
 
 - **镜像**：`deploy/sandbox/Dockerfile`。基于 Debian slim，包含 bun、tmux（与宿主同为 3.x）、git、curl、claude code 以及常用开发工具。tmux-hub 代码在构建时 COPY 进镜像（取 `accepted` tag），不挂载宿主 worktree。
 - **运行参数**（`deploy/sandbox/compose.yaml`）：
-  - `user`：由 entrypoint 降权，镜像内不保留 root shell
-  - `cap_drop: [ALL]`，`security_opt: [no-new-privileges:true]`
+  - entrypoint 以 root 启动，只用来降权：`cap_drop: [ALL]` + `cap_add: [SETUID, SETGID]`，用 `setpriv` 切到 hub / agent 后 capability 清零（实测 CapEff=0）；`security_opt: [no-new-privileges:true]`
+  - `init: true`（tini 当 PID 1）
   - `read_only: true` 根文件系统，加 tmpfs `/tmp`
   - volume：`hub-sandbox-home` → `/home/agent`（agent 的工作区），`hub-sandbox-state` → `/var/lib/hub`（hub 的 DB、secret、日志）
   - 资源：`cpus: 4`，`mem_limit: 8g`，`pids_limit: 1024`
@@ -83,9 +83,13 @@ graph LR
 | `hub` | tmux-hub 进程 | `/var/lib/hub`（0700）：`GATE_INJECT_KEY`、`hub.secret`、DB |
 | `agent` | tmux server 和所有 pane | `/home/agent`、`CLAUDE_CODE_OAUTH_TOKEN` |
 
-- tmux server 由 `agent` 启动，socket 用固定路径（`/run/tmux-sandbox/default`），并执行 `server-access -a hub` 授权 `hub` 连接。tmux ≥ 3.3 默认拒绝其他 UID 的客户端。
+- tmux server 由 `agent` 启动，socket 用固定路径（`/run/tmux-sandbox/default`），并执行 `server-access -a hub` 授权 `hub` 连接。tmux ≥ 3.3 默认拒绝其他 UID 的客户端；`server-access` 不改文件权限，socket 还要 `chmod 0660`。
+- `/run/tmux-sandbox` 是 tmpfs，属主 `agent`、属组 `hub`、权限 `2750`（setgid），socket 创建出来就属于 hub 组。hub 对这个目录没有写权限，所以 agent 的 server 挂掉后，hub 也没法以自己的身份另起一个 server（那样 pane 就会跑在 hub 身份下）。
+- entrypoint 每 5 秒用 `tmux -N` 探活，server 被杀就原地重启。必须加 `-N`：不加的话，`show` 会自己拉起一个临时 server 然后返回成功。
+- 环境变量拆分：hub 只拿 `TMUX_HUB_*` / `GATE_*`，agent（tmux server）只拿 Claude token、代理和基础变量。实测 pane 环境里没有任何 `GATE_*` / `TMUX_HUB_*`。
 - **代码改动**：tmux-hub 目前只支持 `TMUX_HUB_SOCKET`（即 `-L <name>`，socket 落在按 UID 区分的 `/tmp/tmux-<uid>/` 下，跨用户不可达）。需要新增 `TMUX_HUB_SOCKET_PATH`，对应 `-S <path>`；两者都设时报错退出。改动在 `src/server/tmux-cmd.ts`，`tmux-env.ts` 同步透传。
-- pipe-pane 日志目录由 `agent` 写、`hub` 读（目录权限 `agent:hub 0750`）。agent 能篡改自己 pane 的日志，但只会影响自己的显示，可以接受。
+- pipe-pane 日志目录 `/var/log/hub-panes`（`hub:agent 2770`）：agent 写，hub 读、轮转、删除。agent 能篡改自己 pane 的日志，但只会影响自己的显示，可以接受。`server.log` 用 `TMUX_HUB_LOG_FILE` 单独放到 hub 私有目录。
+- 镜像里没有 `.git`，`/system/health` 上报的 commit 改由构建时写入的 `TMUX_HUB_COMMIT` 提供（代码小改动）。
 
 ### 2.4 网络（proxy-infra）
 
@@ -93,34 +97,38 @@ graph LR
 
 ```yaml
 listeners:
-  - name: sandbox
+  - name: hub-sandbox
     type: mixed
-    listen: 192.168.250.1   # 只绑 sandbox bridge 网关，局域网和 tailnet 都不可达
+    listen: 0.0.0.0     # 见下方说明
     port: 7898
-    rule: sandbox
+    rule: hub-sandbox
 
 sub-rules:
-  sandbox:
-    - IP-CIDR,127.0.0.0/8,REJECT,no-resolve
-    - IP-CIDR,10.0.0.0/8,REJECT,no-resolve
-    - IP-CIDR,172.16.0.0/12,REJECT,no-resolve
-    - IP-CIDR,192.168.0.0/16,REJECT,no-resolve
-    - IP-CIDR,100.64.0.0/10,REJECT,no-resolve
-    - IP-CIDR,169.254.0.0/16,REJECT,no-resolve
-    - IP-CIDR,198.18.0.0/15,REJECT,no-resolve
+  hub-sandbox:
+    - IP-CIDR,127.0.0.0/8,REJECT        # 不带 no-resolve：域名请求也先解析再比 IP
+    - IP-CIDR,10.0.0.0/8,REJECT
+    - IP-CIDR,172.16.0.0/12,REJECT
+    - IP-CIDR,192.168.0.0/16,REJECT
+    - IP-CIDR,100.64.0.0/10,REJECT
+    - IP-CIDR,169.254.0.0/16,REJECT
+    - IP-CIDR,198.18.0.0/15,REJECT
+    - IP-CIDR,0.0.0.0/8,REJECT
     - DOMAIN-SUFFIX,qinglinzhang.top,REJECT     # 防止绕回自家公网入口
     - DOMAIN-SUFFIX,qinglinzhang.xyz,REJECT
     - DOMAIN-SUFFIX,agibot.com,REJECT          # 公司内网
     - GEOSITE,category-ai-!cn,🤖 人工智能
+    - DOMAIN-KEYWORD,anthropic,🤖 人工智能
+    - DOMAIN-KEYWORD,claude,🤖 人工智能
+    - DOMAIN-KEYWORD,openai,🤖 人工智能
     - GEOSITE,cn,DIRECT
     - GEOIP,CN,DIRECT
     - MATCH,✈️ 境外流量
 ```
 
 - 最后两条引用现有的选择组。换节点只在 mihomo 里改，沙箱自动跟随。
-- 私网 REJECT 规则在域名解析**之后**也必须生效：防止"域名解析到内网 IP"的绕过。实现时需要验证 `no-resolve` 与域名请求的组合行为，必要时改为 resolve 后再匹配 IP（见验收 A5）。
-- 这个 listener 不设认证：它只绑在 sandbox bridge 网关上，配合防火墙，只有 sandbox 容器能连到它。
-- 生成器 `clash_emitter` 需要能把 overlay 里的 `listeners` / `sub-rules` 透传到产物，不支持的话补上。
+- 私网 REJECT 不带 `no-resolve`，域名请求也会先解析再比 IP，挡住"域名解析到内网"的绕过。实测 `localtest.me`、`127.0.0.1.nip.io` 都命中 `IPCIDR(127.0.0.0/8)` 被拒（A5）。
+- 监听 `0.0.0.0` 而不是 bridge 网关：NUC 上 mihomo 设了 `Before=docker.service`，它启动时 `192.168.250.1` 还不存在。来源由防火墙限定为 sandbox 网段（§2.5）。不设认证。
+- 生成器的深合并会把 overlay 里的 `listeners` / `sub-rules` 原样透传，无需改代码。TUN 版与 pre-tun 版两份 profile 都要加，由测试锁定一致。
 
 ### 2.5 防火墙（tmux-hub `deploy/sandbox/firewall.sh` + systemd oneshot）
 
@@ -133,11 +141,13 @@ iptables -I DOCKER-USER 2 -s 192.168.250.0/24 -j DROP
 iptables -I INPUT 1 -s 192.168.250.0/24 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 iptables -I INPUT 2 -s 192.168.250.0/24 -p tcp --dport 7898 -j ACCEPT
 iptables -I INPUT 3 -s 192.168.250.0/24 -j DROP
+# listener 绑 0.0.0.0：7898 只许 sandbox 网段连
+iptables -I INPUT 4 ! -s 192.168.250.0/24 -p tcp --dport 7898 -j DROP
 ```
 
 - 入站方向（tailnet:3103 → 容器）走 Docker 的 DNAT，属于 ESTABLISHED 回包，不受影响。
 - 容器 DNS：compose 里设 `dns: [192.168.250.1]`，而该地址只放行了 7898，所以 DNS 不可用。所有域名都交给代理解析，容器内设 `HTTP(S)_PROXY=http://192.168.250.1:7898`，`NO_PROXY=127.0.0.1,localhost`。
-- 规则由 `hub-sandbox-firewall.service`（oneshot，`After=docker.service`）幂等地加载。脚本先清理再插入，重启后自动恢复。
+- 规则由 `hub-sandbox-firewall.service`（oneshot，`Before=docker.service` + `PartOf=docker.service`）幂等加载：规则带 `hub-sandbox` 注释，脚本先删除再插入。`Before=` 保证开机时规则先于容器自启就位；`deploy-sandbox` 发现规则不在就拒绝部署。
 
 ### 2.6 鉴权
 
@@ -189,6 +199,27 @@ iptables -I INPUT 3 -s 192.168.250.0/24 -j DROP
 | A15 | 宿主 `systemctl restart docker` 和重启 NUC 后 | 防火墙规则和容器自动恢复，A3/A4 仍然成立 |
 | A16 | tmux-hub CI | `bun test` 和 `tsc` 全部通过，包括新增的 `-S` socket 测试 |
 
+### 4.1 验收记录（2026-10-18，NUC，commit fb518e0）
+
+mihomo 侧暂未部署到 `/etc`（见 §7），A1/A2/A4–A6 用同一份 SSoT 产物在 scratchpad 里临时起了一个 mihomo（只开 7898）验证；判定依据是 mihomo 日志中的命中规则。
+
+| # | 结果 | 证据 |
+|---|---|---|
+| A1 | ✅ | `api.anthropic.com` / `claude.ai` 命中 `GeoSite(category-ai-!cn)` → `🤖 人工智能[日本-TY-4-AT]` |
+| A2 | ✅ | `www.baidu.com` 命中 `GeoSite(cn)` → DIRECT；`github.com` → `✈️ 境外流量[日本-TY-4-AT]` |
+| A3 | ✅ | 直连 `1.1.1.1`、ECS `14.103.20.44:443` 不通 |
+| A4 | ✅ | 直连宿主 7897/9091/22、`100.64.0.6:3101`、`192.168.8.1`、其他 docker 网段都不通；经代理全部命中 `IPCIDR(...)` → REJECT |
+| A5 | ✅ | `localtest.me`、`127.0.0.1.nip.io`、`100.64.0.6.nip.io` 解析后命中私网段 → REJECT |
+| A6 | ✅ | `hub.qinglinzhang.top` 命中 `DomainSuffix` → REJECT |
+| A7 | ✅ | `getent hosts`、直发 UDP 53 都不通 |
+| A8 | ✅ | agent 读 `/var/lib/hub`、`/proc/{1,hub}/environ` 均 Permission denied；pane 环境里没有 `GATE_*` / `TMUX_HUB_*` |
+| A9 | ✅ | 无 `docker.sock`、无 sudo、`su` 失败、根文件系统只读；hub / agent / tmux 进程 CapEff=0，NoNewPrivs=1 |
+| A10 | ✅ | fork 炸弹停在约 1000 个进程；10G 内存申请被 OOM 杀（137），容器和 3101/3102 健康不受影响 |
+| A11 | ⏳ | 等 `claude.env` |
+| A12–A14 | ⏳ | 等 edge 部署和新 gate-id 账号 |
+| A15 | ◐ | tmux server 被杀后 5s 内自动拉起；`docker stop` 0.16s 正常退出；`systemctl restart docker` / 整机重启会影响 NUC 上所有容器，留到维护窗口再做 |
+| A16 | ✅ | `bun test` 604 pass；tsc 只剩语音模块原有的报错（非本改动引入） |
+
 ---
 
 ## 5 部署
@@ -213,8 +244,11 @@ iptables -I INPUT 3 -s 192.168.250.0/24 -j DROP
 
 - **账号条款**：只要始终是本人使用，就不涉及账号共用。一旦提供给他人，就违反 Claude 消费者条款，可能导致封号。
 - **共用 inject key**：`GATE_INJECT_KEY` 是所有 app 共用的一把 key。§2.3 的用户分离挡住了 agent 读取它；更彻底的方案是 gate-auth 按 app 签发不同的 key，列为后续项。
-- **tmux 跨用户 socket**：需要在实现时先做 spike，验证 `server-access` 在 tmux 3.x 下的 socket 权限行为。不可行的话，退路是 hub 以 `agent` 用户运行，同时把 key 改为通过 Caddy 侧的 bearer 校验，到时另行讨论。
-- **未决**：新 gate-id 账号用哪个邮箱；资源上限（4 核 / 8G）是否合适。
+- **tmux 跨用户 socket**：已在 tmux 3.5a 上 spike 验证可行（`server-access -a hub` + socket 0660 + setgid 目录）。
+- **mihomo SSoT 漂移（部署阻塞）**：线上 `/etc/mihomo` 有未回写 SSoT 的手改（去掉了公司代理和内网创智代理、内网 DNS，TUN 关闭）。直接跑 `deploy-config.sh` 会把这些手改冲掉，需要先回写 SSoT。
+- **`docker exec` 的环境**：`docker exec` 拿到的是容器级 env，包括 env_file 里的 key 和 token。这条路只有宿主 docker 用户能走，pane 走不到，不属于沙箱边界内的问题。
+- **经 IP 访问自家 ECS**：CONNECT `14.103.20.44` 会走 `GEOIP,CN` → DIRECT 到达 Caddy，挡住它的是 gate-id（新账号没有其他 app 的授权），这一点符合预期。
+- **未决**：新 gate-id 账号的邮箱。资源上限已确认为 4 核 / 8G。
 
 ## 8 被否方案
 
