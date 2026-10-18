@@ -40,6 +40,14 @@ describe("diffSessions", () => {
     expect(events).toEqual([]);
   });
 
+  test("same name, new tmux session id → removed then created (killed and recreated between polls)", () => {
+    const events = diffSessions([{ ...s("a", 100), id: "$1" }], [{ ...s("a", 100), id: "$7" }]);
+    expect(events).toEqual([
+      { event: "session_removed", payload: { name: "a" } },
+      { event: "session_created", payload: { ...s("a", 100), id: "$7" } },
+    ]);
+  });
+
   test("combined create + remove + activity", () => {
     const prev = [s("a", 100), s("b", 100)];
     const next = [s("a", 200), s("c", 50)];
