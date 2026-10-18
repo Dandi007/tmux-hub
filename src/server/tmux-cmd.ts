@@ -25,9 +25,16 @@ export function socketArgs(
   return [];
 }
 
+// 只认 argv 开头的全局 -L/-S：子命令自己也有 -S（capture-pane -S <start-line>）。
+export function withSocket(
+  args: string[],
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  return args[0] === "-L" || args[0] === "-S" ? args : [...socketArgs(env), ...args];
+}
+
 export async function tmux(args: string[]): Promise<TmuxResult> {
-  const explicit = args.includes("-L") || args.includes("-S");
-  const finalArgs = explicit ? args : [...socketArgs(), ...args];
+  const finalArgs = withSocket(args);
   const proc = Bun.spawn(["tmux", ...finalArgs], {
     stdout: "pipe",
     stderr: "pipe",
