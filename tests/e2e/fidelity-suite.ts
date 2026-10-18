@@ -24,11 +24,11 @@ function normalize(lines: string[]): string[] {
   return out;
 }
 
-async function browserView(page: Page, name: string): Promise<{ size: string; lines: string[]; state: string; resyncs: number } | null> {
+async function browserView(page: Page, name: string): Promise<{ size: string; lines: string[]; state: string; visible: boolean; resyncs: number } | null> {
   return page.evaluate((n) => {
     const p = window.__tmuxHubTerms?.[n];
     if (!p) return null;
-    return { size: `${p.cols}x${p.rows}`, lines: p.screen(), state: p.state, resyncs: p.resyncs };
+    return { size: `${p.cols}x${p.rows}`, lines: p.screen(), state: p.state, visible: p.visible, resyncs: p.resyncs };
   }, name);
 }
 
@@ -64,13 +64,13 @@ export function defineFidelitySuite(test: TestType<PlaywrightTestArgs & { ctx: C
       if (!b) { last = "probe missing"; return false; }
       const bl = normalize(b.lines);
       const tl = normalize(t.lines);
-      const same = b.state === "connected" && b.size === t.size && JSON.stringify(bl) === JSON.stringify(tl);
+      const same = b.state === "connected" && b.visible && b.size === t.size && JSON.stringify(bl) === JSON.stringify(tl);
       if (!same) {
         const diff: string[] = [];
         for (let i = 0; i < Math.max(bl.length, tl.length); i++) {
           if (bl[i] !== tl[i]) diff.push(`  row ${i}\n    tmux:  ${JSON.stringify(tl[i])}\n    xterm: ${JSON.stringify(bl[i])}`);
         }
-        last = `state=${b.state} resyncs=${b.resyncs} size xterm=${b.size} tmux=${t.size}\n${[...diff.slice(0, 3), "  ...", ...diff.slice(-5)].join("\n")}`;
+        last = `state=${b.state} visible=${b.visible} resyncs=${b.resyncs} size xterm=${b.size} tmux=${t.size}\n${[...diff.slice(0, 3), "  ...", ...diff.slice(-5)].join("\n")}`;
       }
       return same;
     }, { message: `xterm screen != tmux capture-pane (${why})`, timeout: 10_000, intervals: [100, 250, 500] })
@@ -127,6 +127,22 @@ export function defineFidelitySuite(test: TestType<PlaywrightTestArgs & { ctx: C
       await page.reload();
       await page.evaluate((n) => window.__tmuxHub?.openSession?.(n), name);
       await expectInSync(page, ctx, name, "after reload");
+    });
+
+    // Regression（2026-10-19 dogfood）：会话被杀掉、紧接着用同名重建（rsi driver
+    // 跨天换会话就是这样），registry 按名字 diff 看不出变化，broadcaster 仍挂在旧
+    // pane 上，新 pane 没有 pipe-pane：浏览器拿到 snapshot 后画面冻住。
+    test("a session recreated under the same name keeps streaming to the page", async ({ page, ctx }) => {
+      const name = await ctx.createSession();
+      await runAndWait(ctx, name, `clear; sh ${writeGenerator("before", 20)}`, "before 020");
+      await openSession(page, name);
+      await expectInSync(page, ctx, name, "before recreate");
+
+      ctx.tmuxE2E(["kill-session", "-t", name]);
+      ctx.tmuxE2E(["new-session", "-d", "-s", name, "-x", "120", "-y", "40"]);
+      await runAndWait(ctx, name, `clear; sh ${writeGenerator("after", 20)}`, "after 020");
+      // The list drops and re-adds the session; the page reopens it by itself.
+      await expectInSync(page, ctx, name, "after recreate");
     });
 
     // Regression（第 5 轮修复）：resize 后 xterm 与 tmux 各自 reflow，光标行分叉

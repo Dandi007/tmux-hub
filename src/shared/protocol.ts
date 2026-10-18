@@ -8,6 +8,8 @@ export type SessionInfo = {
   grammar_ok: boolean;
   /** Active pane's terminal title — Claude Code sets this dynamically via OSC sequences. */
   pane_title: string;
+  /** tmux `#{session_id}` ("$3"): tells a session apart from a newer one reusing its name. */
+  id?: string;
 };
 
 export type ServerEvent =

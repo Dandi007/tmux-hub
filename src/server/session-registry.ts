@@ -7,7 +7,7 @@ import { createLogger } from "./logger";
 
 const logger = createLogger("registry");
 
-const FORMAT = "#{session_name}|#{session_activity}|#{session_attached}|#{session_windows}|#{window_width}|#{window_height}|#{pane_title}";
+const FORMAT = "#{session_name}|#{session_id}|#{session_activity}|#{session_attached}|#{session_windows}|#{window_width}|#{window_height}|#{pane_title}";
 
 /**
  * Filter the full tmux session list down to the tmux-hub-managed subset.
@@ -27,6 +27,11 @@ export function diffSessions(prev: SessionInfo[], next: SessionInfo[]): ServerEv
   for (const [name, info] of nextMap) {
     const p = prevMap.get(name);
     if (!p) {
+      events.push({ event: "session_created", payload: info });
+    } else if (p.id && info.id && p.id !== info.id) {
+      // Killed and recreated under the same name between polls: a different
+      // pane, so its broadcaster (pipe-pane) must be rebuilt.
+      events.push({ event: "session_removed", payload: { name } });
       events.push({ event: "session_created", payload: info });
     } else if (
       p.activity !== info.activity ||
@@ -63,9 +68,10 @@ export async function listSessions(runner: TmuxRunner = tmux): Promise<SessionIn
   }
   if (!r.stdout) return [];
   const sessions = r.stdout.split("\n").map((line) => {
-    const [name, activity, attached, windows, cols, rows, pane_title] = line.split("|");
+    const [name, id, activity, attached, windows, cols, rows, pane_title] = line.split("|");
     return {
       name: name!,
+      id: id!,
       activity: Number(activity),
       attached: Number(attached),
       windows: Number(windows),

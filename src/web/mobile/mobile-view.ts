@@ -240,6 +240,9 @@ export function renderMobile(root: HTMLElement): void {
   };
 
   let pendingQuickLaunchName: string | null = null;
+  // The open session was removed; reopen it if it comes straight back under
+  // the same name (killed and recreated).
+  let reopenName: string | null = null;
   let pendingQuickLaunchTimer: ReturnType<typeof setTimeout> | null = null;
 
   const sse = subscribeEvents((e: ServerEvent) => {
@@ -258,12 +261,16 @@ export function renderMobile(root: HTMLElement): void {
         pendingQuickLaunchName = null;
         if (pendingQuickLaunchTimer) { clearTimeout(pendingQuickLaunchTimer); pendingQuickLaunchTimer = null; }
         openSession(e.payload.name);
+      } else if (reopenName === e.payload.name) {
+        reopenName = null;
+        openSession(e.payload.name);
       }
     }
     else if (e.event === "session_removed") {
       sessions = sessions.filter((s) => s.name !== e.payload.name);
       if (openedName === e.payload.name) {
         openedName = null;
+        reopenName = e.payload.name;
         if (term) { term.close(); term = null; }
       }
     } else if (e.event === "session_activity") {

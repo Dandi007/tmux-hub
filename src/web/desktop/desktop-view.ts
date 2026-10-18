@@ -77,6 +77,9 @@ export function renderDesktop(root: HTMLElement): void {
 
   let hasRestoredSession = false;
   let pendingOpen: string | null = null;
+  // The open session was removed; if it comes straight back under the same
+  // name (killed and recreated), reopen it instead of leaving a blank pane.
+  let reopenName: string | null = null;
 
   const refreshUI = (): void => {
     tabBar.refresh(sessions, openedName);
@@ -104,14 +107,15 @@ export function renderDesktop(root: HTMLElement): void {
       sessions = e.payload;
     } else if (e.event === "session_created") {
       sessions = [...sessions, e.payload];
-      if (pendingOpen === e.payload.name) {
-        pendingOpen = null;
+      if (pendingOpen === e.payload.name || reopenName === e.payload.name) {
+        if (pendingOpen === e.payload.name) pendingOpen = null;
+        reopenName = null;
         setTimeout(() => openSession(e.payload.name), 0);
       }
     } else if (e.event === "session_removed") {
       sessions = sessions.filter((s) => s.name !== e.payload.name);
       pool.remove(e.payload.name);
-      if (openedName === e.payload.name) openedName = null;
+      if (openedName === e.payload.name) { openedName = null; reopenName = e.payload.name; }
     } else if (e.event === "session_activity") {
       sessions = sessions.map((s) => s.name === e.payload.name ? e.payload : s);
       pool.notifySessionActivity(e.payload.name, e.payload.attached, e.payload.cols, e.payload.rows);

@@ -37,7 +37,7 @@ describe("isClaudeWorkingScreen", () => {
 });
 
 describe("listSessions marks a working Claude Code session", () => {
-  const row = (name: string, title: string) => `${name}|1|0|1|200|50|${title}`;
+  const row = (name: string, title: string) => `${name}|$1|1|0|1|200|50|${title}`;
   const fake = (screens: Record<string, string>, calls: string[][]) => async (args: string[]) => {
     calls.push(args);
     if (args[0] === "list-sessions") {
