@@ -241,6 +241,36 @@ export function defineFidelitySuite(test: TestType<PlaywrightTestArgs & { ctx: C
       expect(await counters()).toBe(prev);
     });
 
+    // 两台设备看同一个会话（第 30 轮实测：dogfood 上 diffRows 30–40，且不自愈）：
+    // 后打开的设备把 pane 钉成自己的尺寸，先打开的页面 xterm 仍是旧尺寸，tmux
+    // 按新尺寸画的字节落在旧网格上，整屏错乱；后来者关掉后 pane 也停在它的尺寸。
+    // 期望：被挤占的页面采用 pane 的新尺寸并收到对齐 snapshot（不回发 resize，
+    // 避免两端互抢）；钉住尺寸的设备离开后，可见的页面自动收回自己的尺寸。
+    test("a second device pinning the pane keeps the first page in sync", async ({ page, ctx, browser }, testInfo) => {
+      const name = await ctx.createSession();
+      await runAndWait(ctx, name, `clear; sh ${writeGenerator("two", 60)}`, "two 060");
+      await openSession(page, name);
+      await expectInSync(page, ctx, name, "first device alone");
+      const own = (await browserView(page, name))!.size;
+
+      const narrow = (page.viewportSize()?.width ?? 1280) > 800;
+      const other = await browser.newContext({
+        baseURL: testInfo.project.use.baseURL,
+        viewport: narrow ? { width: 412, height: 800 } : { width: 1300, height: 850 },
+      });
+      const page2 = await other.newPage();
+      await openSession(page2, name);
+      await expectInSync(page2, ctx, name, "second device");
+      expect((await browserView(page2, name))!.size).not.toBe(own);
+      await expectInSync(page, ctx, name, "first device after the second pinned the pane");
+      await runAndWait(ctx, name, `sh ${writeGenerator("both", 30)}`, "both 030");
+      await expectInSync(page, ctx, name, "first device, output while displaced");
+
+      await other.close();
+      await expectInSync(page, ctx, name, "first device after the second left");
+      expect((await browserView(page, name))!.size).toBe(own);
+    });
+
     // Regression（第 4 轮修复）：刚起的 shell 还在画第一个 prompt 时 attach，
     // 同样命中 attach 时 snapshot 与在途字节重叠的问题（prompt 被画多次）。
     test("fresh shell attach while the first prompt is still being drawn", async ({ page, ctx }) => {

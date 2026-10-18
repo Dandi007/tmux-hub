@@ -10,6 +10,7 @@ export type ViewportState = {
 
 export type ViewportAction =
   | { type: "resize"; cols: number; rows: number }
+  | { type: "reclaim" }
   | { type: "none" };
 
 /**
@@ -27,6 +28,14 @@ export function handleViewportMessage(
 
   if (msg.owner === "native") {
     // Native owns: suppress local resize, adopt server's viewport
+    return { next, action: { type: "resize", cols: msg.cols, rows: msg.rows } };
+  } else if (msg.released) {
+    // The page that last pinned the pane left: pin it back to our size.
+    return { next, action: { type: "reclaim" } };
+  } else if (msg.peer) {
+    // Another page pinned the pane: show it at that size (an aligned resync
+    // follows) without sending a resize back — that would make the pages fight.
+    // We still own it: our next fit / focus / click re-pins it to our size.
     return { next, action: { type: "resize", cols: msg.cols, rows: msg.rows } };
   } else {
     // Web owns: we control viewport, no action needed

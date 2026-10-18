@@ -124,3 +124,19 @@ describe("handleSessionActivity", () => {
     expect(result.action).toEqual({ type: "none" });
   });
 });
+
+describe("handleViewportMessage: another web page on the session", () => {
+  const web: ViewportState = { owner: "web", cols: 200, rows: 50 };
+  test("peer pin: adopt the pane's new size, keep owning", () => {
+    const r = handleViewportMessage({ kind: "viewport", cols: 56, rows: 40, owner: "web", peer: true }, web);
+    expect(r.action).toEqual({ type: "resize", cols: 56, rows: 40 });
+    expect(shouldSendResize(r.next)).toBe(true);
+  });
+  test("pinner left: reclaim", () => {
+    const r = handleViewportMessage({ kind: "viewport", cols: 56, rows: 40, owner: "web", released: true }, web);
+    expect(r.action).toEqual({ type: "reclaim" });
+  });
+  test("plain web message (own attach): no action", () => {
+    expect(handleViewportMessage({ kind: "viewport", cols: 200, rows: 50, owner: "web" }, web).action).toEqual({ type: "none" });
+  });
+});
