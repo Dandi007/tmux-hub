@@ -26,7 +26,8 @@ for v in $(compgen -e); do
   case $v in TMUX_HUB_SOCKET|TMUX_HUB_SOCKET_PATH) ;; TMUX_HUB_*|GATE_*) hub_env+=("$v=${!v}") ;; esac
 done
 
-tmux_alive() { as_agent tmux -S "$SOCK" show -g exit-empty >/dev/null 2>&1; }
+# -N：server 不在时不要顺手拉起一个（show 会自启 server 并立刻退出、返回成功）。
+tmux_alive() { as_agent tmux -N -S "$SOCK" show -g exit-empty >/dev/null 2>&1; }
 
 # SOCK_DIR 是 setgid=hub 的 tmpfs，socket 建出来即属 hub 组；hub 自己无写权限，
 # 因此 agent 的 server 挂掉时 hub 也无法以 hub 身份另起一个 server。
