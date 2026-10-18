@@ -435,7 +435,14 @@ export class BroadcasterRegistry {
     if (existing) return existing;
     const b = new SessionBroadcaster(session, this.run, this.emulatorEnabled);
     this.map.set(session, b);
-    await b.start();
+    try {
+      await b.start();
+    } catch (e) {
+      // Don't cache a broadcaster without a pipe: a later get() (the session
+      // shows up, or a retry) would return it and the session never streams.
+      if (this.map.get(session) === b) this.map.delete(session);
+      throw e;
+    }
     return b;
   }
 

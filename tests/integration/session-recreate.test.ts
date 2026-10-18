@@ -57,3 +57,22 @@ test("a session killed and recreated under the same name gets a live broadcaster
   await broadcasters.stopAll();
   db.close();
 }, 10_000);
+
+// A get() whose start fails (session not there yet / already gone) must not
+// leave the half-built broadcaster cached: the next get() for that name would
+// return it, with no pipe-pane, and the session would never stream.
+test("a failed start is not cached; the next get() starts a working broadcaster", async () => {
+  const T = S + "-late";
+  const broadcasters = new BroadcasterRegistry(tmuxTest, true);
+  await expect(broadcasters.get(T)).rejects.toThrow(/pipe-pane failed/);
+  expect(broadcasters.size()).toBe(0);
+
+  await tmuxTest(["new-session", "-d", "-s", T, ...ticker("LATE")]);
+  const b = await broadcasters.get(T);
+  expect((await tmuxTest(["display", "-p", "-t", `${T}:0.0`, "#{pane_pipe}"])).stdout).toBe("1");
+  const got: Uint8Array[] = [];
+  b.attach((c) => { got.push(c); });
+  await sleep(500);
+  expect(Buffer.concat(got).toString()).toContain("LATE");
+  await broadcasters.stopAll();
+}, 10_000);
