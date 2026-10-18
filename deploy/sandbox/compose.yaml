@@ -1,0 +1,45 @@
+# hub-sandbox 运行配置（docs/specs/002-sandbox-instance.md §2.2）。
+# 由 `instances.zsh deploy-sandbox` 调用；网络 hub-sandbox 与防火墙须先就位。
+name: hub-sandbox
+
+services:
+  hub:
+    image: tmux-hub-sandbox:latest
+    container_name: hub-sandbox
+    init: true
+    restart: unless-stopped
+    env_file:
+      - ${HOME}/.config/tmux-hub-sandbox/sandbox.env
+      - ${HOME}/.config/tmux-hub-sandbox/claude.env
+    environment:
+      SANDBOX_PROXY: http://192.168.250.1:7898
+    cap_drop: [ALL]
+    # 仅供 entrypoint 降权到 hub / agent；降权后进程不再持有任何 capability。
+    cap_add: [SETUID, SETGID]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=1g
+      - /run/tmux-sandbox:uid=1002,gid=1001,mode=2750,size=1m
+    volumes:
+      - home:/home/agent
+      - state:/var/lib/hub
+      - panes:/var/log/hub-panes
+    cpus: 4
+    mem_limit: 8g
+    pids_limit: 1024
+    ports:
+      - "100.64.0.6:3103:3103"
+    # 指向只放行 7898 的网关地址 = 容器内没有 DNS，域名一律交给代理解析。
+    dns: [192.168.250.1]
+    networks: [sandbox]
+
+volumes:
+  home:
+  state:
+  panes:
+
+networks:
+  sandbox:
+    name: hub-sandbox
+    external: true

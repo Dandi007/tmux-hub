@@ -1,0 +1,19 @@
+# 安装：sudo install -m 0755 deploy/sandbox/firewall.sh /usr/local/sbin/hub-sandbox-firewall.sh
+#       sudo install -m 0644 deploy/sandbox/hub-sandbox-firewall.service /etc/systemd/system/
+#       sudo systemctl daemon-reload && sudo systemctl enable --now hub-sandbox-firewall.service
+# Before=docker：开机时规则先于容器自启就位，不留直连出网的窗口
+# （DOCKER-USER 链由本脚本预建，docker 启动时沿用、不清空）。
+# PartOf：docker 重启时本 unit 跟着重新加载。
+[Unit]
+Description=hub-sandbox egress lockdown (only 192.168.250.1:7898)
+Before=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/hub-sandbox-firewall.sh
+ExecStop=/usr/local/sbin/hub-sandbox-firewall.sh --off
+
+[Install]
+WantedBy=multi-user.target docker.service

@@ -7,6 +7,7 @@
 // hub that owns the session (dogfood vs prod).
 const CLI_ROUTING_KEYS = new Set([
   "TMUX_HUB_SOCKET",
+  "TMUX_HUB_SOCKET_PATH",
   "TMUX_HUB_PORT",
   "TMUX_HUB_SECRET_PATH",
   "TMUX_HUB_ADMIN_SECRET_PATH",

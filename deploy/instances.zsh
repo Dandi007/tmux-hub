@@ -14,6 +14,7 @@
 #                                                # Linux：accepted tag 前移到 ref 并推远端 → deploy-prod
 #   zsh deploy/instances.zsh deploy-prod         # Linux：checkout accepted → build → restart prod
 #   zsh deploy/instances.zsh drift               # dogfood 领先 accepted 多少、都是什么
+#   zsh deploy/instances.zsh deploy-sandbox [<ref>]  # Linux：ref（默认 accepted）→ 镜像 → 重建 hub-sandbox 容器
 set -eu
 
 PLATFORM=$(uname -s)
@@ -42,6 +43,9 @@ _usage() {
                                                Linux：accepted tag 前移到 dogfood HEAD（或 ref）并推远端 → deploy-prod
   zsh deploy/instances.zsh deploy-prod         Linux：checkout accepted tag → build → systemctl --user restart tmux-hub.service
   zsh deploy/instances.zsh drift               accepted 与 dogfood 的差距（commit 列表 + 期间 dogfood 部署次数）
+  zsh deploy/instances.zsh deploy-sandbox [<ref>]
+                                               Linux：<ref>（默认 accepted tag）的源码打进 tmux-hub-sandbox 镜像 → 重建容器
+                                               （docs/specs/002-sandbox-instance.md）
 
 环境变量覆盖路径（可选）：
   TMUX_HUB_DOGFOOD_WT=<path>   dogfood worktree（macOS 默认 ~/code/worktrees/tmux-hub/dogfood-live；Linux 默认 /data/code/worktrees/tmux-hub/dogfood-live）
@@ -205,6 +209,42 @@ case "${1:-}" in
       echo "期间 dogfood 部署 ${deploys// /} 次"
     fi
     git -C "$PROD_WT" log --first-parent --format='  %h %cs %s' "$base..$head"
+    ;;
+
+  deploy-sandbox)
+    if [ "$PLATFORM" = "Darwin" ]; then
+      echo "错误：hub-sandbox 只部署在 NUC。" >&2
+      exit 1
+    fi
+    REF=${2:-$ACCEPTED_TAG}
+    SANDBOX_DIR=${0:A:h}/sandbox
+    SANDBOX_URL=http://100.64.0.6:3103/system/health
+    echo "=== deploy-sandbox: $REF → tmux-hub-sandbox 镜像 → hub-sandbox 容器 ==="
+    # 防火墙或网络缺失时容器会直连出网 / 起不来：先确认再动容器。
+    if ! sudo -n iptables -S DOCKER-USER | grep -qF -- "--comment hub-sandbox"; then
+      echo "✗ 未加载 hub-sandbox 防火墙规则（systemctl status hub-sandbox-firewall）" >&2
+      exit 1
+    fi
+    docker network inspect hub-sandbox >/dev/null
+    git -C "$PROD_WT" fetch -q --force origin "refs/tags/${ACCEPTED_TAG}:refs/tags/$ACCEPTED_TAG"
+    commit=$(git -C "$PROD_WT" rev-parse "$REF^{commit}")
+    ctx=$(mktemp -d)
+    trap 'rm -rf "$ctx"' EXIT
+    mkdir -p "$ctx/app" "$ctx/bin"
+    git -C "$PROD_WT" archive "$commit" | tar -x -C "$ctx/app"
+    cp -r "$SANDBOX_DIR" "$ctx/sandbox"
+    cp "$(readlink -f "$(command -v bun)")" "$ctx/bin/bun"
+    cp "$(readlink -f "$(command -v claude)")" "$ctx/bin/claude"
+    # 构建期走宿主 mihomo 7897（apt / bun install）。
+    docker build --network host \
+      --build-arg HTTP_PROXY=http://127.0.0.1:7897 --build-arg HTTPS_PROXY=http://127.0.0.1:7897 \
+      --build-arg TMUX_HUB_COMMIT="$commit" \
+      -f "$ctx/sandbox/Dockerfile" -t tmux-hub-sandbox:latest "$ctx"
+    docker compose -f "$SANDBOX_DIR/compose.yaml" up -d --force-recreate
+    sleep 3
+    _health_check "$SANDBOX_URL" "hub-sandbox"
+    _verify_commit "$SANDBOX_URL" "$commit"
+    _log_deploy sandbox "$commit"
     ;;
 
   help|--help|-h)
