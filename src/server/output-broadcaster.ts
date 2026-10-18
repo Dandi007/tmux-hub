@@ -52,6 +52,12 @@ type Subscriber = (chunk: Uint8Array) => void;
 const ALIGN_SETTLE_MS = 30;
 const ALIGN_MAX_CAPTURES = 5;
 
+// Process-wide attach/resync snapshot counters for /metrics. `retries` are
+// extra captures because bytes were in flight; `overlaps` are snapshots that
+// never went quiet and were delivered with the overlap tolerated — the case
+// that can still leave a client misaligned.
+export const snapshotStats = { snapshots: 0, retries: 0, overlaps: 0 };
+
 export type BroadcasterEvent =
   | { kind: "replay_truncated" }
   | { kind: "stopped" }
@@ -275,9 +281,13 @@ export class SessionBroadcaster {
           this.poll();
           if (pending.length === 0) break;
           if (attempt === ALIGN_MAX_CAPTURES) {
+            snapshotStats.overlaps++;
             logger.debug({ session: this.session, attempts: attempt }, "attach snapshot never quiet; delivering overlap");
+          } else {
+            snapshotStats.retries++;
           }
         }
+        snapshotStats.snapshots++;
         send(enc.encode(snap));
       } else {
         const upTo = this.offset;

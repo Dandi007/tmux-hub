@@ -4,6 +4,8 @@ export interface Gauge {
   name: string;
   help: string;
   value: () => number | undefined;
+  // Default gauge; a counter only ever grows (Prometheus `_total`).
+  type?: "gauge" | "counter";
 }
 
 // Prometheus text format. A gauge whose reader throws or yields undefined is
@@ -15,7 +17,7 @@ export function renderMetrics(gauges: Gauge[]): string {
     let v: number | undefined;
     try { v = g.value(); } catch { continue; }
     if (v === undefined || !Number.isFinite(v)) continue;
-    out += `# HELP ${g.name} ${g.help}\n# TYPE ${g.name} gauge\n${g.name} ${v}\n`;
+    out += `# HELP ${g.name} ${g.help}\n# TYPE ${g.name} ${g.type ?? "gauge"}\n${g.name} ${v}\n`;
   }
   return out;
 }

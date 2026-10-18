@@ -58,6 +58,9 @@ describe("GET /metrics", () => {
     expect(val("tmux_hub_ws_connections")).toBe(0);
     expect(val("tmux_hub_sse_clients")).toBe(0);
     expect(val("tmux_hub_sessions")).toBeGreaterThanOrEqual(0);
+    expect(val("tmux_hub_snapshots_total")).toBeGreaterThanOrEqual(0);
+    expect(val("tmux_hub_snapshot_retries_total")).toBeGreaterThanOrEqual(0);
+    expect(val("tmux_hub_snapshot_overlaps_total")).toBeGreaterThanOrEqual(0);
     expect(val("tmux_hub_broadcasters")).toBeGreaterThanOrEqual(0);
     expect(val("tmux_hub_broadcaster_subscribers")).toBeGreaterThanOrEqual(0);
   });

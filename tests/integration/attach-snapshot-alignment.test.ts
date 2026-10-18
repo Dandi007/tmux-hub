@@ -36,9 +36,14 @@ test("bytes in flight during capture are not replayed on top of the snapshot", a
   logPath = b.logPath;
   await b.start();
 
+  const { snapshotStats } = await import("../../src/server/output-broadcaster");
+  const before = { ...snapshotStats };
   const frames: string[] = [];
   await b.attachWithReplay((c: Uint8Array | string) => frames.push(dec(c)), 120, 40);
   const all = frames.join("");
+  expect(snapshotStats.snapshots - before.snapshots).toBe(1);
+  expect(snapshotStats.retries - before.retries).toBe(1);
+  expect(snapshotStats.overlaps - before.overlaps).toBe(0);
 
   expect(all).not.toContain("IN_FLIGHT_REDRAW");
   expect(all).toContain("SNAPSHOT_2");
@@ -63,9 +68,13 @@ test("a quiet pane is captured once", async () => {
   };
   const b = new SessionBroadcaster("align-2", run as any, true);
   await b.start();
+  const { snapshotStats } = await import("../../src/server/output-broadcaster");
+  const before = { ...snapshotStats };
   const frames: string[] = [];
   await b.attachWithReplay((c: Uint8Array | string) => frames.push(dec(c)), 120, 40);
   expect(captures).toBe(1);
+  expect(snapshotStats.snapshots - before.snapshots).toBe(1);
+  expect(snapshotStats.retries - before.retries).toBe(0);
   expect(frames.join("")).toContain("QUIET");
   await b.stop({ deleteLog: true });
 });
@@ -88,9 +97,14 @@ test("a never-quiet pane attaches after bounded retries without losing bytes", a
   const b = new SessionBroadcaster("align-3", run as any, true);
   logPath = b.logPath;
   await b.start();
+  const { snapshotStats } = await import("../../src/server/output-broadcaster");
+  const before = { ...snapshotStats };
   const frames: string[] = [];
   await b.attachWithReplay((c: Uint8Array | string) => frames.push(dec(c)), 120, 40);
   const all = frames.join("");
+  // The fallback is what can leave a client misaligned: it must be counted.
+  expect(snapshotStats.overlaps - before.overlaps).toBe(1);
+  expect(snapshotStats.retries - before.retries).toBe(captures - 1);
   expect(captures).toBeGreaterThan(1);
   expect(captures).toBeLessThanOrEqual(6);
   expect(all).toContain(`SNAP_${captures}`);
