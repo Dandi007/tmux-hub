@@ -9,6 +9,11 @@ describe("renderMetrics", () => {
     expect(out.endsWith("\n")).toBe(true);
   });
 
+  test("renders counters with TYPE counter", () => {
+    const out = renderMetrics([{ name: "foo_total", help: "Foo.", type: "counter", value: () => 3 }]);
+    expect(out).toContain("# HELP foo_total Foo.\n# TYPE foo_total counter\nfoo_total 3\n");
+  });
+
   test("omits gauges that throw or return undefined", () => {
     const out = renderMetrics([
       { name: "bad", help: "x", value: () => { throw new Error("boom"); } },

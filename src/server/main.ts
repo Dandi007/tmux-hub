@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { SessionRegistry } from "./session-registry";
 import { SseHub } from "./sse";
-import { BroadcasterRegistry, type SessionBroadcaster } from "./output-broadcaster";
+import { BroadcasterRegistry, snapshotStats, type SessionBroadcaster } from "./output-broadcaster";
 import { InputRouter, HubError } from "./input-router";
 import { pinViewport, getNativeAttachCount } from "./viewport-pinner";
 import { tmux } from "./tmux-cmd";
@@ -30,7 +30,7 @@ import { createLogger, LOG_FILE } from "./logger";
 import { ResyncScheduler } from "./resize-resync";
 import { adoptUnsubs } from "./ws-attach";
 import { SessionPeers } from "./session-peers";
-import { renderMetrics, openFdCount } from "./metrics";
+import { renderMetrics, openFdCount, type Gauge } from "./metrics";
 
 const logger = createLogger("main");
 
@@ -113,7 +113,7 @@ app.use("*", authGate);
 // never 5xxes on data-plane failures — process aliveness is Prometheus `up`.
 // Gauges are in-memory reads only (no tmux calls), for leak watching.
 let wsConnections = 0;
-const METRIC_GAUGES = [
+const METRIC_GAUGES: Gauge[] = [
   { name: "process_resident_memory_bytes", help: "Resident set size in bytes.", value: () => process.memoryUsage().rss },
   { name: "process_heap_used_bytes", help: "JS heap used in bytes.", value: () => process.memoryUsage().heapUsed },
   { name: "process_open_fds", help: "Open file descriptors (Linux only).", value: openFdCount },
@@ -124,6 +124,9 @@ const METRIC_GAUGES = [
   { name: "tmux_hub_sse_clients", help: "Connected SSE clients.", value: () => sse.clientCount() },
   { name: "tmux_hub_broadcasters", help: "Live session broadcasters.", value: () => broadcasters.size() },
   { name: "tmux_hub_broadcaster_subscribers", help: "Data subscribers across all broadcasters.", value: () => broadcasters.subscriberTotal() },
+  { name: "tmux_hub_snapshots_total", help: "Attach/resync snapshots delivered.", type: "counter", value: () => snapshotStats.snapshots },
+  { name: "tmux_hub_snapshot_retries_total", help: "Extra snapshot captures because bytes were in flight.", type: "counter", value: () => snapshotStats.retries },
+  { name: "tmux_hub_snapshot_overlaps_total", help: "Snapshots that never went quiet and were delivered with overlapping bytes.", type: "counter", value: () => snapshotStats.overlaps },
 ];
 app.get("/metrics", (c) => c.text(renderMetrics(METRIC_GAUGES), { headers: { "content-type": "text/plain; charset=utf-8" } }));
 // 进程启动时钉住的代码版本：部署后据此核对「在跑的是不是刚部署的 commit」。
