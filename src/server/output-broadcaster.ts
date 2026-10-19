@@ -436,6 +436,10 @@ export class BroadcasterRegistry {
   // `ready` is the start: every caller awaits the same one, so none gets an
   // instance whose pipe is not open yet (or never will be).
   private map = new Map<string, { b: SessionBroadcaster; ready: Promise<SessionBroadcaster> }>();
+  // Stops still in flight. A same-name recreate fires stop() and get() without
+  // awaiting either (main.ts); the new start waits here so the old stop's pipe
+  // close and log trash cannot land on the new pipe and log.
+  private stopping = new Map<string, Promise<void>>();
 
   constructor(private run: TmuxRunner = tmux, private emulatorEnabled?: boolean) {}
 
@@ -443,7 +447,8 @@ export class BroadcasterRegistry {
     const existing = this.map.get(session);
     if (existing) return existing.ready;
     const b = new SessionBroadcaster(session, this.run, this.emulatorEnabled);
-    const ready = b.start().then(() => b, (e: unknown) => {
+    const prior = this.stopping.get(session) ?? Promise.resolve();
+    const ready = prior.then(() => b.start()).then(() => b, (e: unknown) => {
       // Don't cache a broadcaster without a pipe: a later get() (the session
       // shows up, or a retry) would return it and the session never streams.
       if (this.map.get(session)?.b === b) this.map.delete(session);
@@ -467,7 +472,14 @@ export class BroadcasterRegistry {
     const entry = this.map.get(session);
     if (!entry) return;
     this.map.delete(session);
-    await entry.b.stop(opts);
+    const stopped = entry.b.stop(opts);
+    // What a later get() waits on: settles either way, a failed stop must not
+    // fail the next start.
+    const settled: Promise<void> = stopped.then(() => undefined, () => undefined).then(() => {
+      if (this.stopping.get(session) === settled) this.stopping.delete(session);
+    });
+    this.stopping.set(session, settled);
+    await stopped;
   }
 
   async stopAll(): Promise<void> {
