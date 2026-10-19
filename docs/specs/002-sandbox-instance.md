@@ -215,8 +215,10 @@ mihomo 侧暂未部署到 `/etc`（见 §7），A1/A2/A4–A6 用同一份 SSoT 
 | A8 | ✅ | agent 读 `/var/lib/hub`、`/proc/{1,hub}/environ` 均 Permission denied；pane 环境里没有 `GATE_*` / `TMUX_HUB_*` |
 | A9 | ✅ | 无 `docker.sock`、无 sudo、`su` 失败、根文件系统只读；hub / agent / tmux 进程 CapEff=0，NoNewPrivs=1 |
 | A10 | ✅ | fork 炸弹停在约 1000 个进程；10G 内存申请被 OOM 杀（137），容器和 3101/3102 健康不受影响 |
-| A11 | ⏳ | 等 `claude.env` |
-| A12–A14 | ⏳ | 等 edge 部署和新 gate-id 账号 |
+| A11 | ✅ | 2026-10-19：容器内以 agent 身份运行 `claude -p` 正常返回；token 复用 sops 里已有的本人 setup-token |
+| A12 | ✅ | 2026-10-19：fsy 在根域密码登录后打开 `hub-sandbox.`，完成 Claude Code 首次引导；从输入框发消息，回显 `agent` / `US`（出口跟随线上 mihomo 的 `🛟 BWG优先`）。过程中发现 pane 日志竞态导致浏览器无输出，已修（0212107） |
+| A13 | ✅ | fsy 的 cookie：`hub-sandbox.` 200，`hub.` / `hub-dogfood.` 403 |
+| A14 | ✅ | gate verify 对所有账号一律 `requireGrant`，admin 没有例外；主账号 qinglin 的 grants 只有 hub 和 hub-dogfood，没有 hub-sandbox（据代码和 DB，未用主账号实测） |
 | A15 | ◐ | tmux server 被杀后 5s 内自动拉起；`docker stop` 0.16s 正常退出；`systemctl restart docker` / 整机重启会影响 NUC 上所有容器，留到维护窗口再做 |
 | A16 | ✅ | `bun test` 604 pass；tsc 只剩语音模块原有的报错（非本改动引入） |
 
@@ -245,10 +247,12 @@ mihomo 侧暂未部署到 `/etc`（见 §7），A1/A2/A4–A6 用同一份 SSoT 
 - **账号条款**：只要始终是本人使用，就不涉及账号共用。一旦提供给他人，就违反 Claude 消费者条款，可能导致封号。
 - **共用 inject key**：`GATE_INJECT_KEY` 是所有 app 共用的一把 key。§2.3 的用户分离挡住了 agent 读取它；更彻底的方案是 gate-auth 按 app 签发不同的 key，列为后续项。
 - **tmux 跨用户 socket**：已在 tmux 3.5a 上 spike 验证可行（`server-access -a hub` + socket 0660 + setgid 目录）。
-- **mihomo SSoT 漂移（部署阻塞）**：线上 `/etc/mihomo` 有未回写 SSoT 的手改（去掉了公司代理和内网创智代理、内网 DNS，TUN 关闭）。直接跑 `deploy-config.sh` 会把这些手改冲掉，需要先回写 SSoT。
+- **mihomo SSoT 漂移**：线上 `/etc/mihomo` 有未回写 SSoT 的手改（去掉了公司代理和内网创智代理、内网 DNS，TUN 关闭，境外和 AI 改为 `🛟 BWG优先`）。因此没有跑 `deploy-config.sh`，只把 listener 和 sub-rules 追加到线上配置后热加载。SSoT 回写另行处理。
+- **edge 线上漂移**：ECS `/opt/edge-gateway` 与 main 差异很大，本次用 `ops/hub-sandbox-route.py` 只做增量发布。
+- **pane 日志竞态（已修）**：hub 抢先 touch 的日志是 0644，agent 侧 pipe-pane 无法追加，浏览器收不到输出。修法是 hub 以 umask 0002 启动。
 - **`docker exec` 的环境**：`docker exec` 拿到的是容器级 env，包括 env_file 里的 key 和 token。这条路只有宿主 docker 用户能走，pane 走不到，不属于沙箱边界内的问题。
 - **经 IP 访问自家 ECS**：CONNECT `14.103.20.44` 会走 `GEOIP,CN` → DIRECT 到达 Caddy，挡住它的是 gate-id（新账号没有其他 app 的授权），这一点符合预期。
-- **未决**：新 gate-id 账号的邮箱。资源上限已确认为 4 核 / 8G。
+- **新账号**：gate-id 用户名 `fsy`，邮箱 `ronnynoell48+fsy@gmail.com`，只授权 hub-sandbox。密码登录只能在根域提交（子域返回 `account_origin_required`，是 gate 的设计）。资源上限为 4 核 / 8G。
 
 ## 8 被否方案
 
