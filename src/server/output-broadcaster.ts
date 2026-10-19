@@ -110,6 +110,13 @@ export class SessionBroadcaster {
     // into ~1.7s lumps, making the browser clock jump every few seconds.
     const shellCmd = `${PIPE_SINK_CMD} >> ${shellQuote(this.logPath)}`;
     const r = await this.run(["pipe-pane", "-t", `${this.session}:0.0`, shellCmd]);
+    if (this.stopped) {
+      // stop() ran while we awaited tmux; its pipe close may have landed before
+      // our open. Close again and leave without opening the fd or the timer —
+      // nothing would ever release them.
+      if (r.code === 0) await this.run(["pipe-pane", "-o", "-t", `${this.session}:0.0`]).catch(() => undefined);
+      throw new Error("broadcaster stopped during start");
+    }
     if (r.code !== 0) {
       logger.error({ session: this.session, code: r.code, stderr: r.stderr }, "pipe-pane failed");
       throw new Error(`pipe-pane failed (${r.code}): ${r.stderr}`);
@@ -426,24 +433,24 @@ function normalizeDim(v: number | undefined, fallback: number): number {
 }
 
 export class BroadcasterRegistry {
-  private map = new Map<string, SessionBroadcaster>();
+  // `ready` is the start: every caller awaits the same one, so none gets an
+  // instance whose pipe is not open yet (or never will be).
+  private map = new Map<string, { b: SessionBroadcaster; ready: Promise<SessionBroadcaster> }>();
 
   constructor(private run: TmuxRunner = tmux, private emulatorEnabled?: boolean) {}
 
-  async get(session: string): Promise<SessionBroadcaster> {
+  get(session: string): Promise<SessionBroadcaster> {
     const existing = this.map.get(session);
-    if (existing) return existing;
+    if (existing) return existing.ready;
     const b = new SessionBroadcaster(session, this.run, this.emulatorEnabled);
-    this.map.set(session, b);
-    try {
-      await b.start();
-    } catch (e) {
+    const ready = b.start().then(() => b, (e: unknown) => {
       // Don't cache a broadcaster without a pipe: a later get() (the session
       // shows up, or a retry) would return it and the session never streams.
-      if (this.map.get(session) === b) this.map.delete(session);
+      if (this.map.get(session)?.b === b) this.map.delete(session);
       throw e;
-    }
-    return b;
+    });
+    this.map.set(session, { b, ready });
+    return ready;
   }
 
   has(session: string): boolean { return this.map.has(session); }
@@ -452,20 +459,20 @@ export class BroadcasterRegistry {
 
   subscriberTotal(): number {
     let n = 0;
-    for (const b of this.map.values()) n += b.subscriberCount();
+    for (const { b } of this.map.values()) n += b.subscriberCount();
     return n;
   }
 
   async stop(session: string, opts: { deleteLog?: boolean } = {}): Promise<void> {
-    const b = this.map.get(session);
-    if (!b) return;
+    const entry = this.map.get(session);
+    if (!entry) return;
     this.map.delete(session);
-    await b.stop(opts);
+    await entry.b.stop(opts);
   }
 
   async stopAll(): Promise<void> {
     const all = Array.from(this.map.values());
     this.map.clear();
-    await Promise.allSettled(all.map((b) => b.stop()));
+    await Promise.allSettled(all.map(({ b }) => b.stop()));
   }
 }

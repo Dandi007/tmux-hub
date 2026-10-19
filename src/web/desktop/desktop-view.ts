@@ -112,8 +112,10 @@ export function renderDesktop(root: HTMLElement): void {
       if (pendingOpen === e.payload.name) {
         pendingOpen = null;
         setTimeout(() => openSession(e.payload.name), 0);
-      } else if (reopen.take(e.payload.name)) {
-        setTimeout(() => openSession(e.payload.name, { auto: true }), 0);
+      } else {
+        // Decide on the next tick, with the open: a click in between cancels.
+        const name = e.payload.name;
+        setTimeout(() => { if (reopen.take(name)) openSession(name, { auto: true }); }, 0);
       }
     } else if (e.event === "session_removed") {
       sessions = sessions.filter((s) => s.name !== e.payload.name);
