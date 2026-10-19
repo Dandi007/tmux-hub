@@ -54,8 +54,17 @@ export function createWsHandlers(deps: WsDeps) {
   // they adopt the new size and get an aligned resync; when the pinning page
   // leaves, they are told to reclaim.
   const peers = new SessionPeers<ServerWebSocket<WsData>>();
+  function released(ws: ServerWebSocket<WsData>): void {
+    for (const p of peers.others(ws.data.sessionName, ws)) {
+      try { p.send(JSON.stringify({ kind: "viewport", cols: ws.data.cols, rows: ws.data.rows, owner: "web", released: true })); } catch {}
+    }
+  }
   function pinnedBy(ws: ServerWebSocket<WsData>, cols: number, rows: number): void {
     const { sessionName } = ws.data;
+    // Closed while the pin was in flight: close() already ran, so the pane now
+    // has a dead client's size and nobody would ever release it. Let the other
+    // pages reclaim it instead of recording the dead ws as pinner.
+    if (ws.data.closed) { released(ws); return; }
     peers.pinned(sessionName, ws);
     for (const p of peers.others(sessionName, ws)) {
       try { p.send(JSON.stringify({ kind: "viewport", cols, rows, owner: "web", peer: true })); } catch {}
@@ -85,6 +94,7 @@ export function createWsHandlers(deps: WsDeps) {
         logger.warn({ session: sessionName, connId, err: e }, "getNativeAttachCount failed, assuming native attached");
         attachCount = 1; // fail-safe: treat as native attached
       }
+      if (ws.data.closed) return;
       // The pane's current size, for when this client does not pin it.
       const queryPaneSize = async (): Promise<{ cols: number; rows: number } | null> => {
         try {
@@ -135,6 +145,7 @@ export function createWsHandlers(deps: WsDeps) {
         try { ws.close(1011, "broadcaster failed"); } catch {}
         return;
       }
+      if (ws.data.closed) return;
       if (b.ring.truncated()) sse.emit({ event: "replay_truncated", payload: { name: sessionName } });
       ws.data.broadcaster = b;
 
@@ -170,7 +181,14 @@ export function createWsHandlers(deps: WsDeps) {
           sendReplayDone();
         });
       }
-      unsubData = await attached;
+      try {
+        unsubData = await attached;
+      } catch (e) {
+        unsubEvents();
+        logger.error({ session: sessionName, connId, err: e }, "attach failed; closing ws");
+        try { ws.close(1011, "attach failed"); } catch {}
+        return;
+      }
       if (!adoptUnsubs(ws.data, unsubEvents, unsubData)) return;
       peers.add(sessionName, ws);
       sendReplayDone();
@@ -181,11 +199,7 @@ export function createWsHandlers(deps: WsDeps) {
       logger.info({ session: sessionName, connId, code, reason: reason || undefined }, "ws close");
       ws.data.closed = true;
       ws.data.resync?.dispose();
-      if (peers.remove(sessionName, ws)) {
-        for (const p of peers.others(sessionName, ws)) {
-          try { p.send(JSON.stringify({ kind: "viewport", cols: ws.data.cols, rows: ws.data.rows, owner: "web", released: true })); } catch {}
-        }
-      }
+      if (peers.remove(sessionName, ws)) released(ws);
       const { unsubs } = ws.data;
       for (const fn of unsubs) try { fn(); } catch {}
       ws.data.unsubs.length = 0;

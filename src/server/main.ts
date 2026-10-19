@@ -109,15 +109,15 @@ app.use("*", authGate);
 // zero dependencies, never touches the tmux registry/session data plane, and
 // never 5xxes on data-plane failures — process aliveness is Prometheus `up`.
 // Gauges are in-memory reads only (no tmux calls), for leak watching.
-const ws = createWsHandlers({ broadcasters, getNativeAttachCount, pinViewport, tmux, sse, managedDb, input, logger });
+const terminalWs = createWsHandlers({ broadcasters, getNativeAttachCount, pinViewport, tmux, sse, managedDb, input, logger });
 const METRIC_GAUGES: Gauge[] = [
   { name: "process_resident_memory_bytes", help: "Resident set size in bytes.", value: () => process.memoryUsage().rss },
   { name: "process_heap_used_bytes", help: "JS heap used in bytes.", value: () => process.memoryUsage().heapUsed },
   { name: "process_open_fds", help: "Open file descriptors (Linux only).", value: openFdCount },
   { name: "process_uptime_seconds", help: "Seconds since process start.", value: () => process.uptime() },
   { name: "tmux_hub_sessions", help: "Sessions in the registry snapshot.", value: () => registry.snapshot().length },
-  { name: "tmux_hub_ws_connections", help: "Open terminal websockets.", value: () => ws.connections() },
-  { name: "tmux_hub_ws_peers", help: "Terminal websockets registered as session peers.", value: () => ws.peers.size() },
+  { name: "tmux_hub_ws_connections", help: "Open terminal websockets.", value: () => terminalWs.connections() },
+  { name: "tmux_hub_ws_peers", help: "Terminal websockets registered as session peers.", value: () => terminalWs.peers.size() },
   { name: "tmux_hub_sse_clients", help: "Connected SSE clients.", value: () => sse.clientCount() },
   { name: "tmux_hub_broadcasters", help: "Live session broadcasters.", value: () => broadcasters.size() },
   { name: "tmux_hub_broadcaster_subscribers", help: "Data subscribers across all broadcasters.", value: () => broadcasters.subscriberTotal() },
@@ -316,6 +316,6 @@ Bun.serve({
     }
     return app.fetch(req);
   },
-  websocket: ws,
+  websocket: terminalWs,
 });
 }
