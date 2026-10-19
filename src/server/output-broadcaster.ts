@@ -131,17 +131,26 @@ export class SessionBroadcaster {
       closeSync(openSync(this.logPath, "a"));
     }
     this.fd = openSync(this.logPath, "r");
-    // Live bytes start at the current end: nothing reads the history through
-    // poll (the emulator primes and legacy replay read the fd directly), and
-    // re-reading a long-lived session's log blocked the event loop ~12ms/MB on
-    // every hub restart.
-    this.offset = fstatSync(this.fd).size;
-    if (this.offset > this.ring.capacity) this.ring.markTruncated();
-    if (this.offset > 0) {
-      const len = Math.min(this.offset, TITLE_PRIME_BYTES);
-      const tail = new Uint8Array(len);
-      readSync(this.fd, tail, 0, len, this.offset - len);
-      this.titleFilter.push(tail);
+    try {
+      // Live bytes start at the current end: nothing reads the history through
+      // poll (the emulator primes and legacy replay read the fd directly), and
+      // re-reading a long-lived session's log blocked the event loop ~12ms/MB on
+      // every hub restart.
+      this.offset = fstatSync(this.fd).size;
+      if (this.offset > this.ring.capacity) this.ring.markTruncated();
+      if (this.offset > 0) {
+        const len = Math.min(this.offset, TITLE_PRIME_BYTES);
+        const tail = new Uint8Array(len);
+        const n = readSync(this.fd, tail, 0, len, this.offset - len);
+        this.titleFilter.push(tail.subarray(0, n));
+      }
+    } catch (e) {
+      // Nobody holds a failed instance (the registry drops it), so release the
+      // fd and the pipe opened above here or they outlive it.
+      try { closeSync(this.fd); } catch { /* ignore */ }
+      this.fd = null;
+      await this.run(["pipe-pane", "-o", "-t", `${this.session}:0.0`]).catch(() => undefined);
+      throw e;
     }
     this.pollTimer = setInterval(() => { this.poll(); }, 5);
     logger.info({ session: this.session, logPath: this.logPath }, "broadcaster started");
@@ -490,8 +499,10 @@ export class BroadcasterRegistry {
     this.map.delete(session);
     const stopped = entry.b.stop(opts);
     // What a later get() waits on: settles either way, a failed stop must not
-    // fail the next start.
-    const settled: Promise<void> = stopped.then(() => undefined, () => undefined).then(() => {
+    // fail the next start. Chained after any earlier in-flight stop, so a
+    // back-to-back recreate still waits for the first one (#147).
+    const prior = this.stopping.get(session) ?? Promise.resolve();
+    const settled: Promise<void> = prior.then(() => stopped).then(() => undefined, () => undefined).then(() => {
       if (this.stopping.get(session) === settled) this.stopping.delete(session);
     });
     this.stopping.set(session, settled);
