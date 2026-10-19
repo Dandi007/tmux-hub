@@ -1,5 +1,5 @@
 import { test, expect, afterAll } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -87,4 +87,44 @@ test("registry stop() during get() rejects the get and caches nothing", async ()
   g.release();
   await expect(got).rejects.toThrow(/stopped/);
   expect(reg.size()).toBe(0);
+});
+
+// Same-name recreate: main.ts fires the removed handler's stop() and the
+// created handler's get() without awaiting either. The old stop's pipe close
+// and log trash must land before the new start, or they hit the new pipe/log.
+test("get() after a same-name stop() waits for that stop to finish", async () => {
+  const seq: string[] = [];
+  let releaseClose!: () => void;
+  const closeGate = new Promise<void>((r) => { releaseClose = r; });
+  let gated = false;
+  const run = async (args: string[]) => {
+    const kind = args[0] === "pipe-pane" ? (args.includes("-o") ? "close" : "open") : args[0]!;
+    seq.push(kind);
+    if (kind === "close" && gated) {
+      gated = false;
+      await closeGate;
+      seq.push("close-done");
+    }
+    return { stdout: "", stderr: "", code: 0 };
+  };
+  const reg = new BroadcasterRegistry(run as any, false);
+  const old = await reg.get("s5");
+  const logPath = old.logPath;
+  seq.length = 0;
+
+  gated = true;
+  const stopping = reg.stop("s5", { deleteLog: true });
+  const got = reg.get("s5");
+  await Bun.sleep(20);
+  releaseClose();
+  await stopping;
+  const fresh = await got;
+
+  expect(fresh).not.toBe(old);
+  // The new start's tmux calls all come after the old stop's close finished.
+  expect(seq.slice(0, 2)).toEqual(["close", "close-done"]);
+  expect(seq.slice(2)).toEqual(["close", "open"]);
+  // The old stop trashed the old log, not the one the new pipe writes to.
+  expect(existsSync(logPath)).toBe(true);
+  await reg.stopAll();
 });
