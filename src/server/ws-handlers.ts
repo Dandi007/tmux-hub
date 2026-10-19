@@ -146,7 +146,6 @@ export function createWsHandlers(deps: WsDeps) {
         return;
       }
       if (ws.data.closed) return;
-      if (b.ring.truncated()) sse.emit({ event: "replay_truncated", payload: { name: sessionName } });
       ws.data.broadcaster = b;
 
       const unsubEvents = b.onEvent((ev) => {

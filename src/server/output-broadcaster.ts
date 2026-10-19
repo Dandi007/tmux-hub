@@ -3,9 +3,7 @@
 // byte offset so kill/restart resumes without dropping bytes. See work folder
 // for spike S1a/S1b analysis.
 import { tmux } from "./tmux-cmd";
-import { RingBuffer } from "./ring-buffer";
 import {
-  RING_BUFFER_BYTES,
   REPLAY_CAP_BYTES,
   EMULATOR_ENABLED,
   PIPE_SINK_CMD,
@@ -73,7 +71,7 @@ type EventListener = (event: BroadcasterEvent) => void;
 export type TmuxRunner = (args: string[]) => Promise<{ stdout: string; stderr: string; code: number }>;
 
 export class SessionBroadcaster {
-  readonly ring: RingBuffer;
+  private broadcastBytes = 0;
   readonly logPath: string;
   private fd: number | null = null;
   private offset = 0;
@@ -95,7 +93,6 @@ export class SessionBroadcaster {
     private run: TmuxRunner = tmux,
     private readonly emulatorEnabled: boolean = EMULATOR_ENABLED,
   ) {
-    this.ring = new RingBuffer(RING_BUFFER_BYTES);
     mkdirSync(LOG_DIR, { recursive: true });
     const safe = session.replace(/[^a-zA-Z0-9_-]/g, "_");
     // Stable per-session log file. Persists across attaches and hub restarts
@@ -137,7 +134,6 @@ export class SessionBroadcaster {
       // re-reading a long-lived session's log blocked the event loop ~12ms/MB on
       // every hub restart.
       this.offset = fstatSync(this.fd).size;
-      if (this.offset > this.ring.capacity) this.ring.markTruncated();
       if (this.offset > 0) {
         const len = Math.min(this.offset, TITLE_PRIME_BYTES);
         const tail = new Uint8Array(len);
@@ -378,7 +374,7 @@ export class SessionBroadcaster {
 
   subscriberCount(): number { return this.subscribers.size; }
 
-  bytesBroadcast(): number { return this.ring.bytesWritten(); }
+  bytesBroadcast(): number { return this.broadcastBytes; }
 
   async stop(opts: { deleteLog?: boolean } = {}): Promise<void> {
     if (this.stopped) return;
@@ -402,12 +398,8 @@ export class SessionBroadcaster {
 
   private emit(chunk: Uint8Array): void {
     if (chunk.length === 0) return;
-    const wasTruncated = this.ring.truncated();
-    this.ring.append(chunk);
+    this.broadcastBytes += chunk.length;
     if (this.emulator) this.emulator.write(chunk);
-    if (!wasTruncated && this.ring.truncated()) {
-      for (const l of this.eventListeners) l({ kind: "replay_truncated" });
-    }
     for (const sub of this.subscribers) {
       try { sub(chunk); } catch { /* swallow subscriber errors */ }
     }
