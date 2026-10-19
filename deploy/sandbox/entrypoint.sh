@@ -38,8 +38,10 @@ start_tmux() {
 }
 
 start_tmux
-setpriv --reuid=hub --regid=hub --init-groups --inh-caps=-all -- \
-  env -i "${hub_env[@]}" bun run /opt/tmux-hub/src/server/main.ts &
+# umask 0002：hub 预建的 pane 日志要让 agent（setgid 目录下同组）可追加，
+# 否则 hub 抢先 touch 时 pipe-pane 写不进去，浏览器收不到输出。
+(umask 0002; exec setpriv --reuid=hub --regid=hub --init-groups --inh-caps=-all -- \
+  env -i "${hub_env[@]}" bun run /opt/tmux-hub/src/server/main.ts) &
 hub_pid=$!
 
 # root 没有 CAP_KILL，不能直接给 hub/agent 的进程发信号：降权成属主再发，存活看 /proc。
