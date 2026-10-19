@@ -47,6 +47,12 @@ export class RingBuffer {
     return out;
   }
 
+  // Bytes older than the buffer existed but were never appended (e.g. a
+  // broadcaster that starts at the end of an existing log).
+  markTruncated(): void {
+    this.wasTruncated = true;
+  }
+
   truncated(): boolean {
     return this.wasTruncated;
   }
