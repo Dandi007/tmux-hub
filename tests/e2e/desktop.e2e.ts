@@ -111,6 +111,42 @@ test.describe("desktop tab-bar", () => {
     ctx.tmuxE2E(["kill-session", "-t", name]);
   });
 
+  // #140: a removed session's reopen intent must not outlive the user's next
+  // choice — a later same-name recreate (rsi driver rollover) stole focus.
+  // Once a removal is confirmed the name is no longer managed, so the "same
+  // name comes back" is a third managed session renamed to it.
+  test("a killed session recreated after the user moved on does not steal focus", async ({ page, ctx }) => {
+    const a = await ctx.createSession();
+    const b = await ctx.createSession();
+    const c = await ctx.createSession();
+
+    await openApp(page);
+    await expect(tab(page, a)).toBeVisible({ timeout: 10_000 });
+    await tab(page, a).click();
+    await expect(tab(page, a)).toHaveClass(/is-active/, { timeout: 5_000 });
+
+    ctx.tmuxE2E(["kill-session", "-t", a]);
+    await expect(tab(page, a)).toHaveCount(0, { timeout: 15_000 });
+    await tab(page, b).click();
+    await expect(tab(page, b)).toHaveClass(/is-active/, { timeout: 5_000 });
+
+    const base = `http://127.0.0.1:${ctx.port}`;
+    const { secret } = (await (await fetch(`${base}/system/auth-check`)).json()) as { secret: string };
+    const r = await fetch(`${base}/sessions/${encodeURIComponent(c)}/rename`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-hub-secret": secret },
+      body: JSON.stringify({ to: a }),
+    });
+    expect(r.status).toBe(200);
+    await expect(tab(page, a)).toBeVisible({ timeout: 15_000 });
+    await page.waitForTimeout(1_000);
+    await expect(tab(page, b)).toHaveClass(/is-active/);
+    await expect(tab(page, a)).not.toHaveClass(/is-active/);
+
+    ctx.tmuxE2E(["kill-session", "-t", a]);
+    ctx.tmuxE2E(["kill-session", "-t", b]);
+  });
+
   test("switching tabs flips the active tab and reattaches that session", async ({ page, ctx }) => {
     const a = await ctx.createSession();
     const b = await ctx.createSession();

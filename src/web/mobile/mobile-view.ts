@@ -14,6 +14,7 @@ import { killSession } from "../shared/kill-controller";
 import { imeGuard } from "../shared/ime-guard";
 import { confirmModal } from "../ui/confirm-modal";
 import { saveLastSession, loadLastSession } from "../shared/last-session";
+import { ReopenAfterRemove } from "../reopen-after-remove";
 import { createSuggestFlow, type Phase } from "./suggest-flow";
 import { getPaneMode, requestSuggestion } from "./suggest-client";
 import { renderVoiceButton, type VoiceStatus } from "./voice-input";
@@ -43,6 +44,7 @@ export function renderMobile(root: HTMLElement): void {
 
   let term: TerminalHandle | null = null;
   let sessions: SessionInfo[] = [];
+  const reopen = new ReopenAfterRemove();
   let openedName: string | null = null;
 
   // NL→command suggest: mode polling state (fail-safe: default other = today's literal-send behaviour).
@@ -107,7 +109,10 @@ export function renderMobile(root: HTMLElement): void {
     }
   };
 
-  const openSession = (name: string, opts?: { force?: boolean }): void => {
+  // `auto`: the page's own choice (fallback after a removal, same-name reopen),
+  // which leaves a pending reopen in place; anything else is the user's.
+  const openSession = (name: string, opts?: { force?: boolean; auto?: boolean }): void => {
+    if (!opts?.auto) reopen.cancel();
     saveLastSession(name);
     const prevForce = pendingTarget?.name === name ? pendingTarget.force : false;
     const force = (opts?.force ?? false) || prevForce;
@@ -217,7 +222,7 @@ export function renderMobile(root: HTMLElement): void {
       }
       if (!target) target = sorted.find((s) => isGrammarOk(s.name));
       if (target) {
-        void openSession(target.name);
+        void openSession(target.name, { auto: true });
       }
     }
   };
@@ -240,9 +245,6 @@ export function renderMobile(root: HTMLElement): void {
   };
 
   let pendingQuickLaunchName: string | null = null;
-  // The open session was removed; reopen it if it comes straight back under
-  // the same name (killed and recreated).
-  let reopenName: string | null = null;
   let pendingQuickLaunchTimer: ReturnType<typeof setTimeout> | null = null;
 
   const sse = subscribeEvents((e: ServerEvent) => {
@@ -261,16 +263,15 @@ export function renderMobile(root: HTMLElement): void {
         pendingQuickLaunchName = null;
         if (pendingQuickLaunchTimer) { clearTimeout(pendingQuickLaunchTimer); pendingQuickLaunchTimer = null; }
         openSession(e.payload.name);
-      } else if (reopenName === e.payload.name) {
-        reopenName = null;
-        openSession(e.payload.name);
+      } else if (reopen.take(e.payload.name)) {
+        openSession(e.payload.name, { auto: true });
       }
     }
     else if (e.event === "session_removed") {
       sessions = sessions.filter((s) => s.name !== e.payload.name);
       if (openedName === e.payload.name) {
         openedName = null;
-        reopenName = e.payload.name;
+        reopen.removed(e.payload.name);
         if (term) { term.close(); term = null; }
       }
     } else if (e.event === "session_activity") {

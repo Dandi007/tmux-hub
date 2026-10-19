@@ -15,6 +15,7 @@ import { imeGuard } from "../shared/ime-guard";
 import { killSession } from "../shared/kill-controller";
 import { saveLastSession, loadLastSession } from "../shared/last-session";
 import { openTemplatePicker } from "../shared/template-picker";
+import { ReopenAfterRemove } from "../reopen-after-remove";
 
 export function renderDesktop(root: HTMLElement): void {
   root.replaceChildren();
@@ -34,9 +35,13 @@ export function renderDesktop(root: HTMLElement): void {
   connStatus.onRetry(() => pool.retryActive());
 
   let sessions: SessionInfo[] = [];
+  const reopen = new ReopenAfterRemove();
   let openedName: string | null = null;
 
-  const openSession = (name: string): void => {
+  // `auto`: the page's own choice (fallback after a removal, same-name reopen),
+  // which leaves a pending reopen in place; anything else is the user's.
+  const openSession = (name: string, opts?: { auto?: boolean }): void => {
+    if (!opts?.auto) reopen.cancel();
     if (!isGrammarOk(name)) return;
     if (name === openedName) return;
     openedName = name;
@@ -77,9 +82,6 @@ export function renderDesktop(root: HTMLElement): void {
 
   let hasRestoredSession = false;
   let pendingOpen: string | null = null;
-  // The open session was removed; if it comes straight back under the same
-  // name (killed and recreated), reopen it instead of leaving a blank pane.
-  let reopenName: string | null = null;
 
   const refreshUI = (): void => {
     tabBar.refresh(sessions, openedName);
@@ -98,7 +100,7 @@ export function renderDesktop(root: HTMLElement): void {
         if (last) target = sorted.find((s) => s.name === last && isGrammarOk(s.name));
       }
       if (!target) target = sorted.find((s) => isGrammarOk(s.name));
-      if (target) openSession(target.name);
+      if (target) openSession(target.name, { auto: true });
     }
   };
 
@@ -107,15 +109,16 @@ export function renderDesktop(root: HTMLElement): void {
       sessions = e.payload;
     } else if (e.event === "session_created") {
       sessions = [...sessions, e.payload];
-      if (pendingOpen === e.payload.name || reopenName === e.payload.name) {
-        if (pendingOpen === e.payload.name) pendingOpen = null;
-        reopenName = null;
+      if (pendingOpen === e.payload.name) {
+        pendingOpen = null;
         setTimeout(() => openSession(e.payload.name), 0);
+      } else if (reopen.take(e.payload.name)) {
+        setTimeout(() => openSession(e.payload.name, { auto: true }), 0);
       }
     } else if (e.event === "session_removed") {
       sessions = sessions.filter((s) => s.name !== e.payload.name);
       pool.remove(e.payload.name);
-      if (openedName === e.payload.name) { openedName = null; reopenName = e.payload.name; }
+      if (openedName === e.payload.name) { openedName = null; reopen.removed(e.payload.name); }
     } else if (e.event === "session_activity") {
       sessions = sessions.map((s) => s.name === e.payload.name ? e.payload : s);
       pool.notifySessionActivity(e.payload.name, e.payload.attached, e.payload.cols, e.payload.rows);
