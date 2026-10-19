@@ -1,5 +1,5 @@
 import { test, expect, afterAll } from "bun:test";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -127,4 +127,63 @@ test("get() after a same-name stop() waits for that stop to finish", async () =>
   // The old stop trashed the old log, not the one the new pipe writes to.
   expect(existsSync(logPath)).toBe(true);
   await reg.stopAll();
+});
+
+// #147: back-to-back recreate. A second stop() (of the instance still waiting
+// on the first stop) must not let the next get() skip the first stop.
+test("get() after two same-name stops waits for the earlier stop too", async () => {
+  const seq: string[] = [];
+  let releaseClose!: () => void;
+  const closeGate = new Promise<void>((r) => { releaseClose = r; });
+  let gated = false;
+  const run = async (args: string[]) => {
+    const kind = args[0] === "pipe-pane" ? (args.includes("-o") ? "close" : "open") : args[0]!;
+    seq.push(kind);
+    if (kind === "close" && gated) {
+      gated = false;
+      await closeGate;
+      seq.push("close-done");
+    }
+    return { stdout: "", stderr: "", code: 0 };
+  };
+  const reg = new BroadcasterRegistry(run as any, false);
+  await reg.get("s6");
+  seq.length = 0;
+
+  gated = true;
+  const stop1 = reg.stop("s6", { deleteLog: true });
+  const second = reg.get("s6"); // waits on stop1
+  const stop2 = reg.stop("s6", { deleteLog: true });
+  const third = reg.get("s6");
+  await Bun.sleep(20);
+  releaseClose();
+  await Promise.all([stop1, stop2]);
+  await expect(second).rejects.toThrow(/stopped/);
+  await third;
+
+  expect(seq.filter((k) => k === "open")).toHaveLength(1);
+  expect(seq.indexOf("open")).toBeGreaterThan(seq.indexOf("close-done"));
+  await reg.stopAll();
+});
+
+// #147: a read after the fd is open can throw (here EISDIR: the log path is a
+// directory). start() must not leave the fd open or the pipe running.
+test("start() that fails after opening the log closes the fd and the pipe", async () => {
+  const calls: string[] = [];
+  const run = async (args: string[]) => {
+    calls.push(args[0] === "pipe-pane" ? (args.includes("-o") ? "close" : "open") : args[0]!);
+    return { stdout: "", stderr: "", code: 0 };
+  };
+  const b = new SessionBroadcaster("s7-dir", run as any, false);
+  mkdirSync(b.logPath, { recursive: true });
+  const fds = () => readdirSync("/proc/self/fd").length;
+  const before = fds();
+  try {
+    await expect(b.start()).rejects.toThrow();
+    expect(live(b)).toEqual({ fd: null, timer: null });
+    expect(fds()).toBe(before);
+    expect(calls).toEqual(["close", "open", "close"]);
+  } finally {
+    rmSync(b.logPath, { recursive: true, force: true });
+  }
 });
