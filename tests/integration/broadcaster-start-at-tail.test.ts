@@ -27,18 +27,15 @@ test("start() does not re-read the existing log; only new bytes are broadcast", 
   const { b, got, log } = await started("rsi-tail-big", history);
   expect(b.bytesBroadcast()).toBe(0);
   expect(got.join("")).toBe("");
-  // History beyond the ring was there before this hub; the flag stays as a full read set it.
-  expect(b.ring.truncated()).toBe(true);
   appendFileSync(log, "NEW\n");
   await Bun.sleep(30);
   expect(got.join("")).toBe("NEW\n");
   await b.stop();
 });
 
-test("a small existing log does not mark the ring truncated", async () => {
+test("a small existing log is not re-broadcast either", async () => {
   const { b } = await started("rsi-tail-small", "hello\n");
   expect(b.bytesBroadcast()).toBe(0);
-  expect(b.ring.truncated()).toBe(false);
   await b.stop();
 });
 
@@ -47,5 +44,18 @@ test("a window-name sequence split at the log end is still stripped", async () =
   appendFileSync(log, "ntf\x1b\\hello\n");
   await Bun.sleep(30);
   expect(got.join("")).toBe("hello\n");
+  await b.stop();
+});
+
+test("a log truncated under the broadcaster fires replay_truncated and resumes at the new end", async () => {
+  const { b, got, log } = await started("rsi-tail-shrink", "x".repeat(100));
+  const events: string[] = [];
+  b.onEvent((e) => { events.push(e.kind); });
+  writeFileSync(log, "");
+  await Bun.sleep(30);
+  expect(events).toEqual(["replay_truncated"]);
+  appendFileSync(log, "after\n");
+  await Bun.sleep(30);
+  expect(got.join("")).toBe("after\n");
   await b.stop();
 });
