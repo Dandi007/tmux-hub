@@ -15,7 +15,7 @@ import {
 } from "./config";
 import { SessionEmulator } from "./session-emulator";
 import { TitleSeqFilter } from "./title-seq-filter";
-import { mkdirSync, openSync, readSync, closeSync, existsSync, unlinkSync, statSync, renameSync, readdirSync } from "node:fs";
+import { mkdirSync, openSync, readSync, closeSync, existsSync, unlinkSync, statSync, fstatSync, renameSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
 import { createLogger } from "./logger";
@@ -32,6 +32,11 @@ const LOG_DIR = process.env.TMUX_HUB_LOG_DIR
 // window are pruned opportunistically on each discard.
 const TRASH_DIR = resolve(LOG_DIR, ".trash");
 const TRASH_RETAIN_MS = 7 * 24 * 60 * 60 * 1000;
+
+// How much of an existing log's end start() feeds the title filter (output
+// discarded) so a window-name sequence cut at EOF is still stripped. Twice the
+// filter's name cap, so the sequence's opening `ESC k` is always inside.
+const TITLE_PRIME_BYTES = 2048;
 
 function trashLog(logPath: string): void {
   mkdirSync(TRASH_DIR, { recursive: true });
@@ -126,7 +131,18 @@ export class SessionBroadcaster {
       closeSync(openSync(this.logPath, "a"));
     }
     this.fd = openSync(this.logPath, "r");
-    this.offset = 0;
+    // Live bytes start at the current end: nothing reads the history through
+    // poll (the emulator primes and legacy replay read the fd directly), and
+    // re-reading a long-lived session's log blocked the event loop ~12ms/MB on
+    // every hub restart.
+    this.offset = fstatSync(this.fd).size;
+    if (this.offset > this.ring.capacity) this.ring.markTruncated();
+    if (this.offset > 0) {
+      const len = Math.min(this.offset, TITLE_PRIME_BYTES);
+      const tail = new Uint8Array(len);
+      readSync(this.fd, tail, 0, len, this.offset - len);
+      this.titleFilter.push(tail);
+    }
     this.pollTimer = setInterval(() => { this.poll(); }, 5);
     logger.info({ session: this.session, logPath: this.logPath }, "broadcaster started");
   }
