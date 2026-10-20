@@ -1,3 +1,4 @@
+import { defineForegroundCleanupTests } from "./foreground-cleanup";
 // TUI 回传保真 oracle：浏览器里 xterm 实际持有的屏幕文本必须与 tmux 的
 // `capture-pane -p` 逐行一致——首次 attach、流式输出中、断线重连（断线期间
 // 有新输出）、resize、reload、alt-screen（vim）。xterm 用 canvas 渲染、没有
@@ -12,6 +13,7 @@ import { writeFileSync, rmSync } from "node:fs";
 import type { Page, TestType, Expect, PlaywrightTestArgs, PlaywrightWorkerArgs } from "@playwright/test";
 import type { TerminalProbe } from "../../src/web/terminal";
 import { bindSecret } from "./helpers";
+import { defineForegroundTests } from "./fidelity-foreground";
 import { defineScrollIntentTests } from "./fidelity-scroll-intent";
 import { defineReconnectQueueTest } from "./fidelity-reconnect-queue";
 
@@ -79,6 +81,9 @@ export function defineFidelitySuite(test: TestType<PlaywrightTestArgs & { ctx: C
       .toBe(true)
       .catch((e: Error) => { throw new Error(`${e.message}\n${last}`); });
   }
+
+  defineForegroundTests(test, expect, expectInSync);
+  defineForegroundCleanupTests(test, expect);
 
   async function openSession(page: Page, name: string): Promise<void> {
     await page.goto("/?debug=term");

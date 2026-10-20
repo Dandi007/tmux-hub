@@ -34,6 +34,7 @@
 - [Dogfood readiness 设计](docs/superpowers/specs/2026-10-20-dogfood-readiness-design.md) —— dogfood 重启后的有界健康等待。
 - [回放滚动意图设计](docs/superpowers/specs/2026-10-20-replay-scroll-intent-design.md) —— 回放期间的新滚动位置及弱网快照保护。
 - [流式跟底同步设计](docs/superpowers/specs/2026-10-21-stream-scroll-source-design.md) —— 快照收缩与在途 DOM 滚动事件的跟底保真。
+- [浏览器前后台滚动恢复](docs/superpowers/specs/2026-10-21-foreground-scroll-restore-design.md) —— 真实hidden/visible后的历史落点及后台回放门禁。
 - [CLAUDE.md](CLAUDE.md) —— Claude Code 专用补充：双平台部署拓扑、重启安全规则、发布流程。
 
 ## 5  运行命令速查
