@@ -1,6 +1,33 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 
 export type OwnedProcessGroup = { process: ChildProcess; error?: Error; stop(): Promise<void> };
+
+export async function readLiveGroup(pgid: number, query: { command?: string; args?: string[]; timeoutMs?: number } = {}): Promise<number[]> {
+  const stdout = await new Promise<string>((resolve, reject) => {
+    let done = false;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const finish = (error: Error | null, out = "") => {
+      if (done) return;
+      done = true; clearTimeout(deadline);
+      if (error) reject(error); else resolve(out);
+    };
+    const child = execFile(query.command ?? "/bin/ps", [...(query.args ?? []),
+      process.platform === "linux" ? "-eLo" : "-eo", "pid=,pgid=,stat="],
+    { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, killSignal: "SIGKILL" },
+    (error, out) => finish(error, out));
+    deadline = setTimeout(() => {
+      finish(new Error("foreground process query timed out"));
+      try { child.kill("SIGKILL"); } catch { /* timeout remains an explicit failure */ }
+      finally {
+        child.stdin?.destroy(); child.stdout?.destroy(); child.stderr?.destroy(); child.unref();
+      }
+    }, query.timeoutMs ?? 1000);
+  });
+  return stdout.trim().split("\n").flatMap((line) => {
+    const [pid, group, state] = line.trim().split(/\s+/);
+    return Number(group) === pgid && state && !state.startsWith("Z") ? [Number(pid)] : [];
+  });
+}
 
 // The group leader remains alive independently of the browser. That pins this
 // PGID while cleanup kills descendants, even if the browser has already exited.
@@ -67,13 +94,10 @@ export function launchOwnedProcessGroup(command: string, args: string[], logFd: 
           // conservative check wait/fail; it cannot target an unrelated group.
           const start = Date.now();
           for (;;) {
-            const ps = spawnSync("ps", ["-eo", "pgid=,stat="], { encoding: "utf8" });
-            if (ps.status !== 0) throw new Error("could not confirm foreground group exit");
-            const live = ps.stdout.trim().split("\n").some((line) => {
-              const [pgid, state] = line.trim().split(/\s+/);
-              return Number(pgid) === processOwner.pid && state && !state.startsWith("Z");
-            });
-            if (!live) break; // Zombies have exited and released their file descriptors.
+            const remaining = 2000 - (Date.now() - start);
+            if (remaining <= 0) throw new Error("foreground group members did not exit");
+            const live = await readLiveGroup(processOwner.pid, { timeoutMs: Math.min(1000, remaining) });
+            if (!live.length) break;
             if (Date.now() - start >= 2000) throw new Error("foreground group members did not exit");
             await new Promise<void>((resolve) => setTimeout(resolve, 20));
           }

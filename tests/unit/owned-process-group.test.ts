@@ -3,7 +3,7 @@ import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, rmSync, sta
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { launchOwnedProcessGroup, type OwnedProcessGroup } from "../helpers/owned-process-group";
+import { launchOwnedProcessGroup, readLiveGroup, type OwnedProcessGroup } from "../helpers/owned-process-group";
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 async function until(check: () => boolean): Promise<void> {
@@ -11,9 +11,60 @@ async function until(check: () => boolean): Promise<void> {
   while (!check()) { if (Date.now() - start > 3000) throw new Error("owned fixture did not converge"); await sleep(20); }
 }
 function running(pid: number, marker: string): boolean {
-  const result = spawnSync("ps", ["-ww", "-p", String(pid), "-o", "stat=", "-o", "args="], { encoding: "utf8" });
+  const result = spawnSync("/bin/ps", ["-ww", "-p", String(pid), "-o", "stat=", "-o", "args="], { encoding: "utf8", timeout: 500, killSignal: "SIGKILL" });
+  if (result.error) throw result.error;
   return result.status === 0 && result.stdout.includes(marker) && !result.stdout.trim().startsWith("Z");
 }
+
+test("group observation sees a worker after its native main thread exits", async () => {
+  const root = mkdtempSync(join(tmpdir(), "owned-thread-test-"));
+  const pidFile = join(root, "pid"), writes = join(root, "writes"), stop = join(root, "STOP");
+  const code = `import ctypes,threading,time,os\ndef worker():\n open(${JSON.stringify(pidFile)},'w').write(str(os.getpid()))\n while not os.path.exists(${JSON.stringify(stop)}):\n  open(${JSON.stringify(writes)},'a').write('x')\n  time.sleep(.01)\n os._exit(0)\nthreading.Thread(target=worker).start()\nctypes.CDLL(None).pthread_exit(None)`;
+  const log = openSync(join(root, "process.log"), "w");
+  let group: OwnedProcessGroup | undefined;
+  try {
+    group = launchOwnedProcessGroup("python3", ["-c", code], log);
+    await until(() => existsSync(pidFile) && existsSync(writes));
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    if (process.platform === "linux") {
+      await until(() => spawnSync("/bin/ps", ["-p", String(pid), "-o", "stat="], { encoding: "utf8", timeout: 500 }).stdout.trim().startsWith("Z"));
+    }
+    const before = statSync(writes).size;
+    await sleep(40);
+    expect(statSync(writes).size).toBeGreaterThan(before);
+    expect(await readLiveGroup(group.process.pid!)).toContain(pid);
+    await group.stop();
+  } finally {
+    writeFileSync(stop, "stop");
+    try { await group?.stop(); }
+    finally { closeSync(log); rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("a non-returning group query times out without blocking the event loop", async () => {
+  const root = mkdtempSync(join(tmpdir(), "owned-query-test-"));
+  const pidFile = join(root, "pid"), stop = join(root, "STOP");
+  const code = `const f=require('node:fs');f.writeFileSync(${JSON.stringify(pidFile)},String(process.pid));setInterval(()=>{if(f.existsSync(${JSON.stringify(stop)}))process.exit(0);},10);`;
+  let ticks = 0;
+  const heartbeat = setInterval(() => ticks++, 10);
+  try {
+    const query = readLiveGroup(1, { command: "node", args: ["-e", code, "--"], timeoutMs: 500 });
+    const outcome = await Promise.race([query.then(() => "unexpected success", (e) => String(e)), sleep(2000).then(() => "external guard expired")]);
+    expect(outcome).toContain("foreground process query timed out");
+    expect(ticks).toBeGreaterThan(5);
+    expect(existsSync(pidFile)).toBe(true);
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    await until(() => !running(pid, root));
+  } finally {
+    clearInterval(heartbeat);
+    writeFileSync(stop, "stop");
+    if (existsSync(pidFile)) {
+      const pid = Number(readFileSync(pidFile, "utf8"));
+      await until(() => !running(pid, root));
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 for (const ignoreTerm of [false, true]) {
   test(`group cleanup ends a surviving writer after its main process exits (ignore TERM=${ignoreTerm})`, async () => {
