@@ -143,7 +143,8 @@ case "${1:-}" in
     bun install --frozen-lockfile
     bun run build
     _restart_dogfood
-    _health_check "$(_dogfood_health_url)" "tmux-hub-dogfood"
+    source "${0:A:h}/dogfood-health.zsh"
+    wait_for_dogfood_health "$(_dogfood_health_url)"
     if [ "$PLATFORM" != "Darwin" ]; then
       sleep 1
       _verify_commit "$(_dogfood_health_url)" "$(git rev-parse HEAD)"
