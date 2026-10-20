@@ -38,3 +38,5 @@ CI复现现有resize竞态：window resize已fit新尺寸，但延后的旧appli
 不改语音、harness、外部infra、生产权限或浏览器安装配置。不把Chromium移动模拟当作物理手机/iOS验收。
 
 独立静态审查另指出两个既有线索：初始化100ms补偿覆盖后来peer接管、pending attach slot删除后迟到handle未close。已核对5039896的初始open回调逐字相同，terminal-pool.ts两版SHA256均68948a4a419f02b8cbbfb6cf8bbf15c39ff44ace33cffd9ada6d3bc1f637fe80；本PR未改这两路径，线索已进入业务backlog P2待实际复现，不声称已修或完成全仓验收。实际alternate捕获模式P1和HIL仍阻塞发布。
+
+CI39488625346实际667unit通过，8E2E通过/1快捷键失败/80未运行。trace取到7个tab，其中3个前序已销毁tab在最后一次快捷键前由SSE删除，active fallback至最新tab，旧order断言失效。快捷键用例在取order前以隔离tmux实际存活集合等待所有UI死tab消失；整圈、回绕、全部tab及原5秒断言保持，不把被中途删除的fixture当稳定输入。

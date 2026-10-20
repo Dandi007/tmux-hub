@@ -188,6 +188,12 @@ test.describe("desktop tab-bar", () => {
       await openApp(page);
 
       for (const n of created) await expect(tab(page, n)).toBeVisible({ timeout: 10_000 });
+      // Previous fixtures are killed before the registry's next SSE scan.
+      // Their stale tabs must leave before taking a stable full-lap order.
+      await expect.poll(async () => {
+        const live = new Set(ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n"));
+        return (await tabOrder(page)).filter(n => !live.has(n));
+      }).toEqual([]);
       const order = await tabOrder(page);
       expect(order).toEqual(expect.arrayContaining(created));
 
