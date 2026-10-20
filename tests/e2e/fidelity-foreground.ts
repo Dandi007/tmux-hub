@@ -210,10 +210,14 @@ export function defineForegroundTests(
             expect(box).not.toBeNull();
             await page.mouse.move(box!.x + 80, box!.y + 80);
             await page.mouse.wheel(0, -420);
-            await expect.poll(() => page.evaluate((n) => window.__tmuxHubTerms![n]!.linesFromBottom, name)).toBeGreaterThan(0);
-            await page.waitForTimeout(100);
-            chosenLfb = await page.evaluate((n) => window.__tmuxHubTerms![n]!.linesFromBottom, name);
+            // Freeze the actual positive wheel landing, not a later RIS
+            // intermediate viewport sampled while the completion is held.
+            await expect.poll(async () => {
+              chosenLfb = await page.evaluate((n) => window.__tmuxHubTerms![n]!.linesFromBottom, name);
+              return chosenLfb;
+            }).toBeGreaterThan(0);
             expect(chosenLfb).not.toBe(60);
+            await page.waitForTimeout(100);
           }
           const before = await page.evaluate((n) => {
             (window as any).__overlap.phase = "done";

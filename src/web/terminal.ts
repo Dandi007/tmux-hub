@@ -661,11 +661,6 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
               }
               if (kind === "viewport") {
                 const msg = parsed as Extract<ServerWsMessage, { kind: "viewport" }>;
-                // A newer peer pin supersedes our still-debounced intent.
-                if (msg.peer && resizeTimer) {
-                  clearTimeout(resizeTimer);
-                  resizeTimer = null;
-                }
                 const result = handleViewportMessage(msg, viewportState);
                 viewportState = result.next;
                 if (result.action.type === "resize") {
@@ -915,12 +910,6 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       resizeTimer = null;
-      // An older applied/peer viewport can arrive after the window's first
-      // fit. Publish the current layout, rather than that stale acknowledgement.
-      if (isTermVisible() && shouldSendResize(viewportState)) {
-        try { fit.fit(); } catch {}
-        applyPendingScrollDecision();
-      }
       sendResizeIfVisible();
     }, 150);
   };
@@ -928,7 +917,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   const onResize = () => {
     try { fit.fit(); } catch {}
     applyPendingScrollDecision();
-    publishResize();
+    // Capture this fit now: a delayed viewport acknowledgement could replace
+    // term.cols/rows before a debounced sender reads them.
+    sendResizeIfVisible();
   };
   window.addEventListener("resize", onResize);
 

@@ -31,7 +31,7 @@
 另：alternate重叠回放的受控用例采用生产`SessionEmulator.snapshot()`在Bun中生成模式完整的fallback字节，不冒充常规capture-pane路径的自然证据。常规capture-pane快照未保留alternate模式的独立缺口不在本PR修复范围，须另行真实观测与跟进；不能据此宣布完整TUI验收完成。
 
 ## 6 CI复现的resize竞争
-CI复现现有resize竞态：window resize已fit新尺寸，但延后的旧applied确认在150ms发送前覆盖xterm，最终发送旧尺寸。新增受控真实确认延后回归，原5秒收敛断言保持；防抖回调在可见且web拥有时重新fit并消费pending后再发送，隐藏/native不重抢尺寸。该修复与前台恢复共用resize发布路径。收到其他客户端peer接管时取消此前未发送的本地防抖意图；自身applied确认不取消。双客户端真实pin回归在A窗口已fit、B完成接管后释放A的旧定时器，B尺寸必须保持，防止重新fit抢回旧意图。
+CI复现现有resize竞态：window resize已fit新尺寸，但延后的旧applied确认在150ms发送前覆盖xterm，最终发送旧尺寸。窗口/前台恢复在fit并消费pending之后立即发送尺寸，使消息本身捕获当前用户操作的网格，继续由服务端串行pin及resync调度器处理；pool已有立即发送语义。保留连接初始化及pool补偿的原防抖发布。独立审查发现“防抖重fit+收到peer取消”无法区分旧peer通知迟到，故撤回该中间方案，不新增通知时序猜测。新增受控真实自身确认、真实旧peer通知延后回归，要求当前窗口的pane/client/ack两轴一致；另以双客户端真实切换验证更新B接管保持。原5秒断言和隐藏/native所有权门禁保留。wheel用例冻结真实手势首次到达的正离底距离作为预期，不能在100ms后的RIS中间态重新取0覆盖用户意图；保留100ms间隔及重连/静止复查。
 
 
 ## 7 非目标
