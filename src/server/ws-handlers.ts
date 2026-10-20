@@ -26,6 +26,8 @@ export type WsData = {
   // without pinning it (the client pins on activation with a resize message).
   pin: boolean;
   resync?: ResyncScheduler;
+  // Latest applied web size, including updates received before attach is ready.
+  viewport?: { cols: number; rows: number };
   closed?: boolean;
 };
 
@@ -54,6 +56,19 @@ export function createWsHandlers(deps: WsDeps) {
   // they adopt the new size and get an aligned resync; when the pinning page
   // leaves, they are told to reclaim.
   const peers = new SessionPeers<ServerWebSocket<WsData>>();
+  // Serialize the tmux mutation AND its publication. Keep this separate from
+  // PTY input and snapshots, so neither blocks viewport updates or other sessions.
+  const viewports = new Map<string, Promise<void>>();
+  function updateViewport(ws: ServerWebSocket<WsData>, run: () => Promise<void>): Promise<void> {
+    const name = ws.data.sessionName;
+    const next = (viewports.get(name) ?? Promise.resolve()).then(() => {
+      if (!ws.data.closed) return run();
+    });
+    const tail = next.catch(() => {});
+    viewports.set(name, tail);
+    void tail.then(() => { if (viewports.get(name) === tail) viewports.delete(name); });
+    return next;
+  }
   function released(ws: ServerWebSocket<WsData>): void {
     for (const p of peers.others(ws.data.sessionName, ws)) {
       try { p.send(JSON.stringify({ kind: "viewport", cols: ws.data.cols, rows: ws.data.rows, owner: "web", released: true })); } catch {}
@@ -66,8 +81,10 @@ export function createWsHandlers(deps: WsDeps) {
     // pages reclaim it instead of recording the dead ws as pinner.
     if (ws.data.closed) { released(ws); return; }
     peers.pinned(sessionName, ws);
-    for (const p of peers.others(sessionName, ws)) {
-      try { p.send(JSON.stringify({ kind: "viewport", cols, rows, owner: "web", peer: true })); } catch {}
+    ws.data.broadcaster?.syncEmulatorSize(cols, rows);
+    for (const p of [ws, ...peers.others(sessionName, ws)]) {
+      p.data.viewport = { cols, rows };
+      try { p.send(JSON.stringify({ kind: "viewport", cols, rows, owner: "web", ...(p === ws ? { applied: true } : { peer: true }) })); } catch {}
       p.data.resync?.resized(cols, rows);
     }
   }
@@ -79,6 +96,9 @@ export function createWsHandlers(deps: WsDeps) {
       connections++;
       const { sessionName, cols, rows, connId } = ws.data;
       logger.info({ session: sessionName, cols, rows, connId }, "ws open");
+      // Include pending attaches: a pin can otherwise happen between their
+      // initial snapshot and registration, leaving that page on an old grid.
+      peers.add(sessionName, ws);
 
       // Authoritative pane size for the emulator snapshot. Defaults to this
       // client's requested size (web owns → we pin the pane to it below); when a
@@ -86,55 +106,60 @@ export function createWsHandlers(deps: WsDeps) {
       let paneCols = cols;
       let paneRows = rows;
 
-      // Ownership guard: skip pin if native client attached
-      let attachCount = 0;
-      try {
-        attachCount = await getNativeAttachCount(sessionName);
-      } catch (e) {
-        logger.warn({ session: sessionName, connId, err: e }, "getNativeAttachCount failed, assuming native attached");
-        attachCount = 1; // fail-safe: treat as native attached
-      }
-      if (ws.data.closed) return;
-      // The pane's current size, for when this client does not pin it.
-      const queryPaneSize = async (): Promise<{ cols: number; rows: number } | null> => {
+      await updateViewport(ws, async () => {
+        // Ownership guard: skip pin if native client attached
+        let attachCount = 0;
         try {
-          const sizeOut = await tmux(["display-message", "-p", "-t", `${sessionName}:0`, "#{window_width}|#{window_height}"]);
-          if (sizeOut.code !== 0) return null;
-          const parts = sizeOut.stdout.split("|").map(Number);
-          const nc = parts[0] ?? NaN;
-          const nr = parts[1] ?? NaN;
-          if (Number.isFinite(nc) && Number.isFinite(nr) && nc > 0 && nr > 0) return { cols: nc, rows: nr };
-          logger.warn({ session: sessionName, raw: sizeOut.stdout }, "viewport query returned invalid size");
+          attachCount = await getNativeAttachCount(sessionName);
         } catch (e) {
-          logger.warn({ session: sessionName, err: e }, "viewport query failed");
+          logger.warn({ session: sessionName, connId, err: e }, "getNativeAttachCount failed, assuming native attached");
+          attachCount = 1; // fail-safe: treat as native attached
         }
-        return null;
-      };
+        if (ws.data.closed) return;
+        // The pane's current size, for when this client does not pin it.
+        const queryPaneSize = async (): Promise<{ cols: number; rows: number } | null> => {
+          try {
+            const sizeOut = await tmux(["display-message", "-p", "-t", `${sessionName}:0`, "#{window_width}|#{window_height}"]);
+            if (sizeOut.code !== 0) return null;
+            const parts = sizeOut.stdout.split("|").map(Number);
+            const nc = parts[0] ?? NaN;
+            const nr = parts[1] ?? NaN;
+            if (Number.isFinite(nc) && Number.isFinite(nr) && nc > 0 && nr > 0) return { cols: nc, rows: nr };
+            logger.warn({ session: sessionName, raw: sizeOut.stdout }, "viewport query returned invalid size");
+          } catch (e) {
+            logger.warn({ session: sessionName, err: e }, "viewport query failed");
+          }
+          return null;
+        };
 
-      if (attachCount === 0 && ws.data.pin) {
-        try { await pinViewport(sessionName, cols, rows); pinnedBy(ws, cols, rows); }
-        catch (e) {
-          logger.warn({ session: sessionName, connId, err: e }, "viewport pin failed");
-          try { ws.send(`[hub] viewport pin failed: ${(e as Error).message}\n`); } catch {}
+        if (attachCount === 0 && ws.data.pin) {
+          try { await pinViewport(sessionName, cols, rows); pinnedBy(ws, cols, rows); }
+          catch (e) {
+            logger.warn({ session: sessionName, connId, err: e }, "viewport pin failed");
+            try { ws.send(`[hub] viewport pin failed: ${(e as Error).message}\n`); } catch {}
+          }
+          // R3: send viewport message — web owns
+          try { ws.send(JSON.stringify({ kind: "viewport", cols, rows, owner: "web" })); } catch {}
+        } else if (attachCount === 0) {
+          // Hidden slot: web still owns (it may pin later), but snapshot at the
+          // pane's real size so the attach stays aligned until then.
+          const size = await queryPaneSize();
+          if (size) { paneCols = size.cols; paneRows = size.rows; }
+          try { ws.send(JSON.stringify({ kind: "viewport", cols: paneCols, rows: paneRows, owner: "web" })); } catch {}
+        } else {
+          logger.debug({ session: sessionName, attachCount }, "native client attached, skipping viewport pin");
+          // R3: send viewport message — native owns, query current size
+          const size = await queryPaneSize();
+          if (size) {
+            paneCols = size.cols;
+            paneRows = size.rows;
+            try { ws.send(JSON.stringify({ kind: "viewport", cols: size.cols, rows: size.rows, owner: "native" })); } catch {}
+          }
         }
-        // R3: send viewport message — web owns
-        try { ws.send(JSON.stringify({ kind: "viewport", cols, rows, owner: "web" })); } catch {}
-      } else if (attachCount === 0) {
-        // Hidden slot: web still owns (it may pin later), but snapshot at the
-        // pane's real size so the attach stays aligned until then.
-        const size = await queryPaneSize();
-        if (size) { paneCols = size.cols; paneRows = size.rows; }
-        try { ws.send(JSON.stringify({ kind: "viewport", cols: paneCols, rows: paneRows, owner: "web" })); } catch {}
-      } else {
-        logger.debug({ session: sessionName, attachCount }, "native client attached, skipping viewport pin");
-        // R3: send viewport message — native owns, query current size
-        const size = await queryPaneSize();
-        if (size) {
-          paneCols = size.cols;
-          paneRows = size.rows;
-          try { ws.send(JSON.stringify({ kind: "viewport", cols: size.cols, rows: size.rows, owner: "native" })); } catch {}
-        }
-      }
+
+        ws.data.viewport = { cols: paneCols, rows: paneRows };
+      });
+      if (ws.data.closed) return;
 
       let b: Awaited<ReturnType<typeof broadcasters.get>>;
       try {
@@ -147,6 +172,11 @@ export function createWsHandlers(deps: WsDeps) {
       }
       if (ws.data.closed) return;
       ws.data.broadcaster = b;
+      // Another page may have pinned while get() was still starting the
+      // broadcaster. Attach at its latest size, then track any newer changes
+      // through the scheduler while the snapshot itself is in flight.
+      paneCols = ws.data.viewport?.cols ?? paneCols;
+      paneRows = ws.data.viewport?.rows ?? paneRows;
 
       const unsubEvents = b.onEvent((ev) => {
         if (ev.kind === "replay_truncated") {
@@ -192,7 +222,6 @@ export function createWsHandlers(deps: WsDeps) {
         return;
       }
       if (!adoptUnsubs(ws.data, unsubEvents, unsubData)) return;
-      peers.add(sessionName, ws);
       sendReplayDone();
     },
     async close(ws: ServerWebSocket<WsData>, code: number, reason: string) {
@@ -241,7 +270,8 @@ export function createWsHandlers(deps: WsDeps) {
         }
         return;
       }
-      input.send(sessionName, parsed as Parameters<typeof input.send>[1]).then((result) => {
+      const send = async (): Promise<void> => {
+        const result = await input.send(sessionName, parsed as Parameters<typeof input.send>[1]);
         // If resize was skipped (native attached), send authoritative viewport back
         if (result?.skipped && result.cols && result.rows) {
           try {
@@ -250,11 +280,11 @@ export function createWsHandlers(deps: WsDeps) {
         } else if (!result?.skipped && result?.cols && result?.rows) {
           // Web resize applied → pane changed size; keep the emulator grid aligned
           // so later snapshots stay coherent at the new width.
-          ws.data.broadcaster?.syncEmulatorSize(result.cols, result.rows);
-          ws.data.resync?.resized(result.cols, result.rows);
           pinnedBy(ws, result.cols, result.rows);
         }
-      }).catch((e: unknown) => {
+      };
+      const resize = typeof parsed === "object" && parsed !== null && (parsed as { kind?: string }).kind === "resize";
+      (resize ? updateViewport(ws, send) : send()).catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : String(e);
         if (e instanceof HubError && e.code === 410) {
           logger.warn({ session: sessionName, connId }, "input send: session gone");

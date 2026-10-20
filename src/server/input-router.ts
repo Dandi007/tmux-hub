@@ -33,11 +33,11 @@ export class HubError extends Error {
   }
 }
 
-function classifyTmuxError(session: string, stderr: string): HubError {
+function classifyTmuxError(session: string, stderr: string, operation = "send-keys"): HubError {
   if (/can't find|no such session|no session/i.test(stderr)) {
     return new HubError(`session not found: ${session}`, 410);
   }
-  return new HubError(`send-keys failed: ${stderr}`, 500);
+  return new HubError(`${operation} failed: ${stderr}`, 500);
 }
 
 export class InputRouter {
@@ -125,6 +125,7 @@ export class InputRouter {
       const r = await this.run(["resize-window", "-t", `${session}:0`, "-x", String(cols), "-y", String(rows)]);
       if (r.code !== 0) {
         logger.warn({ session, cols, rows, stderr: r.stderr }, "resize-window failed");
+        throw classifyTmuxError(session, r.stderr, "resize-window");
       }
       // Report the applied (clamped) size so the caller can keep the emulator
       // grid aligned with the pane.

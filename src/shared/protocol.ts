@@ -46,8 +46,10 @@ export type ServerWsMessage =
   | { kind: "resync" }
   | { kind: "pong"; ts: number }
   // owner "web" + peer: another page pinned the pane to cols×rows (adopt it, a
-  // resync follows). released: the page that last pinned it left (reclaim).
-  | { kind: "viewport"; cols: number; rows: number; owner: "native" | "web"; peer?: true; released?: true }
+  // resync follows). applied: acknowledgement of our own applied size (also
+  // adopt: an intervening peer update may have changed our local grid).
+  // released: the page that last pinned it left (reclaim).
+  | { kind: "viewport"; cols: number; rows: number; owner: "native" | "web"; peer?: true; applied?: true; released?: true }
   // Scroll position recovery: server sends restored scroll position to client after attach,
   // allowing cross-device memory of user's viewing location in buffer history.
   | { kind: "scrollpos"; linesFromBottom: number };

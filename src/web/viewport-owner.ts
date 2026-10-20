@@ -32,9 +32,11 @@ export function handleViewportMessage(
   } else if (msg.released) {
     // The page that last pinned the pane left: pin it back to our size.
     return { next, action: { type: "reclaim" } };
-  } else if (msg.peer) {
+  } else if (msg.peer || msg.applied) {
     // Another page pinned the pane: show it at that size (an aligned resync
     // follows) without sending a resize back — that would make the pages fight.
+    // Own applied acknowledgements must restore the same authoritative grid
+    // if a peer notification arrived while our resize request was pending.
     // We still own it: our next fit / focus / click re-pins it to our size.
     return { next, action: { type: "resize", cols: msg.cols, rows: msg.rows } };
   } else {
