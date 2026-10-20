@@ -31,7 +31,7 @@
 另：alternate重叠回放的受控用例采用生产`SessionEmulator.snapshot()`在Bun中生成模式完整的fallback字节，不冒充常规capture-pane路径的自然证据。常规capture-pane快照未保留alternate模式的独立缺口不在本PR修复范围，须另行真实观测与跟进；不能据此宣布完整TUI验收完成。
 
 ## 6 CI复现的resize竞争
-CI复现现有resize竞态：window resize已fit新尺寸，但延后的旧applied确认在150ms发送前覆盖xterm，最终发送旧尺寸。新增受控真实确认延后回归，原5秒收敛断言保持；防抖回调在可见且web拥有时重新fit并消费pending后再发送，隐藏/native不重抢尺寸。该修复与前台恢复共用resize发布路径。
+CI复现现有resize竞态：window resize已fit新尺寸，但延后的旧applied确认在150ms发送前覆盖xterm，最终发送旧尺寸。新增受控真实确认延后回归，原5秒收敛断言保持；防抖回调在可见且web拥有时重新fit并消费pending后再发送，隐藏/native不重抢尺寸。该修复与前台恢复共用resize发布路径。收到其他客户端peer接管时取消此前未发送的本地防抖意图；自身applied确认不取消。双客户端真实pin回归在A窗口已fit、B完成接管后释放A的旧定时器，B尺寸必须保持，防止重新fit抢回旧意图。
 
 
 ## 7 非目标

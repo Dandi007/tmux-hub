@@ -661,6 +661,11 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
               }
               if (kind === "viewport") {
                 const msg = parsed as Extract<ServerWsMessage, { kind: "viewport" }>;
+                // A newer peer pin supersedes our still-debounced intent.
+                if (msg.peer && resizeTimer) {
+                  clearTimeout(resizeTimer);
+                  resizeTimer = null;
+                }
                 const result = handleViewportMessage(msg, viewportState);
                 viewportState = result.next;
                 if (result.action.type === "resize") {
