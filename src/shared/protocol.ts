@@ -23,6 +23,8 @@ export type ServerEvent =
 
 export type ClientWsMessage =
   | { kind: "keys"; literal: string }
+  // xterm onBinary carries Latin1 bytes (legacy mouse), not UTF8 text.
+  | { kind: "binary"; data: string }
   | { kind: "key"; name: string }
   | { kind: "resize"; cols: number; rows: number }
   // Mouse-wheel forwarding: alternate-screen TUI apps (claude code, vim, less)

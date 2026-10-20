@@ -9,13 +9,13 @@ const until = async (fn: () => boolean | Promise<boolean>, ms = 3000) => {
   while (!await fn()) { if (Date.now() > end) throw new Error("timeout"); await Bun.sleep(5); }
 };
 
-test("exit repair recovers a five-capture LF overlap while redraws remain busy", async () => {
+async function exercise(failure: "overlap" | "history") {
   const { SessionBroadcaster } = await import("../../src/server/output-broadcaster");
   const oracle = new Terminal({ cols: 80, rows: 24, scrollback: 5000, allowProposedApi: true });
   const client = new Terminal({ cols: 80, rows: 24, scrollback: 5000, allowProposedApi: true });
   const writeOracle = (data: string) => (oracle as any)._core.writeSync(data);
   writeOracle(Array.from({ length: 40 }, (_, i) => `STATIC ${i}`).join("\r\n") + "\r\n\x1b[?1049hALT");
-  let b: InstanceType<typeof SessionBroadcaster>, forcing = false, captures = 0, ticks = 0;
+  let b: InstanceType<typeof SessionBroadcaster>, forcing = false, captures = 0, ticks = 0, historyFailures = 0;
   const emit = (data: string) => { writeOracle(data); appendFileSync(b.logPath, data); };
   const screen = (term: Terminal, normal = false) => {
     const buf = normal ? term.buffer.normal : term.buffer.active;
@@ -29,10 +29,11 @@ test("exit repair recovers a five-capture LF overlap while redraws remain busy",
     if (args[0] === "capture-pane") {
       if (args.includes("-a")) return { stdout: screen(oracle, true).join("\n").trimEnd(), stderr: "", code: 0 };
       if (args.includes("-S")) {
+        if (forcing && failure === "history" && historyFailures++ === 0) return { stdout: "", stderr: "history unavailable", code: 1 };
         const n = oracle.buffer.normal;
         return { stdout: Array.from({ length: n.baseY }, (_, y) => n.getLine(y)?.translateToString(true) ?? "").join("\n"), stderr: "", code: 0 };
       }
-      if (forcing && ++captures <= 5) emit("\r\nLF");
+      if (forcing) { captures++; if (failure === "overlap" && captures <= 5) emit("\r\nLF"); }
       const captured = screen(oracle).join("\n").trimEnd();
       // The sampled LF is already in the grid, but its pipe byte remains in
       // flight when capture starts. 5ms redraws keep every settle busy.
@@ -64,14 +65,25 @@ test("exit repair recovers a five-capture LF overlap while redraws remain busy",
   try {
     await until(() => done > 0); expect(client.buffer.active.type).toBe("alternate");
     forcing = true; emit("\x1b[?1049l");
-    timer = setInterval(() => { ticks++; emit("\x1b[1;1HTICK\x1b[24;1H"); }, 5);
-    await until(() => captures >= 5 && done >= 2);
-    await until(async () => { await parsed; return captures > 5 && JSON.stringify(screen(client)) === JSON.stringify(screen(oracle)); });
-    expect(b.outputQuietFor(100)).toBe(false);
-    const before = ticks; await Bun.sleep(25); expect(ticks).toBeGreaterThan(before);
+    if (failure === "overlap") {
+      timer = setInterval(() => { ticks++; emit("\x1b[1;1HTICK\x1b[24;1H"); }, 5);
+      await until(() => captures >= 5 && done >= 2);
+      await until(async () => { await parsed; return captures > 5 && JSON.stringify(screen(client)) === JSON.stringify(screen(oracle)); });
+      expect(b.outputQuietFor(100)).toBe(false);
+      const before = ticks; await Bun.sleep(25); expect(ticks).toBeGreaterThan(before);
+    } else {
+      await until(() => done >= 3);
+      await parsed;
+      expect(historyFailures).toBeGreaterThan(1);
+      expect(client.buffer.normal.baseY).toBe(oracle.buffer.normal.baseY);
+      expect(screen(client)).toEqual(screen(oracle));
+    }
     expect(client.buffer.active.type).toBe("normal");
   } finally {
     if (timer) clearInterval(timer); ws.close(); await until(() => h.connections() === 0);
     server.stop(true); await b.stop({ deleteLog: true }); oracle.dispose(); client.dispose(); rmSync(dir, { recursive: true, force: true });
   }
-}, 10000);
+}
+
+test("exit repair recovers a five-capture LF overlap while redraws remain busy", () => exercise("overlap"), 10000);
+test("history-only capture failure is retried before exit repair is satisfied", () => exercise("history"), 10000);

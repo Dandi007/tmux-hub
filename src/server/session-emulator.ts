@@ -57,7 +57,8 @@ export class SessionEmulator {
   snapshot(scrollbackLines: number = this.scrollbackLines): string {
     if (this.disposed) return "\x1bc";
     const body = this.serializer.serialize({ scrollback: scrollbackLines });
-    return "\x1bc" + body + this.shadow.serializeModes();
+    const buf = this.term.buffer.active;
+    return "\x1bc" + body + this.serializeModes({ x: buf.cursorX, y: buf.cursorY });
   }
 
   /**
@@ -66,15 +67,24 @@ export class SessionEmulator {
    * Appended to a capture-pane-seeded restore stream so a reattached client
    * inherits the modes the running app set earlier in the stream.
    */
-  serializeModes(): string {
+  serializeModes(cursor?: { x: number; y: number }): string {
     if (this.disposed) return "";
     const modes = this.term.modes;
     let out = this.shadow.serializeModes();
     if (modes.applicationCursorKeysMode) out += "\x1b[?1h";
     if (modes.applicationKeypadMode) out += "\x1b=";
     if (modes.bracketedPasteMode) out += "\x1b[?2004h";
+    if (modes.insertMode) out += "\x1b[4h";
+    if (modes.originMode) out += "\x1b[?6h";
+    if (modes.reverseWraparoundMode) out += "\x1b[?45h";
+    if (modes.sendFocusMode) out += "\x1b[?1004h";
+    if (!modes.wraparoundMode) out += "\x1b[?7l";
     const mouse: Record<string, number> = { x10: 9, vt200: 1000, drag: 1002, any: 1003 };
     if (mouse[modes.mouseTrackingMode]) out += `\x1b[?${mouse[modes.mouseTrackingMode]}h`;
+    if (cursor) {
+      const row = Math.max(1, cursor.y + 1 - (modes.originMode ? this.shadow.originOffset : 0));
+      out += `\x1b[${row};${cursor.x + 1}H`;
+    }
     return out;
   }
 
@@ -82,6 +92,7 @@ export class SessionEmulator {
 
   /** Observe live requests to leave alt, including when priming missed entry. */
   onNormalScreen(listener: () => void): void {
+    this.term.parser.registerEscHandler({ final: "c" }, () => { listener(); return false; });
     this.term.parser.registerCsiHandler({ prefix: "?", final: "l" }, params => {
       if (params.some(p => p === 47 || p === 1047 || p === 1049)) listener();
       return false;

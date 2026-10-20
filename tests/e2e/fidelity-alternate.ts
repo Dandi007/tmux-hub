@@ -110,14 +110,21 @@ export function defineAlternateTests(
     test.setTimeout(60_000);
     const owned = mkdtempSync("/tmp/e2e-alt-input-");
     const received = `${owned}/received`, app = `${owned}/app.sh`;
+    const priorModes = replay ? "\x1b[?1006h" : "";
+    const exitModes = replay
+      ? "\x1bc\x1b[3;8r\x1b[?6h\x1b[?7l\x1b[?1;2004;1000h"
+      : "\x1b[?1;2004;1000;1006h";
+    let name = "";
     writeFileSync(app, `stty -echo -icanon min 1 time 0
-printf '\\033[?1049h\\033[HALT_INPUT'
+set -- $(stty size); cols=$2
+printf '${priorModes}\x1b[?1049h\x1b[HALT_INPUT'
 dd bs=1 count=1 of=/dev/null 2>/dev/null
-printf '\\033[?1049l\\033[?1;2004;1000;1006hINPUT_READY'
+printf '\x1b[?1049l${exitModes}INPUT_READY'
+${replay ? `while [ ! -f ${owned}/continue ]; do sleep 0.01; done; printf 'x\x1b[1;%sHAB' "$cols"` : ""}
 dd bs=1 of=${received} 2>/dev/null
 `);
     try {
-      const name = await ctx.createSession();
+      name = await ctx.createSession();
       await openSession(page, name); await expectInSync(page, ctx, name, "input fixture ready");
       await page.waitForTimeout(400); // Finish initial layout before the no-replay control.
       ctx.tmuxE2E(["send-keys", "-t", name, `sh ${app}`, "Enter"]);
@@ -138,6 +145,11 @@ dd bs=1 of=${received} 2>/dev/null
         expect(await page.evaluate(n => window.__tmuxHubTerms![n]!.resyncs, name)).toBe(before.resyncs);
       }
       await expectInSync(page, ctx, name, "input modes after actual repair");
+      if (replay) {
+        writeFileSync(`${owned}/continue`, "go");
+        await expect.poll(() => ctx.tmuxE2E(["capture-pane", "-p", "-t", name])).toContain("INPUT_READYx");
+        await expectInSync(page, ctx, name, "origin and no-wrap survive real repair and later right-edge output");
+      }
       const bytes = () => existsSync(received) ? readFileSync(received, "utf8") : "";
       if (info.project.use.isMobile) {
         // Mobile intentionally opens xterm readOnly:true. Exercise its real
@@ -162,11 +174,30 @@ dd bs=1 of=${received} 2>/dev/null
         await page.keyboard.press("Control+Shift+V");
         const box = await page.locator(".xterm-screen:visible").first().boundingBox();
         if (!box) throw new Error("missing input terminal");
-        await page.mouse.click(box.x + 50, box.y + 50);
+        const mouseX = box.x + (replay ? box.width - 50 : 50), mouseY = box.y + 50;
+        const grid = await page.evaluate(n => { const p = window.__tmuxHubTerms![n]!; return { cols: p.cols, rows: p.rows }; }, name);
+        await page.mouse.click(mouseX, mouseY);
         await expect.poll(bytes).toContain("\x1bOA");
         await expect.poll(bytes).toContain("\x1b[200~PASTE_CHECK\x1b[201~");
-        await expect.poll(bytes).toMatch(/\x1b\[<0;\d+;\d+M/);
+        if (replay) {
+          const expected = Buffer.from([27, 91, 77, 32,
+            33 + Math.floor((mouseX - box.x) * grid.cols / box.width),
+            33 + Math.floor((mouseY - box.y) * grid.rows / box.height)]);
+          expect(expected[4]).toBeGreaterThan(127); // Actual high-coordinate byte, not UTF8.
+          await expect.poll(() => existsSync(received) && readFileSync(received).includes(expected)).toBe(true);
+          expect(bytes()).not.toContain("\x1b[<");
+        } else await expect.poll(bytes).toMatch(/\x1b\[<0;\d+;\d+M/);
       }
+    } catch (error) {
+      if (name) {
+        const probe = await page.evaluate(n => { const p = window.__tmuxHubTerms?.[n]; return p ? { state: p.state, cols: p.cols, rows: p.rows, scroll: p.linesFromBottom, lines: p.screen() } : null; }, name).catch(() => null);
+        writeFileSync(info.outputPath("platform-failure.json"), JSON.stringify({ probe,
+          pane: ctx.tmuxE2E(["capture-pane", "-p", "-t", name]),
+          modes: ctx.tmuxE2E(["display", "-p", "-t", name, "#{alternate_on} #{origin_flag} #{wrap_flag} #{mouse_sgr_flag}"]),
+        }));
+        await page.screenshot({ path: info.outputPath("platform-failure.png") }).catch(() => {});
+      }
+      throw error;
     } finally {
       if (existsSync(received)) writeFileSync(info.outputPath("application-input.hex"), readFileSync(received).toString("hex"));
       rmSync(owned, { recursive: true, force: true });

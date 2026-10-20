@@ -984,12 +984,14 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   });
 
   if (!opts.readOnly) {
-    // Desktop single input path per spec §设计原则 / Spike S2: only term.onData raw bytes,
-    // NO attachCustomKeyEventHandler / keyEventToTmuxToken (those would double-send).
+    // xterm emits text onData and legacy mouse bytes onBinary. Keep those
+    // distinct so high mouse coordinates do not get UTF8-encoded or echoed.
+    // No additional keyboard handler (which would double-send).
     term.onData((data) => {
       predictLocalEcho(data);
       queuedSend({ kind: "keys", literal: data });
     });
+    term.onBinary(data => queuedSend({ kind: "binary", data }));
   }
 
   return {

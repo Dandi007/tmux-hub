@@ -83,6 +83,7 @@ test("normal-screen exit observer follows parsed CSI requests, not text", () => 
   e.write("\x1b[?10"); expect(exits).toBe(0);
   e.write("49l"); expect(exits).toBe(1);
   e.write("\x1b[?1047l\x1b[?47l"); expect(exits).toBe(3);
+  e.write("\x1bc"); expect(exits).toBe(4);
   e.dispose();
 });
 
@@ -104,4 +105,21 @@ test("capture restore preserves application input modes after RIS", async () => 
     expect(t.modes.bracketedPasteMode).toBe(false);
     expect(t.modes.mouseTrackingMode).toBe("none");
   } finally { e.dispose(); t.dispose(); }
+});
+
+
+test("capture modes retain wrap, origin, insert and focus with cursor in the region", async () => {
+  const e = new SessionEmulator(60, 10, 100);
+  const expected = new Terminal({ cols: 60, rows: 10, allowProposedApi: true });
+  const restored = new Terminal({ cols: 60, rows: 10, allowProposedApi: true });
+  try {
+    const data = "\x1b[3;8r\x1b[?6;45;1004h\x1b[?7l\x1b[4h\x1b[2;7H";
+    e.write(data); await new Promise<void>(r => expected.write(data, r));
+    const cursor = { x: expected.buffer.active.cursorX, y: expected.buffer.active.cursorY };
+    await new Promise<void>(r => restored.write("\x1bc" + e.serializeModes(cursor), r));
+    for (const key of ["wraparoundMode", "originMode", "insertMode", "reverseWraparoundMode", "sendFocusMode"] as const) {
+      expect(restored.modes[key]).toBe(expected.modes[key]);
+    }
+    expect([restored.buffer.active.cursorX, restored.buffer.active.cursorY]).toEqual([cursor.x, cursor.y]);
+  } finally { e.dispose(); expected.dispose(); restored.dispose(); }
 });

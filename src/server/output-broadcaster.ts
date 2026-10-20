@@ -267,7 +267,8 @@ export class SessionBroadcaster {
         const hist = Math.min(geo.history, SNAPSHOT_SCROLLBACK_LINES);
         if (hist > 0) {
           const h = await this.run(["capture-pane", "-e", "-p", "-J", "-t", target, "-S", `-${hist}`, "-E", "-1"]);
-          if (h.code === 0 && h.stdout !== "") {
+          if (h.code !== 0) throw new Error(`history capture failed (${h.code})`);
+          if (h.stdout !== "") {
             out += toCrlf(h.stdout) + "\r\n" + "\n".repeat(Math.max(0, geo.height - 1)) + "\x1b[H";
           }
         }
@@ -280,8 +281,7 @@ export class SessionBroadcaster {
           out += toCrlf(normal.stdout);
           out += `\x1b[${geo.savedY + 1};${geo.savedX + 1}H\x1b[0m\x1b[?1049h\x1b[H`;
         }
-        out += toCrlf(vis.stdout) + emu.serializeModes();
-        out += `\x1b[${geo.cursorY + 1};${geo.cursorX + 1}H`;
+        out += toCrlf(vis.stdout) + emu.serializeModes({ x: geo.cursorX, y: geo.cursorY });
         return { data: out, alternate: geo.alternate, normalScreenVersion, authoritative: true };
       }
       logger.warn(
