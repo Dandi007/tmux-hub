@@ -184,8 +184,8 @@ export class SessionBroadcaster {
   // rule wraps and every absolute cursor move clamps, corrupting the snapshot.
   // Prime it from the current log tail so the snapshot reflects existing
   // history; xterm keeps only the last `scrollback` lines. A later attach may
-  // re-pin the pane to a new size, so an existing emulator is resized to track
-  // it. (Mid-stream reflow of already-captured history lands in P1.)
+  // re-pin the pane to a new size; syncEmulatorSize follows applied changes.
+  // A capture retry must never roll an existing emulator back to stale dimensions. (Mid-stream reflow of already-captured history lands in P1.)
   private ensureEmulator(cols: number, rows: number): SessionEmulator {
     if (this.emulator) {
       this.emulator.resize(cols, rows);
@@ -256,7 +256,7 @@ export class SessionBroadcaster {
   // of it describes the same instant.
   private async captureSnapshot(cols: number, rows: number): Promise<{ data: string; alternate: boolean; normalScreenVersion: number; authoritative: boolean }> {
     const normalScreenVersion = this.normalScreenVersion;
-    const emu = this.ensureEmulator(cols, rows); // keep shadow primed + live-fed for modes
+    const emu = this.emulator ?? this.ensureEmulator(cols, rows); // retries use the latest applied size
     const target = `${this.session}:0.0`;
     try {
       const geo = await this.paneGeometry();
@@ -348,6 +348,7 @@ export class SessionBroadcaster {
         // plus its trailing bytes (the overlap is then tolerated, not dropped).
         const cols = normalizeDim(paneCols, WINDOW_COLS);
         const rows = normalizeDim(paneRows, WINDOW_ROWS);
+        this.ensureEmulator(cols, rows);
         let snap = { data: "", alternate: false, normalScreenVersion: this.normalScreenVersion, authoritative: false };
         for (let attempt = 1; attempt <= ALIGN_MAX_CAPTURES; attempt++) {
           this.poll();

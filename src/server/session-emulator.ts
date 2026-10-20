@@ -58,7 +58,13 @@ export class SessionEmulator {
     if (this.disposed) return "\x1bc";
     const body = this.serializer.serialize({ scrollback: scrollbackLines });
     const buf = this.term.buffer.active;
-    return "\x1bc" + body + this.serializeModes({ x: buf.cursorX, y: buf.cursorY });
+    // SerializeAddon already restores its public modes/cursor. Only margins
+    // (or origin's homing) require another positioning operation. An extra
+    // CUP at a pending right-edge wrap would otherwise cancel that state.
+    const tail = this.shadow.restoresMargins || this.term.modes.originMode
+      ? this.serializeModes({ x: buf.cursorX, y: buf.cursorY })
+      : this.shadow.serializeModes();
+    return "\x1bc" + body + tail;
   }
 
   /**

@@ -15,6 +15,7 @@ export function defineAlternateTests(
       const name = await ctx.createSession();
       const owned = mkdtempSync("/tmp/e2e-alt-exit-");
       let continuousStarted = false;
+      const wheelSamples: unknown[] = [];
       try {
       const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
       let delayed = 0;
@@ -52,8 +53,16 @@ export function defineAlternateTests(
       const wheel = async () => {
         const box = await page.locator(".xterm-screen:visible").first().boundingBox();
         if (!box) throw new Error("no visible terminal");
+        const sample = () => page.evaluate(n => {
+          const p = window.__tmuxHubTerms![n]!;
+          const v = document.querySelector<HTMLElement>(".term-slot:not([style*='hidden']) .xterm-viewport") ?? document.querySelector<HTMLElement>(".xterm-viewport");
+          return { replays: p.replays, resyncs: p.resyncs, scroll: p.linesFromBottom,
+            dom: v ? { top: v.scrollTop, height: v.scrollHeight, client: v.clientHeight } : null };
+        }, name);
+        const before = await sample();
         await page.mouse.move(box.x + 50, box.y + 50); await page.mouse.wheel(0, -420);
         await page.waitForTimeout(250);
+        wheelSamples.push({ before, after: await sample() });
       };
       const grid = (await view()).size;
       await wheel();
@@ -88,6 +97,12 @@ export function defineAlternateTests(
         await expect.poll(() => ctx.tmuxE2E(["capture-pane", "-p", "-t", name]).split("\n").includes("CONTINUOUS_DONE")).toBe(true);
         await expectInSync(page, ctx, name, "normal after continuous output stops");
       }
+      // Text can match while the final repair is still parsing. Start this
+      // normal-history navigation after all announced snapshots complete;
+      // navigation during replay has its own fidelity-scroll-intent cases.
+      await expect.poll(() => page.evaluate(n => {
+        const p = window.__tmuxHubTerms![n]!; return p.replays - p.resyncs;
+      }, name)).toBe(1);
       await wheel(); expect((await view()).scroll).toBeGreaterThan(0);
       const chosen = (await view()).scroll, replay = (await view()).replays;
       await page.evaluate(n => window.__tmuxHubTerms![n]!.dropSocket(), name);
@@ -95,6 +110,14 @@ export function defineAlternateTests(
       await expect.poll(async () => (await view()).scroll).toBe(chosen);
       await expectInSync(page, ctx, name, "normal history still navigates and reconnects");
       if (weak) expect(delayed).toBeGreaterThan(0);
+      } catch (error) {
+        writeFileSync(info.outputPath("alternate-failure.json"), JSON.stringify({ wheelSamples,
+          probe: await page.evaluate(n => { const p = window.__tmuxHubTerms?.[n]; return p ? { state: p.state, scroll: p.linesFromBottom, replays: p.replays, resyncs: p.resyncs, lines: p.screen() } : null; }, name).catch(() => null),
+          pane: ctx.tmuxE2E(["capture-pane", "-p", "-t", name]),
+          modes: ctx.tmuxE2E(["display", "-p", "-t", name, "#{alternate_on} #{history_size} #{mouse_standard_flag} #{mouse_sgr_flag}"]),
+        }));
+        await page.screenshot({ path: info.outputPath("alternate-failure.png") }).catch(() => {});
+        throw error;
       } finally {
         if (continuousStarted) {
           const cleanup = await stopOwnedGenerator(owned, name, {

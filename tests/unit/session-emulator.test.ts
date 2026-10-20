@@ -123,3 +123,13 @@ test("capture modes retain wrap, origin, insert and focus with cursor in the reg
     expect([restored.buffer.active.cursorX, restored.buffer.active.cursorY]).toEqual([cursor.x, cursor.y]);
   } finally { e.dispose(); expected.dispose(); restored.dispose(); }
 });
+
+test("fallback snapshot preserves pending wrap before the next character", async () => {
+  const e = new SessionEmulator(10, 6, 100);
+  const restored = new SessionEmulator(10, 6, 100);
+  try {
+    e.write("123456789A"); restored.write(e.snapshot());
+    e.write("Z"); restored.write("Z");
+    expect(restored.snapshot()).toBe(e.snapshot());
+  } finally { e.dispose(); restored.dispose(); }
+});

@@ -45,6 +45,8 @@ export class ModeShadow {
     });
   }
 
+  get restoresMargins(): boolean { return this.scrollTop !== null; }
+
   get originOffset(): number { return (this.scrollTop ?? 1) - 1; }
 
   private setDecset(params: (number | number[])[], on: boolean): void {
