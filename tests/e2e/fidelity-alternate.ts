@@ -70,7 +70,7 @@ export function defineAlternateTests(
       // before asking it to exit alternate mode.
       ctx.tmuxE2E(["send-keys", "-t", name, "C-u"]);
       const exitCommand = entry === "continuous-exit"
-        ? `printf '\\033[?1049lNORMAL_ORDINARY\\n'; i=0; while [ ! -f ${owned}/stop ]; do printf '\\033[1;1HTICK'; i=$((i+1)); printf '%s' "$i" > ${owned}/progress; sleep 0.05; done; printf '\\r\\nCONTINUOUS_DONE\\r\\n'`
+        ? `printf '\\033[?1049lNORMAL_ORDINARY\\n'; i=0; while [ ! -f ${owned}/stop ]; do printf '\\033[1;1HTICK'; i=$((i+1)); printf '%s' "$i" > ${owned}/progress; sleep 0.05; done; printf '\\r\\n\\033[2KCONTINUOUS_DONE\\r\\n'`
         : "printf '\\033[?1049lNORMAL_ORDINARY\\n'";
       ctx.tmuxE2E(["send-keys", "-t", name, exitCommand, "Enter"]);
       await expect.poll(serverAlt).toBe("0");
