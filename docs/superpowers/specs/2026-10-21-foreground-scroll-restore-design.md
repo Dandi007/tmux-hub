@@ -18,8 +18,8 @@
 - `tests/e2e/foreground-browser.ts`：独立Chromium默认context的真实可见性测试工具，每个自有临时profile使用basic password store避免宿主桌面密钥环冷启动等待；阶段日志记录导航/恢复/清理耗时；直接CDP抓屏并断言截图前后行列数不变，避免Playwright重置外设CDP视口。临时profile和进程有界清理；回调独立40秒deadline，挂起也进入清理。
 - `tests/e2e/fidelity-foreground.ts`、`fidelity-suite.ts`：真实后台重连/后台resize的桌面、移动触摸视口行为回归，跟底/无输入对照与隐藏事件断言；十种场景覆盖normal/alternate重叠回放、前台真实wheel覆盖旧pending。只冷导航一次，通过产品自身EventSource呈现的真实tab/picker等待fixture就绪并点击选择一次；不另外开SSE读取器，不重复debug open制造入口竞争。
 - `tests/unit/foreground-browser.test.ts`：初始化日志失败时清理已获得的profile。
-- `tests/e2e/foreground-cleanup.ts`：CDP已断开但进程仍活时，永不返回的回调独立超时后，实际浏览器PID退出且profile删除；红测持有自有进程组对象兜底，独立存活的组所有者在Chrome退出后仍固定PGID，stop一次杀掉整组并幂等；不依赖CDP或已退出Chrome的PID。所有者发现测试worker死亡也清理自有组；目录回收置于finally。
-- `tests/helpers/owned-process-group.ts`、`tests/unit/owned-process-group.test.ts`：独立进程组所有者；真实子进程在主进程已退出后继续写入（正常/忽略TERM）先红后绿，并检查写入停止。
+- `tests/e2e/foreground-cleanup.ts`：CDP已断开但进程仍活时，永不返回的回调独立超时后，实际浏览器PID退出且profile删除；红测持有自有进程组对象兜底，独立存活的组所有者在Chrome退出后仍固定PGID，stop先让所有者通过持有的子句柄结束并回收Chrome、等待IPC确认，再一次结束余组且幂等，再以只读ps有界确认组内非Z成员全部退出后才允许目录回收；退出后不再按PGID发信号；不依赖CDP或已退出Chrome的PID。所有者发现测试worker死亡也清理自有组；目录回收置于finally。
+- `tests/helpers/owned-process-group.ts`、`tests/unit/owned-process-group.test.ts`：独立进程组所有者；真实子进程在主进程已退出后继续写入（正常/忽略TERM）先红后绿，stop返回后立即检查子进程已退出及写入停止，红测兜底仅用本fixture私有停止标记，不向裸PID发信号。
 - 本spec和`AGENTS.md`索引。
 
 ## 5 测试计划与部署条件
