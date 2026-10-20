@@ -13,7 +13,7 @@ import {
 } from "./config";
 import { SessionEmulator } from "./session-emulator";
 import { TitleSeqFilter } from "./title-seq-filter";
-import { mkdirSync, openSync, readSync, closeSync, existsSync, unlinkSync, statSync, fstatSync, renameSync, readdirSync } from "node:fs";
+import { mkdirSync, openSync, readSync, closeSync, existsSync, unlinkSync, statSync, fstatSync, renameSync, readdirSync, constants as fsc } from "node:fs";
 import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
 import { createLogger } from "./logger";
@@ -35,6 +35,25 @@ const TRASH_RETAIN_MS = 7 * 24 * 60 * 60 * 1000;
 // discarded) so a window-name sequence cut at EOF is still stripped. Twice the
 // filter's name cap, so the sequence's opening `ESC k` is always inside.
 const TITLE_PRIME_BYTES = 2048;
+
+// The pane log is written by tmux's sink as the pane's user. In hub-sandbox
+// that user is the untrusted agent, which can replace the file with a link to a
+// hub-private file; reading through it would stream that file to viewers
+// (issue #150). Open without following a final symlink and accept only a
+// regular file with a single name. A missing log is created the same way.
+function openLogForRead(logPath: string): number {
+  const fd = openSync(logPath, fsc.O_RDONLY | fsc.O_CREAT | fsc.O_NOFOLLOW, 0o666);
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.nlink !== 1) {
+      throw new Error(`refusing pane log ${logPath}: not a regular single-link file`);
+    }
+    return fd;
+  } catch (e) {
+    closeSync(fd);
+    throw e;
+  }
+}
 
 function trashLog(logPath: string): void {
   mkdirSync(TRASH_DIR, { recursive: true });
@@ -123,12 +142,9 @@ export class SessionBroadcaster {
       logger.error({ session: this.session, code: r.code, stderr: r.stderr }, "pipe-pane failed");
       throw new Error(`pipe-pane failed (${r.code}): ${r.stderr}`);
     }
-    if (!existsSync(this.logPath)) {
-      // Touch so we can open for read even before tmux writes the first byte.
-      closeSync(openSync(this.logPath, "a"));
-    }
-    this.fd = openSync(this.logPath, "r");
     try {
+      // Created if missing so we can read before tmux writes the first byte.
+      this.fd = openLogForRead(this.logPath);
       // Live bytes start at the current end: nothing reads the history through
       // poll (the emulator primes and legacy replay read the fd directly), and
       // re-reading a long-lived session's log blocked the event loop ~12ms/MB on
@@ -143,7 +159,7 @@ export class SessionBroadcaster {
     } catch (e) {
       // Nobody holds a failed instance (the registry drops it), so release the
       // fd and the pipe opened above here or they outlive it.
-      try { closeSync(this.fd); } catch { /* ignore */ }
+      if (this.fd !== null) { try { closeSync(this.fd); } catch { /* ignore */ } }
       this.fd = null;
       await this.run(["pipe-pane", "-o", "-t", `${this.session}:0.0`]).catch(() => undefined);
       throw e;
@@ -408,7 +424,8 @@ export class SessionBroadcaster {
   private poll(): void {
     if (this.fd === null) return;
     try {
-      const st = statSync(this.logPath);
+      // fstat, not stat: the path may since have been swapped for a link.
+      const st = fstatSync(this.fd);
       if (st.size < this.offset) {
         for (const l of this.eventListeners) l({ kind: "replay_truncated" });
         this.offset = st.size;
