@@ -102,7 +102,7 @@ export function defineAlternateTests(
       // navigation during replay has its own fidelity-scroll-intent cases.
       await expect.poll(() => page.evaluate(n => {
         const p = window.__tmuxHubTerms![n]!; return p.replays - p.resyncs;
-      }, name)).toBe(1);
+      }, name)).toBe(entry === "offline-entry" ? 2 : 1);
       await wheel(); expect((await view()).scroll).toBeGreaterThan(0);
       const chosen = (await view()).scroll, replay = (await view()).replays;
       await page.evaluate(n => window.__tmuxHubTerms![n]!.dropSocket(), name);
