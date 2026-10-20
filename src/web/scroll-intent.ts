@@ -38,6 +38,24 @@ export function observeScrollIntent(
   // xterm suppresses its public onScroll for native viewport scrolls. Its own
   // DOM listener was registered by open() before ours, so buffer.viewportY is
   // already updated here (wheel, scrollbar, and touch momentum all use it).
+  // xterm 5.3 can clamp scrollTop while shrinking replay history without
+  // marking the resulting DOM scroll as programmatic. If live output parses
+  // before that queued event, the old DOM bottom scrolls the buffer backwards.
+  // At a shared bottom, synchronize geometry BEFORE xterm handles the event.
+  // A wheel/drag away from DOM bottom, or a buffer already in history, must
+  // keep its ordinary navigation path. Do not suppress any scroll events.
+  const syncFollowingBottom = (): void => {
+    if (!viewport || viewport.offsetParent === null) return;
+    const b = term.buffer.active;
+    if (b.type !== "normal" || b.viewportY !== b.baseY
+      || viewport.scrollTop < viewport.scrollHeight - viewport.clientHeight - 1) return;
+    // Pinned xterm 5.3 has no public immediate viewport synchronization API.
+    const internal = term as unknown as {
+      _core?: { viewport?: { syncScrollArea(immediate: boolean): void } };
+    };
+    internal._core?.viewport?.syncScrollArea(true);
+  };
+  viewport?.addEventListener("scroll", syncFollowingBottom, true);
   viewport?.addEventListener("scroll", changed);
   return {
     programmatic: (action) => {
@@ -45,6 +63,7 @@ export function observeScrollIntent(
       try { action(); } finally { sync(); programmatic = false; }
     },
     dispose: () => {
+      viewport?.removeEventListener("scroll", syncFollowingBottom, true);
       viewport?.removeEventListener("scroll", changed);
       for (const subscription of subscriptions) subscription.dispose();
     },
