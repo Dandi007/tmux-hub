@@ -6,6 +6,7 @@ import { attachMomentumScroll } from "./momentum-scroll";
 import { showToast } from "./ui/toast";
 import "xterm/css/xterm.css";
 import type { ClientWsMessage, ServerWsMessage } from "@shared/protocol";
+import { observeScrollIntent } from "./scroll-intent";
 import { decideScrollRestore, snapshotLocalLfb, type RestoreDecision } from "@shared/scroll-restore";
 import { hubWsUrl, refreshSecret } from "./hub-fetch";
 import { TERMINAL_FONT_FAMILY, ensureTerminalFonts } from "./shared/fonts";
@@ -562,19 +563,26 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // 调 fit() 时消费。hidden 期间用户无法滚动该 slot，activate 时消费挂起
   // 决策不会覆盖用户意图；新决策到来（reconnect）直接覆盖旧 pending。
   let pendingDecision: RestoreDecision | null = null;
+  // A real navigation can happen after resync starts but before replay-done.
+  // Keep that intent separately from the untrusted-buffer sampling gate.
+  const scrollIntent = observeScrollIntent(term, el.querySelector<HTMLElement>(".xterm-viewport"),
+    () => !disposed && replayCount > 0 && isTermVisible() && pendingDecision === null,
+    (lines) => { savedLocalLfb = lines; });
   // 执行落点决策（parse barrier 回调与 fit() 挂起消费两处共用）。
   const executeScrollDecision = (decision: RestoreDecision): void => {
-    if (decision.action === "bottom") {
-      // 断线前跟底 → 明确回底（replay 可能把 viewport 留在中间态），
-      // 黄金律 1 / INV-3。
-      term.scrollToBottom();
-    } else if (decision.action === "restore") {
-      // scrollLines is RELATIVE. Anchor to bottom first so the offset is
-      // absolute — the viewport may already sit mid-history and a bare
-      // scrollLines(-lines) would compound the offset.
-      term.scrollToBottom();
-      term.scrollLines(-decision.lines);
-    }
+    scrollIntent.programmatic(() => {
+      if (decision.action === "bottom") {
+        // 断线前跟底 → 明确回底（replay 可能把 viewport 留在中间态），
+        // 黄金律 1 / INV-3。
+        term.scrollToBottom();
+      } else if (decision.action === "restore") {
+        // scrollLines is RELATIVE. Anchor to bottom first so the offset is
+        // absolute — the viewport may already sit mid-history and a bare
+        // scrollLines(-lines) would compound the offset.
+        term.scrollToBottom();
+        term.scrollLines(-decision.lines);
+      }
+    });
     // 决策执行后把 lastReportedLfb 重置为实际 lfb（保留既有做法）：
     // 下一轮上报不把恢复动作本身当成用户滚动。
     const buf = term.buffer.active;
@@ -1035,6 +1043,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       try { el.removeEventListener("mouseup", onMouseUp); } catch {}
       try { selectionDisposable.dispose(); } catch {}
       try { detachMomentum?.(); } catch {}
+      scrollIntent.dispose();
       ws.onmessage = null;
       ws.onclose = null;
       ws.onerror = null;
