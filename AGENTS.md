@@ -31,6 +31,7 @@
 - [`docs/superpowers/specs/`](docs/superpowers/specs/) 与 [`docs/superpowers/plans/`](docs/superpowers/plans/) —— **每-MR 设计文档与实施计划的现行落点**（§2.1 强制、PR 模板勾选项引用）。**不适用 `NNN-` 命名，保持 `YYYY-MM-DD-<slug>` 原样。**
 - [多浏览器 viewport 收敛设计](docs/superpowers/specs/2026-10-20-viewport-convergence-design.md) —— 并发 resize、应用尺寸确认与 attach 追平。
 - [初始连接发送队列设计](docs/superpowers/specs/2026-10-20-initial-terminal-queue-design.md) —— 初始输入送达与过期 resize 防重放。
+- [Dogfood readiness 设计](docs/superpowers/specs/2026-10-20-dogfood-readiness-design.md) —— dogfood 重启后的有界健康等待。
 - [CLAUDE.md](CLAUDE.md) —— Claude Code 专用补充：双平台部署拓扑、重启安全规则、发布流程。
 
 ## 5  运行命令速查
