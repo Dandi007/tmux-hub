@@ -100,3 +100,55 @@ test.skipIf(!HAS_TMUX)("rows wrapped at a narrower width stay split after wideni
   await waitFor(() => T(["display-message", "-p", "-t", "widen:0.0", "#{pane_width}"]).trim() === "56");
   await checkPane("widen", 56, 10);
 });
+
+// Start the broadcaster only after entry: no log/emulator can infer the mode.
+for (const entry of [1049, 47, 1047]) {
+  test.skipIf(!HAS_TMUX)(`cold alternate snapshot keeps both screens and live exit (${entry})`, async () => {
+    const sess = `alt-${entry}`, cols = 60, rows = 10;
+    newPane(sess, cols, rows);
+    T(["send-keys", "-t", sess, "seq 1 50", "Enter"]);
+    await waitFor(() => T(["capture-pane", "-p", "-t", sess]).includes("50\n$"));
+    const normal = T(["capture-pane", "-p", "-t", sess, "-S", "-"]);
+    T(["send-keys", "-t", sess, `printf '\\033[?${entry}h\\033[HAltCold\\033[4;7H'`, "Enter"]);
+    await waitFor(() => T(["display", "-p", "-t", sess, "#{alternate_on}"]).trim() === "1");
+    const { SessionBroadcaster } = await import("../../src/server/output-broadcaster");
+    const b = new SessionBroadcaster(sess, run, true);
+    const term = new Terminal({ cols, rows, scrollback: 5000, allowProposedApi: true });
+    const write = (data: Uint8Array | string) => new Promise<void>(resolve => term.write(data, resolve));
+    try {
+      await b.start();
+      const frames: Uint8Array[] = [];
+      const detach = await b.attachWithReplay(c => frames.push(c), cols, rows);
+      detach();
+      for (const f of frames) await write(f);
+      expect(term.buffer.active.type).toBe("alternate");
+      term.scrollLines(-25);
+      expect(term.buffer.active.viewportY).toBe(0);
+      const screen = () => Array.from({ length: rows }, (_, y) =>
+        term.buffer.active.getLine(term.buffer.active.baseY + y)?.translateToString(true) ?? "");
+      const captured = () => T(["capture-pane", "-p", "-t", sess]).split("\n").slice(0, rows);
+      expect(norm(screen())).toEqual(norm(captured()));
+      const cursor = () => T(["display", "-p", "-t", sess, "#{cursor_x} #{cursor_y}"]).trim().split(" ").map(Number);
+      expect([term.buffer.active.cursorX, term.buffer.active.cursorY]).toEqual(cursor());
+      // Let the original application exit on the same live byte stream.
+      const live: Uint8Array[] = [];
+      const detachLive = b.attach(c => live.push(c));
+      T(["send-keys", "-t", sess, `printf '\\033[?${entry}l'`, "Enter"]);
+      await waitFor(() => T(["display", "-p", "-t", sess, "#{alternate_on}"]).trim() === "0");
+      await waitFor(() => live.length > 0);
+      await new Promise(r => setTimeout(r, 80));
+      detachLive();
+      for (const f of live) await write(f);
+      expect(term.buffer.active.type).toBe("normal");
+      expect(norm(screen())).toEqual(norm(captured()));
+      expect([term.buffer.active.cursorX, term.buffer.active.cursorY]).toEqual(cursor());
+      const actual = Array.from({ length: term.buffer.active.length }, (_, y) =>
+        term.buffer.active.getLine(y)?.translateToString(true) ?? "");
+      const expected = T(["capture-pane", "-p", "-t", sess, "-S", "-"]).split("\n");
+      while (actual.at(-1) === "") actual.pop();
+      while (expected.at(-1) === "") expected.pop();
+      expect(norm(actual)).toEqual(norm(expected));
+      expect(normal).toContain("1\n2\n");
+    } finally { term.dispose(); await b.stop({ deleteLog: true }); }
+  });
+}

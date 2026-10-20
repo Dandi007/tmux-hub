@@ -1,3 +1,4 @@
+import { defineAlternateTests } from "./fidelity-alternate";
 import { defineForegroundCleanupTests } from "./foreground-cleanup";
 // TUI 回传保真 oracle：浏览器里 xterm 实际持有的屏幕文本必须与 tmux 的
 // `capture-pane -p` 逐行一致——首次 attach、流式输出中、断线重连（断线期间
@@ -113,6 +114,7 @@ export function defineFidelitySuite(test: TestType<PlaywrightTestArgs & { ctx: C
     await expect.poll(() => ctx.tmuxE2E(["capture-pane", "-p", "-t", name]), { timeout: 10_000 }).toContain(marker);
   }
 
+  defineAlternateTests(test, expect, openSession, expectInSync);
   defineReconnectQueueTest(test, expect, openSession, expectInSync);
   defineScrollIntentTests(test, expect, openSession, expectInSync);
 

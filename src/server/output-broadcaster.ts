@@ -255,6 +255,15 @@ export class SessionBroadcaster {
             out += toCrlf(h.stdout) + "\r\n" + "\n".repeat(Math.max(0, geo.height - 1)) + "\x1b[H";
           }
         }
+        if (geo?.alternate) {
+          // -a captures the saved normal screen; history above was deliberately
+          // read without -a (tmux exposes history only on the active grid).
+          // Seed normal before entering alt so a later live DECRST restores it.
+          const normal = await this.run(["capture-pane", "-a", "-e", "-p", "-t", target]);
+          if (normal.code !== 0) throw new Error(`saved normal capture failed (${normal.code})`);
+          out += toCrlf(normal.stdout);
+          out += `\x1b[${geo.savedY + 1};${geo.savedX + 1}H\x1b[0m\x1b[?1049h\x1b[H`;
+        }
         out += toCrlf(vis.stdout) + emu.serializeModes();
         if (geo) out += `\x1b[${geo.cursorY + 1};${geo.cursorX + 1}H`;
         return out;
@@ -269,15 +278,21 @@ export class SessionBroadcaster {
     return emu.snapshot();
   }
 
-  private async paneGeometry(): Promise<{ cursorX: number; cursorY: number; history: number; height: number } | null> {
+  private async paneGeometry(): Promise<{
+    cursorX: number; cursorY: number; history: number; height: number;
+    alternate: boolean; savedX: number; savedY: number;
+  } | null> {
     try {
       const r = await this.run([
         "display-message", "-p", "-t", `${this.session}:0.0`,
-        "#{cursor_x} #{cursor_y} #{history_size} #{pane_height}",
+        "#{cursor_x} #{cursor_y} #{history_size} #{pane_height} #{alternate_on} #{alternate_saved_x} #{alternate_saved_y}",
       ]);
-      const m = /^(\d+) (\d+) (\d+) (\d+)/.exec(r.stdout.trim());
+      const m = /^(\d+) (\d+) (\d+) (\d+)(?: ([01]) (\d+) (\d+))?/.exec(r.stdout.trim());
       if (r.code === 0 && m) {
-        return { cursorX: Number(m[1]), cursorY: Number(m[2]), history: Number(m[3]), height: Number(m[4]) };
+        return {
+          cursorX: Number(m[1]), cursorY: Number(m[2]), history: Number(m[3]), height: Number(m[4]),
+          alternate: m[5] === "1", savedX: Number(m[6] ?? 0), savedY: Number(m[7] ?? 0),
+        };
       }
     } catch { /* fall through: no history, no cursor restore */ }
     return null;
