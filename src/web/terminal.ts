@@ -47,6 +47,8 @@ export type TerminalProbe = {
   readonly resyncs: number;
   /** Count of completed replays (scrollpos restore decision executed or deferred). */
   readonly replays: number;
+  /** Latest replay parse/restore barrier has not completed. */
+  readonly replayPending: boolean;
   scrollLines: (n: number) => void;
   /** Same visibility test the scroll-restore decision uses (hidden pool slot → deferred). */
   readonly visible: boolean;
@@ -964,6 +966,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     dropSocket: () => { try { ws.close(); } catch {} },
     get linesFromBottom() { const b = term.buffer.active; return Math.max(0, b.baseY - b.viewportY); },
     get resyncs() { return resyncCount; },
+    get replayPending() { return !reportingEnabled; },
     get replays() { return replayCount; },
     scrollLines: (n: number) => term.scrollLines(n),
     get visible() { return isTermVisible(); },

@@ -56,7 +56,7 @@ export function defineAlternateTests(
         const sample = () => page.evaluate(n => {
           const p = window.__tmuxHubTerms![n]!;
           const v = document.querySelector<HTMLElement>(".term-slot:not([style*='hidden']) .xterm-viewport") ?? document.querySelector<HTMLElement>(".xterm-viewport");
-          return { replays: p.replays, resyncs: p.resyncs, scroll: p.linesFromBottom,
+          return { replays: p.replays, resyncs: p.resyncs, replayPending: p.replayPending, scroll: p.linesFromBottom,
             dom: v ? { top: v.scrollTop, height: v.scrollHeight, client: v.clientHeight } : null };
         }, name);
         const before = await sample();
@@ -100,9 +100,7 @@ export function defineAlternateTests(
       // Text can match while the final repair is still parsing. Start this
       // normal-history navigation after all announced snapshots complete;
       // navigation during replay has its own fidelity-scroll-intent cases.
-      await expect.poll(() => page.evaluate(n => {
-        const p = window.__tmuxHubTerms![n]!; return p.replays - p.resyncs;
-      }, name)).toBe(entry === "offline-entry" ? 2 : 1);
+      await expect.poll(() => page.evaluate(n => window.__tmuxHubTerms![n]!.replayPending, name)).toBe(false);
       await wheel(); expect((await view()).scroll).toBeGreaterThan(0);
       const chosen = (await view()).scroll, replay = (await view()).replays;
       await page.evaluate(n => window.__tmuxHubTerms![n]!.dropSocket(), name);
