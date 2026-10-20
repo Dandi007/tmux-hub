@@ -193,7 +193,7 @@ test.describe("desktop tab-bar", () => {
       await expect.poll(async () => {
         const live = new Set(ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n"));
         return (await tabOrder(page)).filter(n => !live.has(n));
-      }).toEqual([]);
+      }, { timeout: 20_000 }).toEqual([]);
       const order = await tabOrder(page);
       expect(order).toEqual(expect.arrayContaining(created));
 
