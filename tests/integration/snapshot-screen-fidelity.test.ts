@@ -119,7 +119,7 @@ for (const entry of [1049, 47, 1047]) {
       await b.start();
       const frames: Uint8Array[] = [];
       const snapshotModes: boolean[] = [];
-      const detach = await b.attachWithReplay(c => frames.push(c), cols, rows, undefined, alternate => snapshotModes.push(alternate));
+      const detach = await b.attachWithReplay(c => frames.push(c), cols, rows, undefined, snapshot => snapshotModes.push(snapshot.alternate));
       detach();
       expect(snapshotModes).toEqual([true]);
       for (const f of frames) await write(f);

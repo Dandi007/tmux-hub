@@ -55,13 +55,13 @@ export class ResyncScheduler {
 
   // A known invalid saved grid needs a bounded capture even if output stays
   // busy. Use the same chain and coalesce with resize/overlap repair.
-  repairNow(): void {
+  repairNow(delayMs = REPAIR_QUIET_MS): void {
     if (this.disposed) return;
     this.urgentRepair = true;
-    this.scheduleRepair();
+    this.scheduleRepair(delayMs);
   }
 
-  private scheduleRepair(): void {
+  private scheduleRepair(delayMs = REPAIR_QUIET_MS): void {
     if (this.repairTimer) return;
     this.repairTimer = setTimeout(() => {
       this.repairTimer = null;
@@ -70,7 +70,7 @@ export class ResyncScheduler {
         if (!this.urgentRepair && this.quiet && !this.quiet()) { this.scheduleRepair(); return; }
         await this.fire(true);
       });
-    }, REPAIR_QUIET_MS);
+    }, delayMs);
   }
 
   private async fire(repair = false): Promise<void> {

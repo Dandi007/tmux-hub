@@ -18,6 +18,7 @@ test("attach snapshot is seeded from capture-pane, not from log replay", async (
   const { SessionBroadcaster } = await import("../../src/server/output-broadcaster");
   // capture-pane returns clean, authoritative content; everything else ok.
   const run = async (args: string[]) => {
+    if (args[0] === "display-message") return { stdout: "0 0 0 24 0 0 0", stderr: "", code: 0 };
     if (args[0] === "capture-pane") {
       return { stdout: "AUTHORITATIVE_CAPTURE_SCREEN", stderr: "", code: 0 };
     }
@@ -54,7 +55,7 @@ test("capture-pane is invoked with scrollback and the session pane target", asyn
   const calls: string[][] = [];
   const run = async (args: string[]) => {
     calls.push(args);
-    if (args[0] === "display-message") return { stdout: "0 0 50 40", stderr: "", code: 0 };
+    if (args[0] === "display-message") return { stdout: "0 0 50 40 0 0 0", stderr: "", code: 0 };
     if (args[0] === "capture-pane") return { stdout: "X", stderr: "", code: 0 };
     return { stdout: "", stderr: "", code: 0 };
   };
@@ -87,6 +88,7 @@ test("capture-pane is invoked with scrollback and the session pane target", asyn
 test("falls back to a reset snapshot when capture-pane fails", async () => {
   const { SessionBroadcaster } = await import("../../src/server/output-broadcaster");
   const run = async (args: string[]) => {
+    if (args[0] === "display-message") return { stdout: "0 0 0 24 0 0 0", stderr: "", code: 0 };
     if (args[0] === "capture-pane") return { stdout: "", stderr: "boom", code: 1 };
     return { stdout: "", stderr: "", code: 0 };
   };

@@ -1,3 +1,4 @@
+import { stopOwnedGenerator } from "../helpers/stop-owned-generator";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import type { Page, TestType, Expect, PlaywrightTestArgs, PlaywrightWorkerArgs } from "@playwright/test";
 
@@ -13,6 +14,7 @@ export function defineAlternateTests(
       test.setTimeout(60_000);
       const name = await ctx.createSession();
       const owned = mkdtempSync("/tmp/e2e-alt-exit-");
+      let continuousStarted = false;
       try {
       const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
       let delayed = 0;
@@ -70,9 +72,10 @@ export function defineAlternateTests(
       // before asking it to exit alternate mode.
       ctx.tmuxE2E(["send-keys", "-t", name, "C-u"]);
       const exitCommand = entry === "continuous-exit"
-        ? `printf '\\033[?1049lNORMAL_ORDINARY\\n'; i=0; while [ ! -f ${owned}/stop ]; do printf '\\033[1;1HTICK'; i=$((i+1)); printf '%s' "$i" > ${owned}/progress; sleep 0.05; done; printf '\\r\\n\\033[2KCONTINUOUS_DONE\\r\\n'`
+        ? `printf '\\033[?1049lNORMAL_ORDINARY\\n'; i=0; while [ ! -f ${owned}/stop ]; do printf '\\033[1;1HTICK'; i=$((i+1)); printf '%s' "$i" > ${owned}/progress; sleep 0.05; done; printf '\\r\\n\\033[2KCONTINUOUS_DONE\\r\\n'; : > ${owned}/done`
         : "printf '\\033[?1049lNORMAL_ORDINARY\\n'";
       ctx.tmuxE2E(["send-keys", "-t", name, exitCommand, "Enter"]);
+      continuousStarted = entry === "continuous-exit";
       await expect.poll(serverAlt).toBe("0");
       if (entry === "continuous-exit") await expect.poll(() =>
         existsSync(`${owned}/progress`) ? Number(readFileSync(`${owned}/progress`, "utf8")) : 0).toBeGreaterThan(4);
@@ -92,7 +95,15 @@ export function defineAlternateTests(
       await expect.poll(async () => (await view()).scroll).toBe(chosen);
       await expectInSync(page, ctx, name, "normal history still navigates and reconnects");
       if (weak) expect(delayed).toBeGreaterThan(0);
-      } finally { writeFileSync(`${owned}/stop`, "stop"); rmSync(owned, { recursive: true, force: true }); }
+      } finally {
+        if (continuousStarted) {
+          const cleanup = await stopOwnedGenerator(owned, name, {
+            listSessions: () => ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n"),
+            killSession: n => { ctx.tmuxE2E(["kill-session", "-t", n]); },
+          });
+          writeFileSync(info.outputPath("generator-cleanup.json"), JSON.stringify(cleanup));
+        } else rmSync(owned, { recursive: true, force: true });
+      }
     });
   }
   for (const replay of [false, true]) test(`alternate exit preserves platform input: ${replay ? "snapshot repair" : "no snapshot"}`, async ({ page, ctx }, info) => {

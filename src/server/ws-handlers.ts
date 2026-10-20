@@ -1,5 +1,5 @@
 import type { ServerWebSocket } from "bun";
-import type { SessionBroadcaster } from "./output-broadcaster";
+import type { SessionBroadcaster, SnapshotInfo } from "./output-broadcaster";
 import { HubError, type InputRouter } from "./input-router";
 import type { SseHub } from "./sse";
 import type { ManagedSessionDb } from "./managed-db";
@@ -178,10 +178,18 @@ export function createWsHandlers(deps: WsDeps) {
       paneCols = ws.data.viewport?.cols ?? paneCols;
       paneRows = ws.data.viewport?.rows ?? paneRows;
 
-      let alternateSnapshot = false;
-      const onSnapshot = (alternate: boolean, normalExitPending: boolean): void => {
-        alternateSnapshot = alternate;
-        if (alternate && normalExitPending) ws.data.resync?.repairNow();
+      let alternateSnapshot = false, normalRepair = false, repairAttempt = 0;
+      const requestNormalRepair = (): void => {
+        normalRepair = true;
+        ws.data.resync?.repairNow(Math.min(1000, 100 * 2 ** repairAttempt));
+        repairAttempt = Math.min(4, repairAttempt + 1);
+      };
+      const onSnapshot = (snapshot: SnapshotInfo): void => {
+        alternateSnapshot = snapshot.alternate;
+        if (snapshot.alternate && snapshot.normalExitPending) requestNormalRepair();
+        else if (snapshot.authoritative && !snapshot.overlapped) {
+          normalRepair = false; repairAttempt = 0;
+        } else if (normalRepair) requestNormalRepair();
       };
       const unsubEvents = b.onEvent((ev) => {
         if (ev.kind === "normal_screen" && alternateSnapshot) {
@@ -189,7 +197,7 @@ export function createWsHandlers(deps: WsDeps) {
           // snapshot taken while alternate was active still holds the old
           // grid; capture the authoritative result through the ordered repair
           // chain. Capture is bounded even if the application stays busy.
-          ws.data.resync?.repairNow();
+          requestNormalRepair();
         }
         if (ev.kind === "replay_truncated") {
           sse.emit({ event: "replay_truncated", payload: { name: sessionName } });
@@ -212,6 +220,7 @@ export function createWsHandlers(deps: WsDeps) {
       const sendData = (chunk: Uint8Array): void => { try { ws.send(chunk); } catch {} };
       let unsubData: (() => void) | null = null;
       const onOverlap = (): void => {
+        if (normalRepair) return; // onSnapshot rearms bounded retry with backoff.
         ws.data.resync?.repairWhenQuiet(() => b.outputQuietFor(100));
       };
       const attached = b.attachWithReplay(sendData, paneCols, paneRows, onOverlap, onSnapshot);

@@ -11,6 +11,7 @@ process.env.TMUX_HUB_LOG_DIR = dir;
 // (correctly-reflowed) screen — the broadcaster seeds the snapshot from this,
 // not from a replay of the on-disk log.
 const fakeRun = async (args: string[]) => {
+    if (args[0] === "display-message") return { stdout: "0 0 0 24 0 0 0", stderr: "", code: 0 };
   if (args[0] === "capture-pane") {
     return { stdout: "echo hi\nhi\n\x1b[31mRED\x1b[0m", stderr: "", code: 0 };
   }

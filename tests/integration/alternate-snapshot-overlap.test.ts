@@ -28,10 +28,10 @@ test("alternate snapshot consumer sees an exit parsed during alignment", async (
   try {
     await b.start();
     const delivered: unknown[] = [];
-    await b.attachWithReplay(() => {}, 80, 24, undefined, (alternate, normalExitPending) => {
-      delivered.push({ alternate, normalExitPending });
+    await b.attachWithReplay(() => {}, 80, 24, undefined, snapshot => {
+      delivered.push(snapshot);
     });
     expect(captures).toBe(5);
-    expect(delivered).toEqual([{ alternate: true, normalExitPending: true }]);
+    expect(delivered).toEqual([{ alternate: true, normalExitPending: true, overlapped: true, authoritative: true }]);
   } finally { await b.stop({ deleteLog: true }); rmSync(dir, { recursive: true, force: true }); }
 });
