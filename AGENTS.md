@@ -38,6 +38,8 @@
 - [浏览器前后台滚动恢复](docs/superpowers/specs/2026-10-21-foreground-scroll-restore-design.md) —— 真实hidden/visible后的历史落点及后台回放门禁。
 - [CLAUDE.md](CLAUDE.md) —— Claude Code 专用补充：双平台部署拓扑、重启安全规则、发布流程。
 
+- [Renderer viewport publication](docs/superpowers/specs/2026-10-21-renderer-viewport-publication-design.md) —— publish measured grids without a delayed hidden-tab pin.
+
 ## 5  运行命令速查
 
 ```bash

@@ -93,6 +93,11 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // Render telemetry — only created when `?debug=perf`; assigned once the send
   // queue exists (below). Hoisted here so writeTerm/CanvasAddon can reference it.
   let perf: PerfTelemetry | null = null;
+  // Assigned before the first asynchronous URL build. Renderer callbacks may
+  // run while that build is pending, before a WebSocket exists.
+  let publishRendererViewport = (): void => {};
+  let socketInitialized = false;
+  let rendererMayPin = true;
   const term = new Terminal({
     convertEol: true,
     cursorBlink: false,
@@ -171,12 +176,12 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     if (disposed) return;
     try {
       term.loadAddon(new CanvasAddon());
-      fit.fit();
       perf?.setRenderer("canvas");
     } catch (e) {
       console.warn("[tmux-hub] CanvasAddon failed to load, falling back to DOM:", e);
       perf?.setRenderer("dom");
     }
+    publishRendererViewport();
   }, 50);
 
   // Safety net for the ensureTerminalFonts() timeout path: if the webfont
@@ -667,6 +672,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
               }
               if (kind === "viewport") {
                 const msg = parsed as Extract<ServerWsMessage, { kind: "viewport" }>;
+                // A later automatic renderer fit must not reclaim a newer
+                // peer/native viewport. Explicit local navigation still may.
+                if (msg.peer || msg.owner === "native") rendererMayPin = false;
                 const result = handleViewportMessage(msg, viewportState);
                 viewportState = result.next;
                 if (result.action.type === "resize") {
@@ -911,8 +919,14 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     const c = term.cols;
     const r = term.rows;
     if (c > 0 && r > 0 && isTermVisible() && shouldSendResize(viewportState)) {
+      rendererMayPin = true;
       queuedSend({ kind: "resize", cols: c, rows: r });
     }
+  };
+  publishRendererViewport = () => {
+    if (disposed || !rendererMayPin || !isTermVisible() || !shouldSendResize(viewportState)) return;
+    try { fit.fit(); } catch {}
+    if (socketInitialized) sendResizeIfVisible();
   };
   const onResize = () => {
     try { fit.fit(); } catch {}
@@ -949,6 +963,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // ── Initial WS connection ──────────────────────────────────────────
   const initUrl = await buildWsUrl();
   let ws = new WebSocket(initUrl);
+  socketInitialized = true;
   wireWs(ws);
 
   // ── Fidelity probe (opt-in via ?debug=term) ───────────────────────
@@ -982,15 +997,10 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     if (disposed) return;
     flushSendQueue();
     startHeartbeat();
-    setTimeout(() => {
-      if (ws.readyState === WebSocket.OPEN && isTermVisible()) {
-        // The canvas renderer may have measured new cell widths since the
-        // initial pin. Re-fit the local layout before publishing: its applied
-        // acknowledgement can have restored the earlier grid in the meantime.
-        try { fit.fit(); } catch {}
-        sendResizeIfVisible();
-      }
-    }, 100);
+    // Publish the current measured grid now; renderer readiness publishes
+    // its own subsequent measurement. No delayed initial pin can outlive a
+    // tab switch or a newer peer takeover.
+    publishRendererViewport();
   });
 
   if (!opts.readOnly) {

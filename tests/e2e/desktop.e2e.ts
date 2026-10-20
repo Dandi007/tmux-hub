@@ -539,3 +539,6 @@ test.describe("desktop voice input", () => {
     await expect(page.locator(".voice-history__list")).toHaveText(/还没有语音记录/);
   });
 });
+
+import { defineRendererFitTests } from "./desktop-renderer-fit";
+defineRendererFitTests();
