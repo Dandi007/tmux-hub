@@ -96,8 +96,10 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // Assigned before the first asynchronous URL build. Renderer callbacks may
   // run while that build is pending, before a WebSocket exists.
   let publishRendererViewport = (): void => {};
-  let socketInitialized = false;
   let rendererMayPin = true;
+  let rendererOwnsViewport = false;
+  let pendingRendererSize: { cols: number; rows: number } | null = null;
+  let flushRendererViewport = (): void => {};
   const term = new Terminal({
     convertEol: true,
     cursorBlink: false,
@@ -674,7 +676,14 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                 const msg = parsed as Extract<ServerWsMessage, { kind: "viewport" }>;
                 // A later automatic renderer fit must not reclaim a newer
                 // peer/native viewport. Explicit local navigation still may.
-                if (msg.peer || msg.owner === "native") rendererMayPin = false;
+                if (msg.peer || msg.owner === "native") {
+                  rendererMayPin = false;
+                  rendererOwnsViewport = false;
+                  pendingRendererSize = null;
+                } else if (msg.applied) {
+                  rendererMayPin = true;
+                  rendererOwnsViewport = true;
+                }
                 const result = handleViewportMessage(msg, viewportState);
                 viewportState = result.next;
                 if (result.action.type === "resize") {
@@ -684,6 +693,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                 } else if (result.action.type === "reclaim") {
                   reassertViewport();
                 }
+                flushRendererViewport();
                 return;
               }
               if (kind === "resync") {
@@ -920,13 +930,23 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     const r = term.rows;
     if (c > 0 && r > 0 && isTermVisible() && shouldSendResize(viewportState)) {
       rendererMayPin = true;
+      if (pendingRendererSize) pendingRendererSize = { cols: c, rows: r };
       queuedSend({ kind: "resize", cols: c, rows: r });
     }
   };
   publishRendererViewport = () => {
     if (disposed || !rendererMayPin || !isTermVisible() || !shouldSendResize(viewportState)) return;
     try { fit.fit(); } catch {}
-    if (socketInitialized) sendResizeIfVisible();
+    pendingRendererSize = { cols: term.cols, rows: term.rows };
+    flushRendererViewport();
+  };
+  flushRendererViewport = () => {
+    if (disposed || !rendererOwnsViewport || !pendingRendererSize || ws.readyState !== WebSocket.OPEN) return;
+    // A visible measurement remains valid if the tab hid before connection.
+    // The server checks ownership again, including peer notifications in flight.
+    const size = pendingRendererSize;
+    pendingRendererSize = null;
+    queuedSend({ kind: "resize", ...size, ifPinned: true });
   };
   const onResize = () => {
     try { fit.fit(); } catch {}
@@ -963,7 +983,6 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // ── Initial WS connection ──────────────────────────────────────────
   const initUrl = await buildWsUrl();
   let ws = new WebSocket(initUrl);
-  socketInitialized = true;
   wireWs(ws);
 
   // ── Fidelity probe (opt-in via ?debug=term) ───────────────────────
@@ -997,10 +1016,8 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     if (disposed) return;
     flushSendQueue();
     startHeartbeat();
-    // Publish the current measured grid now; renderer readiness publishes
-    // its own subsequent measurement. No delayed initial pin can outlive a
-    // tab switch or a newer peer takeover.
-    publishRendererViewport();
+    // Renderer work waits for the ordered initial viewport acknowledgement.
+    // Publishing on open could race a peer pin whose message is still in flight.
   });
 
   if (!opts.readOnly) {
