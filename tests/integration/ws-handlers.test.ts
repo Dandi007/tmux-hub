@@ -150,6 +150,7 @@ test("closed during attach leaves no subscriber behind (real broadcaster)", asyn
   const { SessionBroadcaster } = await import("../../src/server/output-broadcaster");
   const g = gate();
   const run = async (args: string[]) => {
+    if (args[0] === "display-message") return { stdout: "0 0 0 24 0 0 0", stderr: "", code: 0 };
     if (args[0] === "capture-pane") { await g.wait(); return { stdout: "SNAPSHOT", stderr: "", code: 0 }; }
     return { stdout: "", stderr: "", code: 0 };
   };
