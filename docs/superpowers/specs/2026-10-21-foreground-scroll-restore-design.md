@@ -20,6 +20,7 @@
 - `tests/unit/foreground-browser.test.ts`：初始化日志失败时清理已获得的profile。
 - `tests/e2e/foreground-cleanup.ts`：CDP已断开但进程仍活时，永不返回的回调独立超时后，实际浏览器PID退出且profile删除；红测持有自有进程组对象兜底，独立存活的组所有者在Chrome退出后仍固定PGID，stop先让所有者通过持有的子句柄结束并回收Chrome、等待IPC确认，再一次结束余组且幂等，再以带独立截止时间的异步ps逐线程（Linux）有界确认组内非Z成员全部退出后才允许目录回收；查询超时结束其自有子进程并报错，事件循环保持响应；退出后不再按PGID发信号；不依赖CDP或已退出Chrome的PID。所有者发现测试worker死亡也清理自有组；目录回收置于finally。
 - `tests/helpers/owned-process-group.ts`、`tests/unit/owned-process-group.test.ts`：独立进程组所有者；真实子进程在主进程已退出后继续写入（正常/忽略TERM）先红后绿，另有首线程退出但工作线程继续写入、查询永不返回的真实回归；stop返回后立即检查子进程已退出及写入停止，红测兜底仅用本fixture私有停止标记，不向裸PID发信号。
+- `tests/e2e/desktop-resize.ts`：延后真实旧applied确认，放在窗口fit后/防抖发送前的确定性竞争回归；由既有desktop suite注册。
 - 本spec和`AGENTS.md`索引。
 
 ## 5 测试计划与部署条件
@@ -29,5 +30,9 @@
 
 另：alternate重叠回放的受控用例采用生产`SessionEmulator.snapshot()`在Bun中生成模式完整的fallback字节，不冒充常规capture-pane路径的自然证据。常规capture-pane快照未保留alternate模式的独立缺口不在本PR修复范围，须另行真实观测与跟进；不能据此宣布完整TUI验收完成。
 
-## 6 非目标
+## 6 CI复现的resize竞争
+CI复现现有resize竞态：window resize已fit新尺寸，但延后的旧applied确认在150ms发送前覆盖xterm，最终发送旧尺寸。新增受控真实确认延后回归，原5秒收敛断言保持；防抖回调在可见且web拥有时重新fit并消费pending后再发送，隐藏/native不重抢尺寸。该修复与前台恢复共用resize发布路径。
+
+
+## 7 非目标
 不改语音、harness、外部infra、生产权限或浏览器安装配置。不把Chromium移动模拟当作物理手机/iOS验收。

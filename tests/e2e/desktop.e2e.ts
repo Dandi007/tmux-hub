@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { test, expect } from "./fixtures";
+import { defineResizeAcknowledgementTest } from "./desktop-resize";
 import { bindSecret } from "./helpers";
 import type { Page, Locator } from "@playwright/test";
 
@@ -265,6 +266,8 @@ test.describe("desktop tab-bar", () => {
     ctx.tmuxE2E(["kill-session", "-t", a]);
     ctx.tmuxE2E(["kill-session", "-t", b]);
   });
+
+  defineResizeAcknowledgementTest();
 
   test("+ button launches a new managed zsh session", async ({ page, ctx }) => {
     await openApp(page);

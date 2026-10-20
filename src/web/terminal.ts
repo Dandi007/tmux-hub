@@ -910,6 +910,12 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       resizeTimer = null;
+      // An older applied/peer viewport can arrive after the window's first
+      // fit. Publish the current layout, rather than that stale acknowledgement.
+      if (isTermVisible() && shouldSendResize(viewportState)) {
+        try { fit.fit(); } catch {}
+        applyPendingScrollDecision();
+      }
       sendResizeIfVisible();
     }, 150);
   };
