@@ -547,6 +547,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // 初始 false，scrollpos decision 执行完（含 action none）置 true；
   // enterReconnecting() 置 false。
   let reportingEnabled = false;
+  // This flag follows xterm's parse queue, rather than network callback time.
+  // Live bytes queued before disconnect still supersede old normal history.
+  let parsingReplay = true;
   // isTermVisible（INV-5/INV-6 共用的可见性判定）：
   // computed visibility 会从祖先继承（pool 的 .term-slot 用 visibility:hidden
   // 藏非激活 slot），比 checkVisibility() 可靠——后者默认不检查 visibility 属性
@@ -560,14 +563,23 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // 可见（desktop pool 非激活 slot），scrollToBottom/scrollLines 在 hidden
   // renderer 上不生效（xterm renderer 暂停态的 viewport 同步问题，v2 线上
   // 坐实：切到该 tab 看到的是 buffer 顶部历史）——挂起决策，等 pool activate
-  // 调 fit() 时消费。hidden 期间用户无法滚动该 slot，activate 时消费挂起
+  // 或整个浏览器回到前台时 fit 后消费。hidden 期间用户无法滚动，消费挂起
   // 决策不会覆盖用户意图；新决策到来（reconnect）直接覆盖旧 pending。
   let pendingDecision: RestoreDecision | null = null;
+  // Once replay parsing has finished, a live switch into an alternate screen
+  // supersedes a hidden normal-buffer target. Ignore replay/RIS transitions:
+  // those buffers are still intermediate and must preserve the saved target.
+  const bufferModeSub = term.buffer.onBufferChange((buffer) => {
+    if (!parsingReplay && buffer.type === "alternate") {
+      pendingDecision = null;
+      savedLocalLfb = 0;
+    }
+  });
   // A real navigation can happen after resync starts but before replay-done.
   // Keep that intent separately from the untrusted-buffer sampling gate.
   const scrollIntent = observeScrollIntent(term, el.querySelector<HTMLElement>(".xterm-viewport"),
-    () => !disposed && replayCount > 0 && isTermVisible() && pendingDecision === null,
-    (lines) => { savedLocalLfb = lines; });
+    () => !disposed && replayCount > 0 && isTermVisible() && (pendingDecision === null || !reportingEnabled),
+    (lines) => { savedLocalLfb = lines; pendingDecision = null; });
   // 执行落点决策（parse barrier 回调与 fit() 挂起消费两处共用）。
   const executeScrollDecision = (decision: RestoreDecision): void => {
     scrollIntent.programmatic(() => {
@@ -587,6 +599,17 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     // 下一轮上报不把恢复动作本身当成用户滚动。
     const buf = term.buffer.active;
     lastReportedLfb = Math.max(0, buf.baseY - buf.viewportY);
+  };
+  // Both a pool slot and an entire browser document can become visible.
+  // Consume only after fit, before a new resize can snapshot the replay's
+  // temporary viewport instead of the remembered history position.
+  const applyPendingScrollDecision = (): void => {
+    if (!reportingEnabled || !pendingDecision || !isTermVisible()) return;
+    const decision = pendingDecision;
+    pendingDecision = null;
+    try {
+      if (term.buffer.active.type === "normal") executeScrollDecision(decision);
+    } catch { /* disposed edge */ }
   };
   const reportScrollPos = (): void => {
     // NOTE: readOnly is intentionally NOT checked here. readOnly only means
@@ -695,10 +718,12 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                       // alt-screen 无 scrollback 语义：跳过决策并清 pending
                       //（挂起的旧决策对 alt-screen buffer 已无意义）。
                       pendingDecision = null;
+                      savedLocalLfb = 0;
                     }
                   } catch { /* disposed */ }
                   // INV-4: 决策执行完（含 action none / alt-screen 跳过）才放开
                   // 上报 gate。
+                  parsingReplay = false;
                   reportingEnabled = true;
                   replayCount++;
                 });
@@ -745,8 +770,8 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     // 不用 1s 轮询的滞后值 lastReportedLfb 做任何判断。alt-screen（claude
     // code / vim）无 scrollback 语义，取 0。
     //
-    // Invariant：reportingEnabled 同时承担 "buffer 可信" 的语义——只有上一次
-    // scrollpos 恢复决策执行完后它才为 true。replay 中间态（RIS 已清空
+    // Invariant：reportingEnabled 表示上次 replay parse/decision barrier 完成；
+    // pendingDecision 非空时仍须等可见后恢复，不能采样。replay 中间态（RIS 已清空
     // buffer、恢复决策尚未执行、reportingEnabled 仍为 false）发生二次断线时，
     // buffer 是重建中间态，采样是 0/垃圾值——此时保留上一次快照，不覆盖
     // savedLocalLfb（snapshotLocalLfb，弱网移动端高频场景）。
@@ -754,7 +779,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       const buf = term.buffer.active;
       const currentLfb = buf.type === "normal" ? Math.max(0, buf.baseY - buf.viewportY) : 0;
       savedLocalLfb = snapshotLocalLfb({
-        bufferTrusted: reportingEnabled,
+        // A completed hidden replay is still un-restored while its decision
+        // is pending. A second background reconnect must retain that target.
+        bufferTrusted: reportingEnabled && pendingDecision === null,
         currentLfb,
         previousSaved: savedLocalLfb,
       });
@@ -762,6 +789,14 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     // INV-4: reconnect replay 期间 RIS 会把 baseY/viewportY 归零，任何采样都是
     // 噪声——关闭上报，直到下一次 scrollpos 决策执行完再打开。
     reportingEnabled = false;
+    // Already queued live output must be parsed as live before later replay
+    // bytes. A network disconnect can precede its asynchronous parsing.
+    try { term.write("", () => {
+      parsingReplay = true;
+      // An older replay-done callback ahead of us may have reopened this
+      // gate. Close it again before any bytes of the new replay are parsed.
+      reportingEnabled = false;
+    }); } catch { /* disposed */ }
   };
 
   const enterReconnecting = (): void => {
@@ -881,6 +916,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
 
   const onResize = () => {
     try { fit.fit(); } catch {}
+    applyPendingScrollDecision();
     publishResize();
   };
   window.addEventListener("resize", onResize);
@@ -997,19 +1033,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       // now, not debounced: a quick switch away would hide the slot before a
       // debounced send fires, and the catch-up would be lost.
       sendResizeIfVisible();
-      // 消费挂起的落点决策（INV-5 hidden-slot 补丁）：pool activate 把 slot
-      // 置为可见后会调 fit()——此时 renderer 恢复，scrollToBottom/scrollLines
-      // 才可靠。hidden 期间用户无法滚动该 slot，这里消费不会覆盖用户意图。
-      // 在 fit 完成后执行，保证决策基于 resize 后的最终 viewport 几何。
-      if (pendingDecision && isTermVisible()) {
-        const decision = pendingDecision;
-        pendingDecision = null;
-        try {
-          if (term.buffer.active.type === "normal") {
-            executeScrollDecision(decision);
-          }
-        } catch { /* disposed 边缘 */ }
-      }
+      applyPendingScrollDecision();
       publishResize();
     },
     notifySessionActivity: (attached: number, cols: number, rows: number) => {
@@ -1044,6 +1068,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       try { selectionDisposable.dispose(); } catch {}
       try { detachMomentum?.(); } catch {}
       scrollIntent.dispose();
+      bufferModeSub.dispose();
       ws.onmessage = null;
       ws.onclose = null;
       ws.onerror = null;
