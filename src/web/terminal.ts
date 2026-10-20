@@ -503,7 +503,10 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       ws.send(JSON.stringify(msg));
       return;
     }
-    if (currentState === "dead") return;
+    // Resize describes the current layout, not an input event to replay.
+    // Open/reconnect publishes the latest visible geometry; replaying an old
+    // fit here can resize away and back and trigger an unnecessary resync.
+    if (currentState === "dead" || msg.kind === "resize") return;
     const json = JSON.stringify(msg);
     const byteLen = json.length;
     while (sendQueueBytes + byteLen > SEND_QUEUE_MAX_BYTES && sendQueue.length > 0) {
@@ -929,6 +932,8 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   if (probe) (window.__tmuxHubTerms ??= {})[opts.sessionName] = probe;
 
   ws.addEventListener("open", () => {
+    if (disposed) return;
+    flushSendQueue();
     startHeartbeat();
     setTimeout(() => {
       if (ws.readyState === WebSocket.OPEN && isTermVisible()) {

@@ -24,6 +24,42 @@ async function openAndFocus(page: Page, name: string): Promise<void> {
 }
 
 test.describe("key conformance (desktop xterm.onData path)", () => {
+  test("typing before the first connection opens reaches the pane once without needing a reconnect", async ({ page, ctx }) => {
+    const name = await ctx.createSession("kb-cc");
+    await page.goto("/");
+    await bindSecret(page);
+    await page.evaluate((n) => localStorage.setItem("tmux-hub.last-session", n), name);
+    await page.goto("about:blank");
+    let release!: () => void, reached!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    const waiting = new Promise<void>((r) => { reached = r; });
+    let first = true;
+    await page.routeWebSocket((u) => u.pathname === `/ws/sessions/${name}`, async (route) => {
+      if (first) { first = false; reached(); await held; }
+      route.connectToServer();
+    });
+    try {
+      await page.goto("/?debug=term");
+      await expect(tab(page, name)).toBeVisible({ timeout: 10000 });
+      await tab(page, name).click();
+      await waiting;
+      await page.locator(`.term-slot[data-session="${name}"] .xterm-helper-textarea`).focus();
+      await page.keyboard.type("printf 'EARLY_ONCE_%s\\n' 26");
+      await page.keyboard.press("Enter");
+      const output = () => ctx.tmuxE2E(["capture-pane", "-p", "-t", name]);
+      expect(output()).not.toContain("EARLY_ONCE_26");
+      release();
+      await expect.poll(output, { timeout: 8000 }).toContain("EARLY_ONCE_26");
+      await expect.poll(() => (output().match(/^EARLY_ONCE_26$/gm) ?? []).length).toBe(1);
+      const replay = await page.evaluate((n) => {
+        const p = window.__tmuxHubTerms![n]!; const before = p.replays; p.dropSocket(); return before;
+      }, name);
+      await expect.poll(() => page.evaluate((n) => window.__tmuxHubTerms![n]!.replays, name)).toBeGreaterThan(replay);
+      await page.waitForTimeout(500);
+      expect((output().match(/^EARLY_ONCE_26$/gm) ?? []).length).toBe(1);
+    } finally { release(); }
+  });
+
   test("plain text + Enter flows to the pane", async ({ page, ctx }) => {
     const name = await ctx.createSession("kb-cc"); // plain sh — deterministic echo, no zsh ghost
     await openAndFocus(page, name);
