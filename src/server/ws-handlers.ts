@@ -178,13 +178,18 @@ export function createWsHandlers(deps: WsDeps) {
       paneCols = ws.data.viewport?.cols ?? paneCols;
       paneRows = ws.data.viewport?.rows ?? paneRows;
 
+      let alternateSnapshot = false;
+      const onSnapshot = (alternate: boolean, normalExitPending: boolean): void => {
+        alternateSnapshot = alternate;
+        if (alternate && normalExitPending) ws.data.resync?.repairNow();
+      };
       const unsubEvents = b.onEvent((ev) => {
-        if (ev.kind === "normal_screen") {
+        if (ev.kind === "normal_screen" && alternateSnapshot) {
           // tmux resizes its saved normal grid only on alternate exit. A
           // snapshot taken while alternate was active still holds the old
           // grid; capture the authoritative result through the ordered repair
-          // chain, once the application's exit/redraw bytes become quiet.
-          ws.data.resync?.repairWhenQuiet(() => b.outputQuietFor(100));
+          // chain. Capture is bounded even if the application stays busy.
+          ws.data.resync?.repairNow();
         }
         if (ev.kind === "replay_truncated") {
           sse.emit({ event: "replay_truncated", payload: { name: sessionName } });
@@ -209,12 +214,12 @@ export function createWsHandlers(deps: WsDeps) {
       const onOverlap = (): void => {
         ws.data.resync?.repairWhenQuiet(() => b.outputQuietFor(100));
       };
-      const attached = b.attachWithReplay(sendData, paneCols, paneRows, onOverlap);
+      const attached = b.attachWithReplay(sendData, paneCols, paneRows, onOverlap, onSnapshot);
       if (ws.data.resyncCapable && !ws.data.closed) {
         // Same replay-done contract as the attach: the client snapshots its
         // scroll position on `resync` and restores it on the trailing scrollpos.
         ws.data.resync = new ResyncScheduler(paneCols, paneRows, attached, async (c, r) => {
-          await b.resync(sendData, c, r, () => { try { ws.send(JSON.stringify({ kind: "resync" })); } catch {} }, onOverlap);
+          await b.resync(sendData, c, r, () => { try { ws.send(JSON.stringify({ kind: "resync" })); } catch {} }, onOverlap, onSnapshot);
           // resync re-subscribes; a close that raced it already ran the unsubs.
           if (ws.data.closed) { unsubData?.(); return; }
           sendReplayDone();

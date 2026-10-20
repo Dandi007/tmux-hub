@@ -85,3 +85,23 @@ test("normal-screen exit observer follows parsed CSI requests, not text", () => 
   e.write("\x1b[?1047l\x1b[?47l"); expect(exits).toBe(3);
   e.dispose();
 });
+
+
+test("capture restore preserves application input modes after RIS", async () => {
+  const e = new SessionEmulator(60, 10, 100);
+  const t = new Terminal({ cols: 60, rows: 10, allowProposedApi: true });
+  try {
+    e.write("\x1b[?1;2004;1000;1006h\x1b=");
+    await new Promise<void>(r => t.write("\x1bc" + e.serializeModes(), r));
+    expect(t.modes.applicationCursorKeysMode).toBe(true);
+    expect(t.modes.applicationKeypadMode).toBe(true);
+    expect(t.modes.bracketedPasteMode).toBe(true);
+    expect(t.modes.mouseTrackingMode).toBe("vt200");
+    e.write("\x1b[?1;2004;1000;1006l\x1b>");
+    await new Promise<void>(r => t.write("\x1bc" + e.serializeModes(), r));
+    expect(t.modes.applicationCursorKeysMode).toBe(false);
+    expect(t.modes.applicationKeypadMode).toBe(false);
+    expect(t.modes.bracketedPasteMode).toBe(false);
+    expect(t.modes.mouseTrackingMode).toBe("none");
+  } finally { e.dispose(); t.dispose(); }
+});

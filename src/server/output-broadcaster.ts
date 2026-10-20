@@ -92,6 +92,7 @@ export type TmuxRunner = (args: string[]) => Promise<{ stdout: string; stderr: s
 
 export class SessionBroadcaster {
   private broadcastBytes = 0;
+  private normalScreenVersion = 0;
   private lastOutputAt = 0;
   readonly logPath: string;
   private fd: number | null = null;
@@ -209,6 +210,7 @@ export class SessionBroadcaster {
     }
     // Register after priming: only newly read application bytes request repair.
     e.onNormalScreen(() => {
+      this.normalScreenVersion++;
       for (const listener of this.eventListeners) listener({ kind: "normal_screen" });
     });
     this.emulator = e;
@@ -245,7 +247,8 @@ export class SessionBroadcaster {
   // homes it; live output with relative moves would land on the wrong row).
   // Geometry is read first, inside attachWithReplay's alignment window, so all
   // of it describes the same instant.
-  private async captureSnapshot(cols: number, rows: number): Promise<string> {
+  private async captureSnapshot(cols: number, rows: number): Promise<{ data: string; alternate: boolean; normalScreenVersion: number }> {
+    const normalScreenVersion = this.normalScreenVersion;
     const emu = this.ensureEmulator(cols, rows); // keep shadow primed + live-fed for modes
     const target = `${this.session}:0.0`;
     try {
@@ -271,7 +274,7 @@ export class SessionBroadcaster {
         }
         out += toCrlf(vis.stdout) + emu.serializeModes();
         if (geo) out += `\x1b[${geo.cursorY + 1};${geo.cursorX + 1}H`;
-        return out;
+        return { data: out, alternate: geo?.alternate ?? false, normalScreenVersion };
       }
       logger.warn(
         { session: this.session, code: vis.code, stderr: vis.stderr },
@@ -280,7 +283,7 @@ export class SessionBroadcaster {
     } catch (e) {
       logger.warn({ session: this.session, err: e }, "capture-pane threw; falling back to emulator snapshot");
     }
-    return emu.snapshot();
+    return { data: emu.snapshot(), alternate: emu.alternateScreen, normalScreenVersion };
   }
 
   private async paneGeometry(): Promise<{
@@ -310,7 +313,7 @@ export class SessionBroadcaster {
   // `paneCols`/`paneRows` are the authoritative pane size the caller just pinned
   // the tmux window to (or the native owner's size). The emulator is built/kept
   // at that size; invalid/omitted values fall back to the WINDOW_* defaults.
-  async attachWithReplay(send: Subscriber, paneCols?: number, paneRows?: number, onOverlap?: () => void): Promise<() => void> {
+  async attachWithReplay(send: Subscriber, paneCols?: number, paneRows?: number, onOverlap?: () => void, onSnapshot?: (alternate: boolean, normalExitPending: boolean) => void): Promise<() => void> {
     if (this.fd === null) {
       // Broadcaster hasn't started — fall back to plain attach.
       this.subscribers.add(send);
@@ -337,7 +340,7 @@ export class SessionBroadcaster {
         // plus its trailing bytes (the overlap is then tolerated, not dropped).
         const cols = normalizeDim(paneCols, WINDOW_COLS);
         const rows = normalizeDim(paneRows, WINDOW_ROWS);
-        let snap = "";
+        let snap = { data: "", alternate: false, normalScreenVersion: this.normalScreenVersion };
         for (let attempt = 1; attempt <= ALIGN_MAX_CAPTURES; attempt++) {
           this.poll();
           pending = [];
@@ -354,7 +357,11 @@ export class SessionBroadcaster {
           }
         }
         snapshotStats.snapshots++;
-        send(enc.encode(snap));
+        // Exit bytes can already have been parsed into the tap during the
+        // last tolerated overlap, before this connection learns the snapshot
+        // mode. Tell the consumer so that exit still schedules bounded repair.
+        onSnapshot?.(snap.alternate, snap.normalScreenVersion !== this.normalScreenVersion);
+        send(enc.encode(snap.data));
       } else {
         const upTo = this.offset;
         const start = Math.max(0, upTo - REPLAY_CAP_BYTES);
@@ -389,11 +396,11 @@ export class SessionBroadcaster {
   // tell the client a reset is coming. A subscriber that detached meanwhile is
   // left alone. The legacy byte-replay path has no reflowed snapshot to offer,
   // and replaying the width-frozen log would be worse than the drift: no-op.
-  async resync(send: Subscriber, paneCols: number, paneRows: number, announce: () => void, onOverlap?: () => void): Promise<void> {
+  async resync(send: Subscriber, paneCols: number, paneRows: number, announce: () => void, onOverlap?: () => void, onSnapshot?: (alternate: boolean, normalExitPending: boolean) => void): Promise<void> {
     if (!this.emulatorEnabled || !this.subscribers.has(send)) return;
     this.subscribers.delete(send);
     announce();
-    await this.attachWithReplay(send, paneCols, paneRows, onOverlap);
+    await this.attachWithReplay(send, paneCols, paneRows, onOverlap, onSnapshot);
   }
 
   // Re-size the live emulator to track a pane resize (client viewport change).

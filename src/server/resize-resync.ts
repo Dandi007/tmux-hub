@@ -20,6 +20,7 @@ export class ResyncScheduler {
   private repairTimer: ReturnType<typeof setTimeout> | null = null;
   private quiet: (() => boolean) | null = null;
   private dirty = false;
+  private urgentRepair = false;
   private disposed = false;
 
   constructor(
@@ -52,13 +53,21 @@ export class ResyncScheduler {
     this.scheduleRepair();
   }
 
+  // A known invalid saved grid needs a bounded capture even if output stays
+  // busy. Use the same chain and coalesce with resize/overlap repair.
+  repairNow(): void {
+    if (this.disposed) return;
+    this.urgentRepair = true;
+    this.scheduleRepair();
+  }
+
   private scheduleRepair(): void {
     if (this.repairTimer) return;
     this.repairTimer = setTimeout(() => {
       this.repairTimer = null;
       this.chain = this.chain.then(async () => {
-        if (this.disposed || !this.quiet) return;
-        if (!this.quiet()) { this.scheduleRepair(); return; }
+        if (this.disposed || (!this.quiet && !this.urgentRepair)) return;
+        if (!this.urgentRepair && this.quiet && !this.quiet()) { this.scheduleRepair(); return; }
         await this.fire(true);
       });
     }, REPAIR_QUIET_MS);
@@ -67,6 +76,7 @@ export class ResyncScheduler {
   private async fire(repair = false): Promise<void> {
     if (this.disposed || (!this.dirty && !repair)) return;
     this.dirty = false;
+    this.urgentRepair = false;
     // A resize snapshot satisfies the pending repair too. If it overlaps,
     // its callback will request a new quiet window during the await below.
     this.quiet = null;
@@ -82,6 +92,7 @@ export class ResyncScheduler {
 
   dispose(): void {
     this.disposed = true;
+    this.urgentRepair = false;
     this.quiet = null;
     if (this.repairTimer) { clearTimeout(this.repairTimer); this.repairTimer = null; }
     if (this.timer) { clearTimeout(this.timer); this.timer = null; }

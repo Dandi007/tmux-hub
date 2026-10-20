@@ -68,8 +68,17 @@ export class SessionEmulator {
    */
   serializeModes(): string {
     if (this.disposed) return "";
-    return this.shadow.serializeModes();
+    const modes = this.term.modes;
+    let out = this.shadow.serializeModes();
+    if (modes.applicationCursorKeysMode) out += "\x1b[?1h";
+    if (modes.applicationKeypadMode) out += "\x1b=";
+    if (modes.bracketedPasteMode) out += "\x1b[?2004h";
+    const mouse: Record<string, number> = { x10: 9, vt200: 1000, drag: 1002, any: 1003 };
+    if (mouse[modes.mouseTrackingMode]) out += `\x1b[?${mouse[modes.mouseTrackingMode]}h`;
+    return out;
   }
+
+  get alternateScreen(): boolean { return !this.disposed && this.term.buffer.active.type === "alternate"; }
 
   /** Observe live requests to leave alt, including when priming missed entry. */
   onNormalScreen(listener: () => void): void {

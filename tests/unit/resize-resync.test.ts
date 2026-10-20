@@ -155,3 +155,19 @@ test("overlap repair stays behind an in-flight resize snapshot", async () => {
   expect(maxActive).toBe(1);
   s.dispose();
 });
+
+
+test("urgent normal-screen repair cannot be postponed by continuously busy overlap", async () => {
+  let calls = 0, ready!: () => void;
+  const s = new ResyncScheduler(80, 24, new Promise<void>(r => { ready = r; }), async () => { calls++; });
+  s.repairNow(); s.repairWhenQuiet(() => false);
+  await tick(130); expect(calls).toBe(0);
+  ready(); await tick(160); expect(calls).toBe(1);
+  s.dispose();
+});
+
+test("dispose cancels an urgent repair", async () => {
+  let calls = 0;
+  const s = new ResyncScheduler(80, 24, Promise.resolve(), async () => { calls++; });
+  s.repairNow(); s.dispose(); await tick(160); expect(calls).toBe(0);
+});
