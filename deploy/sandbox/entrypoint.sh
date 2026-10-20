@@ -20,11 +20,13 @@ as_agent() {
 }
 
 # hub 只拿 TMUX_HUB_* / GATE_*（含 GATE_INJECT_KEY），不拿 Claude token。
+# DEV_BIND_SECRET 一律丢弃：开着它，未鉴权的 /system/auth-check 会把 hub secret 交给 pane 里的 agent（#150）。
 hub_env=(HOME=/var/lib/hub USER=hub PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8
          TMUX_HUB_SOCKET_PATH="$SOCK")
 for v in $(compgen -e); do
-  case $v in TMUX_HUB_SOCKET|TMUX_HUB_SOCKET_PATH) ;; TMUX_HUB_*|GATE_*) hub_env+=("$v=${!v}") ;; esac
+  case $v in TMUX_HUB_SOCKET|TMUX_HUB_SOCKET_PATH|TMUX_HUB_DEV_BIND_SECRET) ;; TMUX_HUB_*|GATE_*) hub_env+=("$v=${!v}") ;; esac
 done
+if [ -n "${TMUX_HUB_DEV_BIND_SECRET:-}" ]; then echo "warning: ignoring TMUX_HUB_DEV_BIND_SECRET in hub-sandbox" >&2; fi
 
 # -N：server 不在时不要顺手拉起一个（show 会自启 server 并立刻退出、返回成功）。
 tmux_alive() { as_agent tmux -N -S "$SOCK" show -g exit-empty >/dev/null 2>&1; }
