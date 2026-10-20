@@ -85,3 +85,73 @@ test("a resize away and back within one window still resyncs", async () => {
   await tick(60);
   expect(calls).toEqual(["200x50"]);
 });
+
+test("overlap repair waits for quiet and initial attach, then uses current dimensions", async () => {
+  const calls: string[] = [];
+  let quiet = false;
+  let ready!: () => void;
+  const s = new ResyncScheduler(200, 50, new Promise<void>(r => { ready = r; }), async (c, r) => {
+    calls.push(`${c}x${r}`);
+  }, 10);
+  s.repairWhenQuiet(() => quiet);
+  await tick(130);
+  expect(calls).toEqual([]);
+  quiet = true;
+  await tick(130);
+  expect(calls).toEqual([]);
+  s.resized(120, 40);
+  ready();
+  await tick(160);
+  expect(calls).toEqual(["120x40"]);
+  s.dispose();
+});
+
+test("busy output defers repair captures; another overlap rearms recovery", async () => {
+  let quiet = false;
+  let calls = 0;
+  const s = new ResyncScheduler(80, 24, Promise.resolve(), async () => {
+    calls++;
+    if (calls === 1) s.repairWhenQuiet(() => quiet);
+  }, 10);
+  s.repairWhenQuiet(() => quiet);
+  await tick(230);
+  expect(calls).toBe(0);
+  quiet = true;
+  await tick(250);
+  expect(calls).toBe(2);
+  s.dispose();
+});
+
+test("dispose cancels queued overlap recovery before initial attach finishes", async () => {
+  let ready!: () => void;
+  let calls = 0;
+  const s = new ResyncScheduler(80, 24, new Promise<void>(r => { ready = r; }), async () => { calls++; }, 10);
+  s.repairWhenQuiet(() => true);
+  await tick(130);
+  s.dispose();
+  ready();
+  await tick(150);
+  expect(calls).toBe(0);
+});
+
+test("overlap repair stays behind an in-flight resize snapshot", async () => {
+  let release!: () => void;
+  let active = 0, maxActive = 0, calls = 0;
+  const s = new ResyncScheduler(80, 24, Promise.resolve(), async () => {
+    active++;
+    maxActive = Math.max(maxActive, active);
+    calls++;
+    if (calls === 1) await new Promise<void>(r => { release = r; });
+    active--;
+  }, 10);
+  s.resized(100, 30);
+  await tick(40);
+  s.repairWhenQuiet(() => true);
+  await tick(130);
+  expect(calls).toBe(1);
+  release();
+  await tick(130);
+  expect(calls).toBe(2);
+  expect(maxActive).toBe(1);
+  s.dispose();
+});

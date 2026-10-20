@@ -169,12 +169,15 @@ export function createWsHandlers(deps: WsDeps) {
       };
       const sendData = (chunk: Uint8Array): void => { try { ws.send(chunk); } catch {} };
       let unsubData: (() => void) | null = null;
-      const attached = b.attachWithReplay(sendData, paneCols, paneRows);
+      const onOverlap = (): void => {
+        ws.data.resync?.repairWhenQuiet(() => b.outputQuietFor(100));
+      };
+      const attached = b.attachWithReplay(sendData, paneCols, paneRows, onOverlap);
       if (ws.data.resyncCapable && !ws.data.closed) {
         // Same replay-done contract as the attach: the client snapshots its
         // scroll position on `resync` and restores it on the trailing scrollpos.
         ws.data.resync = new ResyncScheduler(paneCols, paneRows, attached, async (c, r) => {
-          await b.resync(sendData, c, r, () => { try { ws.send(JSON.stringify({ kind: "resync" })); } catch {} });
+          await b.resync(sendData, c, r, () => { try { ws.send(JSON.stringify({ kind: "resync" })); } catch {} }, onOverlap);
           // resync re-subscribes; a close that raced it already ran the unsubs.
           if (ws.data.closed) { unsubData?.(); return; }
           sendReplayDone();
