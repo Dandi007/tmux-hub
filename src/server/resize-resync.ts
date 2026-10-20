@@ -12,10 +12,13 @@ import { createLogger } from "./logger";
 const logger = createLogger("resize-resync");
 
 export const RESYNC_DEBOUNCE_MS = 200;
+const REPAIR_QUIET_MS = 100;
 
 export class ResyncScheduler {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private chain: Promise<void>;
+  private repairTimer: ReturnType<typeof setTimeout> | null = null;
+  private quiet: (() => boolean) | null = null;
   private dirty = false;
   private disposed = false;
 
@@ -41,9 +44,33 @@ export class ResyncScheduler {
     }, this.delayMs);
   }
 
-  private async fire(): Promise<void> {
-    if (this.disposed || !this.dirty) return;
+  // Share the resize chain so repair never races initial attach or another
+  // snapshot. A pending request costs a quiet check, not a capture, while busy.
+  repairWhenQuiet(isQuiet: () => boolean): void {
+    if (this.disposed) return;
+    this.quiet = isQuiet;
+    this.scheduleRepair();
+  }
+
+  private scheduleRepair(): void {
+    if (this.repairTimer) return;
+    this.repairTimer = setTimeout(() => {
+      this.repairTimer = null;
+      this.chain = this.chain.then(async () => {
+        if (this.disposed || !this.quiet) return;
+        if (!this.quiet()) { this.scheduleRepair(); return; }
+        await this.fire(true);
+      });
+    }, REPAIR_QUIET_MS);
+  }
+
+  private async fire(repair = false): Promise<void> {
+    if (this.disposed || (!this.dirty && !repair)) return;
     this.dirty = false;
+    // A resize snapshot satisfies the pending repair too. If it overlaps,
+    // its callback will request a new quiet window during the await below.
+    this.quiet = null;
+    if (this.repairTimer) { clearTimeout(this.repairTimer); this.repairTimer = null; }
     const cols = this.paneCols;
     const rows = this.paneRows;
     try {
@@ -55,6 +82,8 @@ export class ResyncScheduler {
 
   dispose(): void {
     this.disposed = true;
+    this.quiet = null;
+    if (this.repairTimer) { clearTimeout(this.repairTimer); this.repairTimer = null; }
     if (this.timer) { clearTimeout(this.timer); this.timer = null; }
   }
 }

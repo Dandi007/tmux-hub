@@ -1,6 +1,13 @@
-import { describe, test, expect } from "bun:test";
-import { homedir } from "node:os";
+import { describe, test, expect, afterAll } from "bun:test";
+import { homedir, tmpdir } from "node:os";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+
+// Config imports the logger too. Scrubbing hub config must not send these
+// subprocesses back to the user's default log directory (or a read-only HOME).
+const logDir = mkdtempSync(join(tmpdir(), "image-dir-config-"));
+afterAll(() => rmSync(logDir, { recursive: true, force: true }));
 
 function readConsts(env: Record<string, string | undefined> = {}): { IMAGE_DIR: string; MAX_IMAGE_BYTES: number } {
   const script = `
@@ -15,6 +22,7 @@ function readConsts(env: Record<string, string | undefined> = {}): { IMAGE_DIR: 
   for (const [k, v] of Object.entries(env)) {
     if (v !== undefined) cleanEnv[k] = v;
   }
+  cleanEnv.TMUX_HUB_LOG_DIR = logDir;
   const res = spawnSync("bun", ["-e", script], { env: cleanEnv });
   if (res.status !== 0) throw new Error(`bun -e failed: ${res.stderr.toString()}`);
   return JSON.parse(res.stdout.toString());

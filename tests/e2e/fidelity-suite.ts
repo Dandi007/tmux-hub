@@ -8,7 +8,7 @@
 // 尾部字节重放不含 attach 前已滚出的屏幕状态，首次 attach 只剩 prompt（2026-10-17
 // 实测）。它只为秒级回滚而保留，所以不对它跑 oracle。suite 写成函数，以便以后
 // 给别的 project 复用。
-import { writeFileSync } from "node:fs";
+import { writeFileSync, rmSync } from "node:fs";
 import type { Page, TestType, Expect, PlaywrightTestArgs, PlaywrightWorkerArgs } from "@playwright/test";
 import type { TerminalProbe } from "../../src/web/terminal";
 import { bindSecret } from "./helpers";
@@ -127,6 +127,49 @@ export function defineFidelitySuite(test: TestType<PlaywrightTestArgs & { ctx: C
       await page.reload();
       await page.evaluate((n) => window.__tmuxHub?.openSession?.(n), name);
       await expectInSync(page, ctx, name, "after reload");
+    });
+
+    test("a busy reconnect converges after output stops and preserves scroll without reconnecting again", async ({ page, ctx }) => {
+      const name = await ctx.createSession();
+      await runAndWait(ctx, name, `clear; sh ${writeGenerator("busyhist", 200)}`, "busyhist 200");
+      await openSession(page, name);
+      await expectInSync(page, ctx, name, "before busy reconnect");
+      await page.waitForTimeout(1200); // let initial layout resync finish
+      const tag = `/tmp/e2e-busy-${process.pid}-${Date.now()}`;
+      const script = tag + ".sh", stop = tag + ".stop";
+      writeFileSync(script, `printf '\\033[2J\\033[HHEADER\\nfirst\\nsecond\\nthird\\n'
+` +
+        `i=0; while [ ! -f '${stop}' ]; do i=$((i+1)); printf '\\033[3A'; sleep 0.008; ` +
+        `for row in 0 1 2; do printf '\\r\\033[Kframe %04d row %d\\n' "$i" "$row"; sleep 0.008; done; done
+` +
+        `while :; do sleep 10; done
+`);
+      const overlapCount = async () => {
+        const text = await (await page.request.get("/metrics")).text();
+        return Number(/^tmux_hub_snapshot_overlaps_total (\d+)$/m.exec(text)?.[1] ?? -1);
+      };
+      try {
+        const overlaps = await overlapCount();
+        ctx.tmuxE2E(["send-keys", "-t", name, `sh ${script}`, "Enter"]);
+        await expect.poll(() => ctx.tmuxE2E(["capture-pane", "-p", "-t", name])).toContain("frame ");
+        await page.evaluate((n) => window.__tmuxHubTerms![n]!.scrollLines(-30), name);
+        const before = await page.evaluate((n) => {
+          const p = window.__tmuxHubTerms![n]!;
+          return { replays: p.replays, resyncs: p.resyncs, scroll: p.linesFromBottom };
+        }, name);
+        expect(before.scroll).toBe(30);
+        await page.evaluate((n) => window.__tmuxHubTerms![n]!.dropSocket(), name);
+        await expect.poll(overlapCount, { timeout: 10000 }).toBeGreaterThan(overlaps);
+        writeFileSync(stop, "stop");
+        await expectInSync(page, ctx, name, "automatic recovery after busy reconnect");
+        await expect.poll(() => page.evaluate((n) => window.__tmuxHubTerms![n]!.resyncs, name)).toBeGreaterThan(before.resyncs);
+        await expect.poll(() => page.evaluate((n) => window.__tmuxHubTerms![n]!.linesFromBottom, name)).toBe(30);
+      } finally {
+        writeFileSync(stop, "stop");
+        ctx.tmuxE2E(["send-keys", "-t", name, "C-c"]);
+        rmSync(script, { force: true });
+        rmSync(stop, { force: true });
+      }
     });
 
     // Regression（2026-10-19 dogfood）：会话被杀掉、紧接着用同名重建（rsi driver

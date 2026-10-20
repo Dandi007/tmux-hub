@@ -91,6 +91,7 @@ export type TmuxRunner = (args: string[]) => Promise<{ stdout: string; stderr: s
 
 export class SessionBroadcaster {
   private broadcastBytes = 0;
+  private lastOutputAt = 0;
   readonly logPath: string;
   private fd: number | null = null;
   private offset = 0;
@@ -289,7 +290,7 @@ export class SessionBroadcaster {
   // `paneCols`/`paneRows` are the authoritative pane size the caller just pinned
   // the tmux window to (or the native owner's size). The emulator is built/kept
   // at that size; invalid/omitted values fall back to the WINDOW_* defaults.
-  async attachWithReplay(send: Subscriber, paneCols?: number, paneRows?: number): Promise<() => void> {
+  async attachWithReplay(send: Subscriber, paneCols?: number, paneRows?: number, onOverlap?: () => void): Promise<() => void> {
     if (this.fd === null) {
       // Broadcaster hasn't started — fall back to plain attach.
       this.subscribers.add(send);
@@ -326,6 +327,7 @@ export class SessionBroadcaster {
           if (pending.length === 0) break;
           if (attempt === ALIGN_MAX_CAPTURES) {
             snapshotStats.overlaps++;
+            onOverlap?.();
             logger.debug({ session: this.session, attempts: attempt }, "attach snapshot never quiet; delivering overlap");
           } else {
             snapshotStats.retries++;
@@ -367,11 +369,11 @@ export class SessionBroadcaster {
   // tell the client a reset is coming. A subscriber that detached meanwhile is
   // left alone. The legacy byte-replay path has no reflowed snapshot to offer,
   // and replaying the width-frozen log would be worse than the drift: no-op.
-  async resync(send: Subscriber, paneCols: number, paneRows: number, announce: () => void): Promise<void> {
+  async resync(send: Subscriber, paneCols: number, paneRows: number, announce: () => void, onOverlap?: () => void): Promise<void> {
     if (!this.emulatorEnabled || !this.subscribers.has(send)) return;
     this.subscribers.delete(send);
     announce();
-    await this.attachWithReplay(send, paneCols, paneRows);
+    await this.attachWithReplay(send, paneCols, paneRows, onOverlap);
   }
 
   // Re-size the live emulator to track a pane resize (client viewport change).
@@ -391,6 +393,10 @@ export class SessionBroadcaster {
   subscriberCount(): number { return this.subscribers.size; }
 
   bytesBroadcast(): number { return this.broadcastBytes; }
+
+  // A quiet window lets a connection repair an overlapped busy snapshot
+  // without repeatedly capturing a pane that is still producing output.
+  outputQuietFor(ms: number): boolean { return Date.now() - this.lastOutputAt >= ms; }
 
   async stop(opts: { deleteLog?: boolean } = {}): Promise<void> {
     if (this.stopped) return;
@@ -414,6 +420,7 @@ export class SessionBroadcaster {
 
   private emit(chunk: Uint8Array): void {
     if (chunk.length === 0) return;
+    this.lastOutputAt = Date.now();
     this.broadcastBytes += chunk.length;
     if (this.emulator) this.emulator.write(chunk);
     for (const sub of this.subscribers) {

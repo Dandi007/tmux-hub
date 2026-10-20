@@ -66,6 +66,7 @@ function hubCommand(opts: {
     `TMUX_HUB_SECRET_PATH=${opts.secretPath} ` +
     `TMUX_HUB_LOG_DIR=${opts.logDir} ` +
     `TMUX_HUB_DB_PATH=${opts.dbPath} ` +
+    `TMUX_HUB_IMAGE_DIR=${opts.tmpdir}/images ` +
     `TMUX_HUB_PORT=${opts.port} ` +
     (opts.emulator ? `TMUX_HUB_EMULATOR=1 ` : ``) +
     `bun run start`
