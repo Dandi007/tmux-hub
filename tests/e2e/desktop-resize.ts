@@ -8,19 +8,22 @@ async function openApp(page: Page): Promise<void> {
 }
 
 export function defineResizeAcknowledgementTest(): void {
-  for (const source of ["applied", "peer"] as const) test(`resize fits the current window after an older ${source} acknowledgement arrives`, async ({ page, ctx }) => {
+  for (const source of ["applied", "peer", "pool"] as const) test(`resize fits the current window after an older ${source} acknowledgement arrives`, async ({ page, ctx }) => {
     const name = await ctx.createSession();
     const size = () => ctx.tmuxE2E(["display", "-p", "-t", name, "#{window_width}x#{window_height}"]).trim();
     await page.addInitScript(({ name, source }) => {
       const Native = window.WebSocket;
-      const gate = (window as any).__resizeGate = { armed: false, held: null, release: false, delivered: false, cols: 0, initialCols: 0, ack: "", target: "" };
+      const gate = (window as any).__resizeGate = { armed: false, held: null, release: false, delivered: false, cols: 0, initialCols: 0, ack: "", target: "", late: [], flush: false };
       window.WebSocket = class extends Native {
         set onmessage(handler) {
           super.onmessage = handler ? function (event) {
             let msg: any;
             if (typeof event.data === "string") { try { msg = JSON.parse(event.data); } catch {} }
             if (this.url.includes(`/ws/sessions/${encodeURIComponent(name)}?`) && msg?.kind === "viewport") {
-              const hold = gate.armed && !gate.held && (source === "applied"
+              if (source === "pool" && gate.delivered && !gate.flush && msg.applied) {
+                gate.late.push(() => { gate.ack = `${msg.cols}x${msg.rows}`; handler.call(this, event); }); return;
+              }
+              const hold = gate.armed && !gate.held && (source !== "peer"
                 ? msg.applied && msg.cols < gate.initialCols : msg.peer);
               if (hold) {
                 gate.cols = msg.cols; gate.held = () => handler.call(this, event); return;
@@ -65,6 +68,12 @@ export function defineResizeAcknowledgementTest(): void {
       // B's older initial pin and 100/150ms compensation must be complete
       // before A's newer window operation; only its real peer notice is held.
       await peer.waitForTimeout(350);
+    } else if (source === "pool") {
+      const other = await ctx.createSession();
+      await expect(tab(page, other)).toBeVisible({ timeout: 10_000 });
+      await tab(page, other).click();
+      await page.setViewportSize({ width: 1200, height: 800 });
+      await tab(page, name).click();
     } else await page.setViewportSize({ width: 1200, height: 800 });
     await expect.poll(() => page.evaluate(() => Boolean((window as any).__resizeGate.held))).toBe(true);
     const olderCols = await page.evaluate(() => (window as any).__resizeGate.cols as number);
@@ -73,6 +82,15 @@ export function defineResizeAcknowledgementTest(): void {
     await expect.poll(() => page.evaluate(() => (window as any).__resizeGate.delivered)).toBe(true);
     const target = await page.evaluate(() => (window as any).__resizeGate.target as string);
     expect(Number(target.split("x")[0])).toBeLessThan(olderCols);
+    if (source === "pool") {
+      // Keep actual newer acknowledgements in wire order until the old pool
+      // compensation would have fired. No dimensions or messages are invented.
+      await page.waitForTimeout(350);
+      await page.evaluate(() => {
+        const g = (window as any).__resizeGate; g.flush = true;
+        for (const deliver of g.late) deliver(); g.late = [];
+      });
+    }
     await expect.poll(async () => {
       const client = await page.evaluate(n => {
         const p = window.__tmuxHubTerms![n]!;
@@ -119,6 +137,9 @@ export function defineResizeAcknowledgementTest(): void {
       // A's real resize is applied; B's later real tab activation takes over.
       await tab(peer, other).click(); await tab(peer, name).click();
       const target = await grid(peer);
+      const [ac, ar] = current.split("x").map(Number);
+      const [bc, br] = target.split("x").map(Number);
+      expect(bc).toBeGreaterThan(ac!); expect(br).toBeGreaterThan(ar!);
       await expect.poll(async () => ({ a: await grid(page), b: await grid(peer), pane: size() }))
         .toEqual({ a: target, b: target, pane: target });
       await peer.waitForTimeout(350);

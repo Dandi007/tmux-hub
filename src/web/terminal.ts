@@ -905,15 +905,6 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       queuedSend({ kind: "resize", cols: c, rows: r });
     }
   };
-  let resizeTimer: ReturnType<typeof setTimeout> | null = null;
-  const publishResize = () => {
-    if (resizeTimer) clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => {
-      resizeTimer = null;
-      sendResizeIfVisible();
-    }, 150);
-  };
-
   const onResize = () => {
     try { fit.fit(); } catch {}
     applyPendingScrollDecision();
@@ -932,7 +923,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // stuck at the other client's size and renders in a narrow left column
   // that never refreshes. Re-publish our own size whenever this client
   // becomes active again, implementing "latest active client wins". This
-  // is safe against native tmux clients: publishResize() is gated on
+  // is safe against native tmux clients: sendResizeIfVisible() is gated on
   // shouldSendResize() (owner === "web"), so it never fights a native owner.
   const reassertViewport = () => {
     if (disposed) return;
@@ -1036,7 +1027,6 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       // debounced send fires, and the catch-up would be lost.
       sendResizeIfVisible();
       applyPendingScrollDecision();
-      publishResize();
     },
     notifySessionActivity: (attached: number, cols: number, rows: number) => {
       if (disposed) return;
@@ -1063,7 +1053,6 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       window.removeEventListener("focus", reassertViewport);
       document.removeEventListener("visibilitychange", reassertViewport);
       try { el.removeEventListener("pointerdown", reassertViewport); } catch {}
-      if (resizeTimer) { clearTimeout(resizeTimer); resizeTimer = null; }
       try { el.removeEventListener("mousedown", onMouseDown); } catch {}
       try { el.removeEventListener("mousemove", onMouseMove); } catch {}
       try { el.removeEventListener("mouseup", onMouseUp); } catch {}
