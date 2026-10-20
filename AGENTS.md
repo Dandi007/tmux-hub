@@ -32,6 +32,7 @@
 - [多浏览器 viewport 收敛设计](docs/superpowers/specs/2026-10-20-viewport-convergence-design.md) —— 并发 resize、应用尺寸确认与 attach 追平。
 - [初始连接发送队列设计](docs/superpowers/specs/2026-10-20-initial-terminal-queue-design.md) —— 初始输入送达与过期 resize 防重放。
 - [Dogfood readiness 设计](docs/superpowers/specs/2026-10-20-dogfood-readiness-design.md) —— dogfood 重启后的有界健康等待。
+- [回放滚动意图设计](docs/superpowers/specs/2026-10-20-replay-scroll-intent-design.md) —— 回放期间的新滚动位置及弱网快照保护。
 - [CLAUDE.md](CLAUDE.md) —— Claude Code 专用补充：双平台部署拓扑、重启安全规则、发布流程。
 
 ## 5  运行命令速查
