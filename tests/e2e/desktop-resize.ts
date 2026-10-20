@@ -14,6 +14,21 @@ export function defineResizeAcknowledgementTest(): void {
     await page.addInitScript(({ name, source }) => {
       const Native = window.WebSocket;
       const gate = (window as any).__resizeGate = { armed: false, held: null, release: false, delivered: false, cols: 0, initialCols: 0, ack: "", target: "", late: [], flush: false };
+      if (source === "pool") {
+        const schedule = window.setTimeout, cancel = window.clearTimeout;
+        const timers = new Map<number, () => void>();
+        window.setTimeout = ((fn: TimerHandler, delay?: number, ...args: any[]) => {
+          if (gate.armed && delay === 150 && typeof fn === "function") {
+            const id = schedule(() => {}, 60_000); timers.set(id, () => fn(...args)); return id;
+          }
+          return schedule(fn, delay, ...args);
+        }) as typeof window.setTimeout;
+        window.clearTimeout = id => { timers.delete(id!); cancel(id); };
+        (window as any).__fireOldCompensation = () => {
+          const entries = [...timers]; timers.clear();
+          for (const [id, run] of entries) { cancel(id); run(); }
+        };
+      }
       window.WebSocket = class extends Native {
         set onmessage(handler) {
           super.onmessage = handler ? function (event) {
@@ -85,6 +100,7 @@ export function defineResizeAcknowledgementTest(): void {
     if (source === "pool") {
       // Keep actual newer acknowledgements in wire order until the old pool
       // compensation would have fired. No dimensions or messages are invented.
+      await page.evaluate(() => (window as any).__fireOldCompensation());
       await page.waitForTimeout(350);
       await page.evaluate(() => {
         const g = (window as any).__resizeGate; g.flush = true;
@@ -116,27 +132,55 @@ export function defineResizeAcknowledgementTest(): void {
     }, name);
     await page.setViewportSize({ width: 1400, height: 900 }); await openApp(page);
     await expect(tab(page, name)).toBeVisible({ timeout: 10_000 }); await tab(page, name).click();
-    await expect.poll(() => grid(page)).not.toBe("");
+    await expect.poll(async () => {
+      const g = await grid(page); return g !== "" && g === size();
+    }).toBe(true);
+    let original = await grid(page);
+    const [oc, or] = original.split("x").map(Number);
     const peer = await page.context().newPage();
     try {
       await peer.setViewportSize({ width: 1200, height: 800 }); await openApp(peer);
       await expect(tab(peer, name)).toBeVisible({ timeout: 10_000 }); await tab(peer, name).click();
       await expect.poll(async () => (await grid(peer)) === size()).toBe(true);
-      await page.waitForTimeout(350);
+      await peer.waitForTimeout(350);
+      const peerExpected = await grid(peer);
+      const [pc, pr] = peerExpected.split("x").map(Number);
+      expect(pc).toBeLessThan(oc!); expect(pr).toBeLessThan(or!);
+      expect(size()).toBe(peerExpected);
       // Establish A as the current pinner first; otherwise B's same-size pin
       // would be a server no-op and generate no peer takeover notification.
+      await page.evaluate(n => {
+        const slot = document.querySelector(`.term-slot[data-session="${n}"]`)!;
+        (window as any).__activationGrid = "";
+        const observer = new MutationObserver(() => {
+          if (!slot.classList.contains("is-active")) return;
+          const p = window.__tmuxHubTerms![n]!;
+          (window as any).__activationGrid = `${p.cols}x${p.rows}`;
+          observer.disconnect();
+        });
+        observer.observe(slot, { attributes: true, attributeFilter: ["class"] });
+      }, name);
       await tab(page, other).click(); await tab(page, name).click();
-      const initial = await grid(page);
+      await expect.poll(() => page.evaluate(() => (window as any).__activationGrid)).not.toBe("");
+      original = await page.evaluate(() => (window as any).__activationGrid as string);
       await expect.poll(async () => ({ a: await grid(page), b: await grid(peer), pane: size() }))
-        .toEqual({ a: initial, b: initial, pane: initial });
+        .toEqual({ a: original, b: original, pane: original });
       await page.waitForTimeout(350);
+      await page.evaluate(n => {
+        (window as any).__newWindowGrid = "";
+        window.addEventListener("resize", () => {
+          const p = window.__tmuxHubTerms![n]!;
+          (window as any).__newWindowGrid = `${p.cols}x${p.rows}`;
+        }, { once: true });
+      }, name);
       await page.setViewportSize({ width: 1000, height: 650 });
-      const current = await grid(page);
+      await expect.poll(() => page.evaluate(() => (window as any).__newWindowGrid)).not.toBe("");
+      const current = await page.evaluate(() => (window as any).__newWindowGrid as string);
       await expect.poll(async () => ({ a: await grid(page), b: await grid(peer), pane: size() }))
         .toEqual({ a: current, b: current, pane: current });
       // A's real resize is applied; B's later real tab activation takes over.
       await tab(peer, other).click(); await tab(peer, name).click();
-      const target = await grid(peer);
+      const target = peerExpected;
       const [ac, ar] = current.split("x").map(Number);
       const [bc, br] = target.split("x").map(Number);
       expect(bc).toBeGreaterThan(ac!); expect(br).toBeGreaterThan(ar!);
