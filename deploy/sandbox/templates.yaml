@@ -1,0 +1,12 @@
+templates:
+  - id: sandbox-cc
+    name: "沙箱 CC（bypass permissions）"
+    cwd_choices:
+      - "/home/agent/work"
+    cmd: "bash -lc 'claude --dangerously-skip-permissions; exec bash -l'"
+
+  - id: sandbox-shell
+    name: "沙箱 shell"
+    cwd_choices:
+      - "/home/agent/work"
+    cmd: "bash -l"

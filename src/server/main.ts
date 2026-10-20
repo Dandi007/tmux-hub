@@ -7,7 +7,7 @@ import { SseHub } from "./sse";
 import { BroadcasterRegistry, snapshotStats, type SessionBroadcaster } from "./output-broadcaster";
 import { InputRouter } from "./input-router";
 import { pinViewport, getNativeAttachCount } from "./viewport-pinner";
-import { tmux } from "./tmux-cmd";
+import { tmux, socketArgs } from "./tmux-cmd";
 import { bootstrapTmuxHooks } from "./tmux-bootstrap";
 import { loadTemplates, HUB_HOST, HUB_PORT, WINDOW_COLS, WINDOW_ROWS, IMAGE_DIR, MAX_IMAGE_BYTES, expandHome, SUGGEST_ENABLED, SUGGEST_ENDPOINT, SUGGEST_MODEL, SUGGEST_CAPTURE_LINES, SUGGEST_TIMEOUT_MS, SUGGEST_PROTOCOL, SUGGEST_TOKEN, SUGGEST_HISTORY_ENABLED, SUGGEST_HISTORY_PATH, SUGGEST_HISTORY_TOP, VOICE_ENABLED, BLOB_BASE, INTAKE_BASE, UPLOAD_BROKER_ENABLED, UPLOAD_BROKER_BASE, UPLOAD_BROKER_NS, UPLOAD_BROKER_TOKEN } from "./config";
 import { buildSuggestRoutes } from "./suggest-routes";
@@ -77,6 +77,9 @@ registry.subscribe(async (event) => {
   }
 });
 
+// socket 配置冲突时启动即失败，而不是每次 tmux 调用都抛。
+socketArgs();
+
 await registry.start();
 
 try { await bootstrapTmuxHooks(); }
@@ -127,9 +130,10 @@ const METRIC_GAUGES: Gauge[] = [
 ];
 app.get("/metrics", (c) => c.text(renderMetrics(METRIC_GAUGES), { headers: { "content-type": "text/plain; charset=utf-8" } }));
 // 进程启动时钉住的代码版本：部署后据此核对「在跑的是不是刚部署的 commit」。
+// 没有 .git 的部署（sandbox 镜像）由构建时写入 TMUX_HUB_COMMIT。
 const COMMIT = (() => {
   const r = Bun.spawnSync(["git", "rev-parse", "HEAD"], { cwd: dirname(fileURLToPath(import.meta.url)) });
-  return r.exitCode === 0 ? r.stdout.toString().trim() : "unknown";
+  return r.exitCode === 0 ? r.stdout.toString().trim() : process.env.TMUX_HUB_COMMIT ?? "unknown";
 })();
 app.get("/system/health", (c) =>
   c.json({ ok: true, tmux: registry.isServerReachable(), uptime: process.uptime(), commit: COMMIT }),

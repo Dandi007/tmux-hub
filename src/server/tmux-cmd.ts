@@ -9,9 +9,32 @@ export type TmuxResult = {
   code: number;
 };
 
+// TMUX_HUB_SOCKET → `-L <name>`（落在按 UID 分的 /tmp/tmux-<uid>/ 下）；
+// TMUX_HUB_SOCKET_PATH → `-S <path>`（固定路径，供 sandbox 里 hub 用户连 agent
+// 用户的 tmux server）。两者互斥。
+export function socketArgs(
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const name = env.TMUX_HUB_SOCKET;
+  const path = env.TMUX_HUB_SOCKET_PATH;
+  if (name && path) {
+    throw new Error("TMUX_HUB_SOCKET and TMUX_HUB_SOCKET_PATH are mutually exclusive");
+  }
+  if (path) return ["-S", path];
+  if (name) return ["-L", name];
+  return [];
+}
+
+// 只认 argv 开头的全局 -L/-S：子命令自己也有 -S（capture-pane -S <start-line>）。
+export function withSocket(
+  args: string[],
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  return args[0] === "-L" || args[0] === "-S" ? args : [...socketArgs(env), ...args];
+}
+
 export async function tmux(args: string[]): Promise<TmuxResult> {
-  const socket = process.env.TMUX_HUB_SOCKET;
-  const finalArgs = socket && !args.includes("-L") ? ["-L", socket, ...args] : args;
+  const finalArgs = withSocket(args);
   const proc = Bun.spawn(["tmux", ...finalArgs], {
     stdout: "pipe",
     stderr: "pipe",
