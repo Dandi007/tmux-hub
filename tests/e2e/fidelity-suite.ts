@@ -12,6 +12,7 @@ import { writeFileSync, rmSync } from "node:fs";
 import type { Page, TestType, Expect, PlaywrightTestArgs, PlaywrightWorkerArgs } from "@playwright/test";
 import type { TerminalProbe } from "../../src/web/terminal";
 import { bindSecret } from "./helpers";
+import { defineReconnectQueueTest } from "./fidelity-reconnect-queue";
 
 type Ctx = {
   tmuxE2E: (args: string[]) => string;
@@ -105,6 +106,8 @@ export function defineFidelitySuite(test: TestType<PlaywrightTestArgs & { ctx: C
     ctx.tmuxE2E(["send-keys", "-t", name, cmd, "Enter"]);
     await expect.poll(() => ctx.tmuxE2E(["capture-pane", "-p", "-t", name]), { timeout: 10_000 }).toContain(marker);
   }
+
+  defineReconnectQueueTest(test, expect, openSession, expectInSync);
 
   test.describe("TUI 回传保真 oracle", () => {
     test("attach, stream, reconnect, reload: xterm screen == capture-pane", async ({ page, ctx }) => {
