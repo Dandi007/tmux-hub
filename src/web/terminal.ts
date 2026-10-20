@@ -630,7 +630,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                 const result = handleViewportMessage(msg, viewportState);
                 viewportState = result.next;
                 if (result.action.type === "resize") {
-                  // Native client or another page sized the pane: adopt its size
+                  // Adopt native, peer, or our own applied size acknowledgement.
                   term.resize(result.action.cols, result.action.rows);
                   console.log(`[tmux-hub] viewport adopted (${msg.owner}${msg.peer ? ", peer" : ""}): ${result.action.cols}x${result.action.rows}`);
                 } else if (result.action.type === "reclaim") {
@@ -931,7 +931,13 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   ws.addEventListener("open", () => {
     startHeartbeat();
     setTimeout(() => {
-      if (ws.readyState === WebSocket.OPEN) sendResizeIfVisible();
+      if (ws.readyState === WebSocket.OPEN && isTermVisible()) {
+        // The canvas renderer may have measured new cell widths since the
+        // initial pin. Re-fit the local layout before publishing: its applied
+        // acknowledgement can have restored the earlier grid in the meantime.
+        try { fit.fit(); } catch {}
+        sendResizeIfVisible();
+      }
     }, 100);
   });
 

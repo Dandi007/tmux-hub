@@ -330,6 +330,27 @@ export function defineFidelitySuite(test: TestType<PlaywrightTestArgs & { ctx: C
       expect((await browserView(page, name))!.size).toBe(own);
     });
 
+    test("both devices converge after simultaneous browser resizes", async ({ page, ctx, browser }, testInfo) => {
+      const name = await ctx.createSession();
+      await runAndWait(ctx, name, `clear; sh ${writeGenerator("race", 80)}`, "race 080");
+      await openSession(page, name);
+      const other = await browser.newContext({ baseURL: testInfo.project.use.baseURL, viewport: { width: 1300, height: 850 } });
+      try {
+        const page2 = await other.newPage();
+        await openSession(page2, name);
+        await expectInSync(page2, ctx, name, "second page before concurrent resize");
+        for (let i = 0; i < 4; i++) {
+          await Promise.all([
+            page.setViewportSize({ width: i % 2 ? 480 : 412, height: i % 2 ? 780 : 800 }),
+            page2.setViewportSize({ width: i % 2 ? 1180 : 1300, height: 850 }),
+          ]);
+          await page.waitForTimeout(650); // allow the resize publishers and aligned snapshot to run
+          await expectInSync(page, ctx, name, `first page concurrent resize ${i}`);
+          await expectInSync(page2, ctx, name, `second page concurrent resize ${i}`);
+        }
+      } finally { await other.close(); }
+    });
+
     // Regression（第 4 轮修复）：刚起的 shell 还在画第一个 prompt 时 attach，
     // 同样命中 attach 时 snapshot 与在途字节重叠的问题（prompt 被画多次）。
     test("fresh shell attach while the first prompt is still being drawn", async ({ page, ctx }) => {

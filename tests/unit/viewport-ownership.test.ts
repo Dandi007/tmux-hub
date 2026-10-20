@@ -139,4 +139,10 @@ describe("handleViewportMessage: another web page on the session", () => {
   test("plain web message (own attach): no action", () => {
     expect(handleViewportMessage({ kind: "viewport", cols: 200, rows: 50, owner: "web" }, web).action).toEqual({ type: "none" });
   });
+  test("own applied resize restores the pane size after an intervening peer notification", () => {
+    const displaced: ViewportState = { owner: "web", cols: 164, rows: 43 };
+    const r = handleViewportMessage({ kind: "viewport", cols: 183, rows: 43, owner: "web", applied: true }, displaced);
+    expect(r.action).toEqual({ type: "resize", cols: 183, rows: 43 });
+    expect(shouldSendResize(r.next)).toBe(true);
+  });
 });
