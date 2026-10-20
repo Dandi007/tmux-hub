@@ -9,12 +9,13 @@ export async function stopOwnedGenerator(dir: string, name: string, controls: Co
   const deadline = Date.now() + waitMs;
   while (!existsSync(`${dir}/done`) && Date.now() < deadline) await sleep(10);
   const acknowledged = existsSync(`${dir}/done`);
+  let forced = false;
   if (!acknowledged) {
-    if (controls.listSessions().includes(name)) controls.killSession(name);
+    if (controls.listSessions().includes(name)) { controls.killSession(name); forced = true; }
     const stopped = Date.now() + 500;
     while (controls.listSessions().includes(name) && Date.now() < stopped) await sleep(10);
     if (controls.listSessions().includes(name)) throw new Error(`owned generator session still alive: ${name}`);
   }
   rmSync(dir, { recursive: true, force: true });
-  return { acknowledged, forced: !acknowledged };
+  return { acknowledged, forced };
 }

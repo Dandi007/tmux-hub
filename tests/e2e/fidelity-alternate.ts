@@ -112,8 +112,8 @@ export function defineAlternateTests(
     const received = `${owned}/received`, app = `${owned}/app.sh`;
     const priorModes = replay ? "\x1b[?1006h" : "";
     const exitModes = replay
-      ? "\x1bc\x1b[3;8r\x1b[?6h\x1b[?7l\x1b[?1;2004;1000h"
-      : "\x1b[?1;2004;1000;1006h";
+      ? "\x1bc\x1b[3;8r\x1b[?6h\x1b[?7l\x1b[?1;2004;1000h\x1b[!p"
+      : "\x1b[?1;2004;1000;1006h\x1b[!p";
     let name = "";
     writeFileSync(app, `stty -echo -icanon min 1 time 0
 set -- $(stty size); cols=$2

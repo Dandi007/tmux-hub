@@ -49,8 +49,8 @@ test("RIS discards stale encoding, hidden cursor and margins", async () => {
   expect(await feed(["\x1b[?1006;25l", "\x1b[?1006h\x1b[?25l\x1b[3;10r", "\x1bc"])).toBe("");
 });
 
-test("soft reset clears cursor and margins while retaining mouse encoding", async () => {
-  expect(await feed(["\x1b[?1006h\x1b[?25l\x1b[3;10r", "\x1b[!p"])).toBe("\x1b[?1006h");
+test("unsupported DECSTR leaves tmux modes intact", async () => {
+  expect(await feed(["\x1b[?1006h\x1b[?25l\x1b[3;10r", "\x1b[!p"])).toBe("\x1b[3;10r\x1b[?25l\x1b[?1006h");
 });
 
 test("default and invalid margins follow the terminal's actual region", async () => {

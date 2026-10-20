@@ -5,8 +5,8 @@ import type { Terminal } from "@xterm/headless";
  *   - mouse encoding: DECSET 1006 (SGR) / 1005 / 1015
  *   - scroll region: DECSTBM (CSI t;b r)
  *   - cursor visibility: DECTCEM (CSI ?25 h/l)
- * Hooks are registered with return-false so xterm still processes the sequence
- * normally; we only observe. serializeModes() emits the restore sequences to
+ * Supported mode hooks return false to observe normal parsing. DECSTR is
+ * ignored to match tmux instead of applying xterm's different soft reset. serializeModes() emits the restore sequences to
  * append after serialize() so these tracked modes survive attach.
  */
 export class ModeShadow {
@@ -34,12 +34,9 @@ export class ModeShadow {
       this.scrollTop = this.scrollBottom = null;
       return false;
     });
-    term.parser.registerCsiHandler({ intermediates: "!", final: "p" }, () => {
-      // DECSTR resets cursor visibility/margins, but not mouse encoding.
-      this.cursorHidden = false;
-      this.scrollTop = this.scrollBottom = null;
-      return false;
-    });
+    // tmux ignores DECSTR (verified against 3.6); xterm's soft reset would
+    // otherwise diverge from the authoritative pane before the next capture.
+    term.parser.registerCsiHandler({ intermediates: "!", final: "p" }, () => true);
     let rows = term.rows;
     term.onResize(size => {
       // tmux preserves margins for width-only changes and resets on row changes.

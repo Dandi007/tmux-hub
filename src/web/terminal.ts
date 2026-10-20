@@ -190,6 +190,8 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // intermediate byte; xterm's parser uses { final: 'q', intermediates: ' ' }.
   try {
     term.parser.registerCsiHandler({ final: "q", intermediates: " " }, () => true);
+    // Match tmux's ignored DECSTR instead of resetting only the browser modes.
+    term.parser.registerCsiHandler({ intermediates: "!", final: "p" }, () => true);
   } catch (e) {
     console.warn("[tmux-hub] DECSCUSR intercept failed:", e);
   }
