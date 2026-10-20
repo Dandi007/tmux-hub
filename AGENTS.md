@@ -28,6 +28,7 @@
 
 - [docs/specs/001-architecture.md](docs/specs/001-architecture.md) —— 架构文档
 - [docs/constitution/001-development-discipline.md](docs/constitution/001-development-discipline.md) —— §2 开发流程 / §3 测试规范 / §4 代码约定 / §5 分支与合入 / §6 文档
+- [Alternate snapshot mode design](docs/superpowers/specs/2026-10-21-snapshot-alternate-mode-design.md) — ordinary reconnect preserves alternate and saved normal screens.
 - [`docs/superpowers/specs/`](docs/superpowers/specs/) 与 [`docs/superpowers/plans/`](docs/superpowers/plans/) —— **每-MR 设计文档与实施计划的现行落点**（§2.1 强制、PR 模板勾选项引用）。**不适用 `NNN-` 命名，保持 `YYYY-MM-DD-<slug>` 原样。**
 - [多浏览器 viewport 收敛设计](docs/superpowers/specs/2026-10-20-viewport-convergence-design.md) —— 并发 resize、应用尺寸确认与 attach 追平。
 - [初始连接发送队列设计](docs/superpowers/specs/2026-10-20-initial-terminal-queue-design.md) —— 初始输入送达与过期 resize 防重放。

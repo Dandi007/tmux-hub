@@ -15,7 +15,7 @@ test("bounded busy snapshot reports overlap and exposes later output quiet", asy
       if (busy) appendFileSync(b.logPath, "delta\r\n");
       return { stdout: "screen", stderr: "", code: 0 };
     }
-    return { stdout: args[0] === "display-message" ? "0 0 0 24" : "", stderr: "", code: 0 };
+    return { stdout: args[0] === "display-message" ? "0 0 0 24 0 0 0" : "", stderr: "", code: 0 };
   };
   const b = new SessionBroadcaster(`overlap-${process.pid}`, run, true);
   await b.start();

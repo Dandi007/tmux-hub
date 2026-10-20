@@ -1,3 +1,4 @@
+import { ReplayProgress } from "./replay-progress";
 import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
 import { Unicode11Addon } from "xterm-addon-unicode11";
@@ -47,6 +48,8 @@ export type TerminalProbe = {
   readonly resyncs: number;
   /** Count of completed replays (scrollpos restore decision executed or deferred). */
   readonly replays: number;
+  /** Latest replay parse/restore barrier has not completed. */
+  readonly replayPending: boolean;
   scrollLines: (n: number) => void;
   /** Same visibility test the scroll-restore decision uses (hidden pool slot → deferred). */
   readonly visible: boolean;
@@ -190,6 +193,8 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // intermediate byte; xterm's parser uses { final: 'q', intermediates: ' ' }.
   try {
     term.parser.registerCsiHandler({ final: "q", intermediates: " " }, () => true);
+    // Match tmux's ignored DECSTR instead of resetting only the browser modes.
+    term.parser.registerCsiHandler({ intermediates: "!", final: "p" }, () => true);
   } catch (e) {
     console.warn("[tmux-hub] DECSCUSR intercept failed:", e);
   }
@@ -533,6 +538,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   let lastReportedLfb = 0;
   let resyncCount = 0; // fidelity probe only
   let replayCount = 0; // fidelity probe only
+  const replayProgress = new ReplayProgress(); // debug observation only
   // scrollposRestoredOnce tracks whether we have applied the first scrollpos
   // delivery for this attach lifetime. First delivery = fresh attach（v2 起
   // 一律显式钉底，INV-5）；re-deliveries arrive on reconnect（只信本地快照）。
@@ -689,6 +695,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                 // 落点决策全部收敛到 decideScrollRestore（INV-1/2/3/5）——
                 // fresh attach 一律显式钉底，reconnect 只信断线瞬间的本地快照。
                 const serverLfb = (parsed as { linesFromBottom?: number }).linesFromBottom ?? 0;
+                const replayGeneration = replayProgress.generation;
                 const isFirstDelivery = !scrollposRestoredOnce;
                 scrollposRestoredOnce = true;
                 // Parse barrier: replay 字节先于本消息到达，但 term.write 是
@@ -726,6 +733,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                   parsingReplay = false;
                   reportingEnabled = true;
                   replayCount++;
+                  replayProgress.complete(replayGeneration);
                 });
                 return;
               }
@@ -766,6 +774,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
 
   // 重放（reconnect 或 resize resync）前即时快照本地 lfb，并关闭上报。
   const saveLocalLfbForReplay = (): void => {
+    replayProgress.begin();
     // 断线瞬间即时快照本地 lfb——这是 reconnect 恢复的唯一真值来源（INV-1），
     // 不用 1s 轮询的滞后值 lastReportedLfb 做任何判断。alt-screen（claude
     // code / vim）无 scrollback 语义，取 0。
@@ -962,6 +971,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     dropSocket: () => { try { ws.close(); } catch {} },
     get linesFromBottom() { const b = term.buffer.active; return Math.max(0, b.baseY - b.viewportY); },
     get resyncs() { return resyncCount; },
+    get replayPending() { return replayProgress.pending; },
     get replays() { return replayCount; },
     scrollLines: (n: number) => term.scrollLines(n),
     get visible() { return isTermVisible(); },
@@ -984,12 +994,14 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   });
 
   if (!opts.readOnly) {
-    // Desktop single input path per spec §设计原则 / Spike S2: only term.onData raw bytes,
-    // NO attachCustomKeyEventHandler / keyEventToTmuxToken (those would double-send).
+    // xterm emits text onData and legacy mouse bytes onBinary. Keep those
+    // distinct so high mouse coordinates do not get UTF8-encoded or echoed.
+    // No additional keyboard handler (which would double-send).
     term.onData((data) => {
       predictLocalEcho(data);
       queuedSend({ kind: "keys", literal: data });
     });
+    term.onBinary(data => queuedSend({ kind: "binary", data }));
   }
 
   return {

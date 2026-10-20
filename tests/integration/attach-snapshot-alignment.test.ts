@@ -25,6 +25,7 @@ test("bytes in flight during capture are not replayed on top of the snapshot", a
   let captures = 0;
   let logPath = "";
   const run = async (args: string[]) => {
+    if (args[0] === "display-message") return { stdout: "0 0 0 24 0 0 0", stderr: "", code: 0 };
     if (args[0] === "capture-pane") {
       captures++;
       if (captures === 1) appendFileSync(logPath, "\r\nIN_FLIGHT_REDRAW");
@@ -63,6 +64,7 @@ test("a quiet pane is captured once", async () => {
   const { SessionBroadcaster } = await import("../../src/server/output-broadcaster");
   let captures = 0;
   const run = async (args: string[]) => {
+    if (args[0] === "display-message") return { stdout: "0 0 0 24 0 0 0", stderr: "", code: 0 };
     if (args[0] === "capture-pane") { captures++; return { stdout: "QUIET", stderr: "", code: 0 }; }
     return { stdout: "", stderr: "", code: 0 };
   };
@@ -87,6 +89,7 @@ test("a never-quiet pane attaches after bounded retries without losing bytes", a
   let captures = 0;
   let logPath = "";
   const run = async (args: string[]) => {
+    if (args[0] === "display-message") return { stdout: "0 0 0 24 0 0 0", stderr: "", code: 0 };
     if (args[0] === "capture-pane") {
       captures++;
       appendFileSync(logPath, `STREAM_${captures};`);
@@ -124,7 +127,7 @@ test("snapshot ends by restoring tmux's cursor position", async () => {
   const run = async (args: string[]) => {
     if (args[0] === "capture-pane") return { stdout: "PROMPT", stderr: "", code: 0 };
     if (args[0] === "display-message" && args.some((a) => a.includes("cursor_x"))) {
-      return { stdout: "5 3 0 40\n", stderr: "", code: 0 };
+      return { stdout: "5 3 0 40 0 0 0\n", stderr: "", code: 0 };
     }
     return { stdout: "", stderr: "", code: 0 };
   };
@@ -147,6 +150,7 @@ test("resync re-sends a snapshot to an attached subscriber, announced first", as
   const { SessionBroadcaster } = await import("../../src/server/output-broadcaster");
   let captures = 0;
   const run = async (args: string[]) => {
+    if (args[0] === "display-message") return { stdout: "0 0 0 24 0 0 0", stderr: "", code: 0 };
     if (args[0] === "capture-pane") { captures++; return { stdout: `SNAP_${captures}`, stderr: "", code: 0 }; }
     return { stdout: "", stderr: "", code: 0 };
   };
@@ -198,7 +202,7 @@ test("the snapshot body does not end with a line terminator", async () => {
   const { SessionBroadcaster } = await import("../../src/server/output-broadcaster");
   const run = async (args: string[]) => {
     if (args[0] === "capture-pane") return { stdout: "HIST\nROW0\nROW1\n", stderr: "", code: 0 };
-    if (args[0] === "display-message") return { stdout: "0 1\n", stderr: "", code: 0 };
+    if (args[0] === "display-message") return { stdout: "0 1 0 24 0 0 0\n", stderr: "", code: 0 };
     return { stdout: "", stderr: "", code: 0 };
   };
   const b = new SessionBroadcaster("align-7", run as any, true);

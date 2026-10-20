@@ -82,15 +82,24 @@ export const snapshotStats = { snapshots: 0, retries: 0, overlaps: 0 };
 
 export type BroadcasterEvent =
   | { kind: "replay_truncated" }
+  | { kind: "normal_screen" }
   | { kind: "stopped" }
   | { kind: "error"; message: string };
 
 type EventListener = (event: BroadcasterEvent) => void;
 
+export type SnapshotInfo = {
+  alternate: boolean;
+  normalExitPending: boolean;
+  overlapped: boolean;
+  authoritative: boolean;
+};
+
 export type TmuxRunner = (args: string[]) => Promise<{ stdout: string; stderr: string; code: number }>;
 
 export class SessionBroadcaster {
   private broadcastBytes = 0;
+  private normalScreenVersion = 0;
   private lastOutputAt = 0;
   readonly logPath: string;
   private fd: number | null = null;
@@ -175,8 +184,8 @@ export class SessionBroadcaster {
   // rule wraps and every absolute cursor move clamps, corrupting the snapshot.
   // Prime it from the current log tail so the snapshot reflects existing
   // history; xterm keeps only the last `scrollback` lines. A later attach may
-  // re-pin the pane to a new size, so an existing emulator is resized to track
-  // it. (Mid-stream reflow of already-captured history lands in P1.)
+  // re-pin the pane to a new size; syncEmulatorSize follows applied changes.
+  // A capture retry must never roll an existing emulator back to stale dimensions. (Mid-stream reflow of already-captured history lands in P1.)
   private ensureEmulator(cols: number, rows: number): SessionEmulator {
     if (this.emulator) {
       this.emulator.resize(cols, rows);
@@ -206,6 +215,11 @@ export class SessionBroadcaster {
         }
       }
     }
+    // Register after priming: only newly read application bytes request repair.
+    e.onNormalScreen(() => {
+      this.normalScreenVersion++;
+      for (const listener of this.eventListeners) listener({ kind: "normal_screen" });
+    });
     this.emulator = e;
     return e;
   }
@@ -240,44 +254,61 @@ export class SessionBroadcaster {
   // homes it; live output with relative moves would land on the wrong row).
   // Geometry is read first, inside attachWithReplay's alignment window, so all
   // of it describes the same instant.
-  private async captureSnapshot(cols: number, rows: number): Promise<string> {
-    const emu = this.ensureEmulator(cols, rows); // keep shadow primed + live-fed for modes
+  private async captureSnapshot(cols: number, rows: number): Promise<{ data: string; alternate: boolean; normalScreenVersion: number; authoritative: boolean }> {
+    const normalScreenVersion = this.normalScreenVersion;
+    const emu = this.emulator ?? this.ensureEmulator(cols, rows); // retries use the latest applied size
     const target = `${this.session}:0.0`;
     try {
       const geo = await this.paneGeometry();
+      if (!geo) throw new Error("pane geometry or screen mode unavailable");
       const vis = await this.run(["capture-pane", "-e", "-p", "-t", target]);
       if (vis.code === 0) {
         let out = "\x1bc";
-        const hist = geo ? Math.min(geo.history, SNAPSHOT_SCROLLBACK_LINES) : 0;
-        if (geo && hist > 0) {
+        const hist = Math.min(geo.history, SNAPSHOT_SCROLLBACK_LINES);
+        if (hist > 0) {
           const h = await this.run(["capture-pane", "-e", "-p", "-J", "-t", target, "-S", `-${hist}`, "-E", "-1"]);
-          if (h.code === 0 && h.stdout !== "") {
+          if (h.code !== 0) throw new Error(`history capture failed (${h.code})`);
+          if (h.stdout !== "") {
             out += toCrlf(h.stdout) + "\r\n" + "\n".repeat(Math.max(0, geo.height - 1)) + "\x1b[H";
           }
         }
-        out += toCrlf(vis.stdout) + emu.serializeModes();
-        if (geo) out += `\x1b[${geo.cursorY + 1};${geo.cursorX + 1}H`;
-        return out;
+        if (geo.alternate) {
+          // -a captures the saved normal screen; history above was deliberately
+          // read without -a (tmux exposes history only on the active grid).
+          // Seed normal before entering alt so a later live DECRST restores it.
+          const normal = await this.run(["capture-pane", "-a", "-e", "-p", "-t", target]);
+          if (normal.code !== 0) throw new Error(`saved normal capture failed (${normal.code})`);
+          out += toCrlf(normal.stdout);
+          out += `\x1b[${geo.savedY + 1};${geo.savedX + 1}H\x1b[0m\x1b[?1049h\x1b[H`;
+        }
+        out += toCrlf(vis.stdout) + emu.serializeModes({ x: geo.cursorX, y: geo.cursorY });
+        return { data: out, alternate: geo.alternate, normalScreenVersion, authoritative: true };
       }
       logger.warn(
         { session: this.session, code: vis.code, stderr: vis.stderr },
         "capture-pane failed; falling back to emulator snapshot",
       );
     } catch (e) {
-      logger.warn({ session: this.session, err: e }, "capture-pane threw; falling back to emulator snapshot");
+      logger.warn({ session: this.session, err: e }, "snapshot capture failed; falling back to emulator snapshot");
     }
-    return emu.snapshot();
+    return { data: emu.snapshot(), alternate: emu.alternateScreen, normalScreenVersion, authoritative: false };
   }
 
-  private async paneGeometry(): Promise<{ cursorX: number; cursorY: number; history: number; height: number } | null> {
+  private async paneGeometry(): Promise<{
+    cursorX: number; cursorY: number; history: number; height: number;
+    alternate: boolean; savedX: number; savedY: number;
+  } | null> {
     try {
       const r = await this.run([
         "display-message", "-p", "-t", `${this.session}:0.0`,
-        "#{cursor_x} #{cursor_y} #{history_size} #{pane_height}",
+        "#{cursor_x} #{cursor_y} #{history_size} #{pane_height} #{alternate_on} #{?alternate_on,#{alternate_saved_x},0} #{?alternate_on,#{alternate_saved_y},0}",
       ]);
-      const m = /^(\d+) (\d+) (\d+) (\d+)/.exec(r.stdout.trim());
+      const m = /^(\d+) (\d+) (\d+) (\d+) ([01]) (\d+) (\d+)$/.exec(r.stdout.trim());
       if (r.code === 0 && m) {
-        return { cursorX: Number(m[1]), cursorY: Number(m[2]), history: Number(m[3]), height: Number(m[4]) };
+        return {
+          cursorX: Number(m[1]), cursorY: Number(m[2]), history: Number(m[3]), height: Number(m[4]),
+          alternate: m[5] === "1", savedX: Number(m[6]), savedY: Number(m[7]),
+        };
       }
     } catch { /* fall through: no history, no cursor restore */ }
     return null;
@@ -290,7 +321,7 @@ export class SessionBroadcaster {
   // `paneCols`/`paneRows` are the authoritative pane size the caller just pinned
   // the tmux window to (or the native owner's size). The emulator is built/kept
   // at that size; invalid/omitted values fall back to the WINDOW_* defaults.
-  async attachWithReplay(send: Subscriber, paneCols?: number, paneRows?: number, onOverlap?: () => void): Promise<() => void> {
+  async attachWithReplay(send: Subscriber, paneCols?: number, paneRows?: number, onOverlap?: () => void, onSnapshot?: (snapshot: SnapshotInfo) => void): Promise<() => void> {
     if (this.fd === null) {
       // Broadcaster hasn't started — fall back to plain attach.
       this.subscribers.add(send);
@@ -317,7 +348,8 @@ export class SessionBroadcaster {
         // plus its trailing bytes (the overlap is then tolerated, not dropped).
         const cols = normalizeDim(paneCols, WINDOW_COLS);
         const rows = normalizeDim(paneRows, WINDOW_ROWS);
-        let snap = "";
+        this.ensureEmulator(cols, rows);
+        let snap = { data: "", alternate: false, normalScreenVersion: this.normalScreenVersion, authoritative: false };
         for (let attempt = 1; attempt <= ALIGN_MAX_CAPTURES; attempt++) {
           this.poll();
           pending = [];
@@ -334,7 +366,16 @@ export class SessionBroadcaster {
           }
         }
         snapshotStats.snapshots++;
-        send(enc.encode(snap));
+        // Exit bytes can already have been parsed into the tap during the
+        // last tolerated overlap, before this connection learns the snapshot
+        // mode. Tell the consumer so that exit still schedules bounded repair.
+        onSnapshot?.({
+          alternate: snap.alternate,
+          normalExitPending: snap.normalScreenVersion !== this.normalScreenVersion,
+          overlapped: pending.length > 0,
+          authoritative: snap.authoritative,
+        });
+        send(enc.encode(snap.data));
       } else {
         const upTo = this.offset;
         const start = Math.max(0, upTo - REPLAY_CAP_BYTES);
@@ -369,11 +410,11 @@ export class SessionBroadcaster {
   // tell the client a reset is coming. A subscriber that detached meanwhile is
   // left alone. The legacy byte-replay path has no reflowed snapshot to offer,
   // and replaying the width-frozen log would be worse than the drift: no-op.
-  async resync(send: Subscriber, paneCols: number, paneRows: number, announce: () => void, onOverlap?: () => void): Promise<void> {
+  async resync(send: Subscriber, paneCols: number, paneRows: number, announce: () => void, onOverlap?: () => void, onSnapshot?: (snapshot: SnapshotInfo) => void): Promise<void> {
     if (!this.emulatorEnabled || !this.subscribers.has(send)) return;
     this.subscribers.delete(send);
     announce();
-    await this.attachWithReplay(send, paneCols, paneRows, onOverlap);
+    await this.attachWithReplay(send, paneCols, paneRows, onOverlap, onSnapshot);
   }
 
   // Re-size the live emulator to track a pane resize (client viewport change).

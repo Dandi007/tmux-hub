@@ -63,7 +63,16 @@ export class InputRouter {
   }
 
   private async doSend(session: string, msg: ClientWsMessage): Promise<{ skipped?: boolean; cols?: number; rows?: number }> {
-    if (msg.kind === "keys") {
+    if (msg.kind === "binary") {
+      if (typeof msg.data !== "string" || [...msg.data].some(c => c.charCodeAt(0) > 255)) {
+        throw new HubError("binary input must contain only byte values", 400);
+      }
+      for (let start = 0; start < msg.data.length; start += SEND_KEYS_CHUNK_BYTES) {
+        const hex = Array.from(msg.data.slice(start, start + SEND_KEYS_CHUNK_BYTES), c => c.charCodeAt(0).toString(16).padStart(2, "0"));
+        const r = await this.run(["send-keys", "-t", `${session}:0.0`, "-H", ...hex]);
+        if (r.code !== 0) throw classifyTmuxError(session, r.stderr);
+      }
+    } else if (msg.kind === "keys") {
       const target = `${session}:0.0`;
       const chunks = chunkString(msg.literal, SEND_KEYS_CHUNK_BYTES);
       for (const chunk of chunks) {
