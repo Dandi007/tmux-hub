@@ -82,6 +82,7 @@ export const snapshotStats = { snapshots: 0, retries: 0, overlaps: 0 };
 
 export type BroadcasterEvent =
   | { kind: "replay_truncated" }
+  | { kind: "normal_screen" }
   | { kind: "stopped" }
   | { kind: "error"; message: string };
 
@@ -206,6 +207,10 @@ export class SessionBroadcaster {
         }
       }
     }
+    // Register after priming: only newly read application bytes request repair.
+    e.onNormalScreen(() => {
+      for (const listener of this.eventListeners) listener({ kind: "normal_screen" });
+    });
     this.emulator = e;
     return e;
   }

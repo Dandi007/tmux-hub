@@ -179,6 +179,13 @@ export function createWsHandlers(deps: WsDeps) {
       paneRows = ws.data.viewport?.rows ?? paneRows;
 
       const unsubEvents = b.onEvent((ev) => {
+        if (ev.kind === "normal_screen") {
+          // tmux resizes its saved normal grid only on alternate exit. A
+          // snapshot taken while alternate was active still holds the old
+          // grid; capture the authoritative result through the ordered repair
+          // chain, once the application's exit/redraw bytes become quiet.
+          ws.data.resync?.repairWhenQuiet(() => b.outputQuietFor(100));
+        }
         if (ev.kind === "replay_truncated") {
           sse.emit({ event: "replay_truncated", payload: { name: sessionName } });
         }

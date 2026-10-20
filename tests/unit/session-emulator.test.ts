@@ -72,3 +72,16 @@ test("wide emoji occupy 2 columns (Unicode 11), matching tmux", () => {
   expect(snap).toContain("⚡y");
   expect(snap).not.toContain("⚡ y");
 });
+
+// Live mode requests need authoritative capture after tmux expands the saved
+// normal grid on exit. The parser must recognize requests split across polls.
+test("normal-screen exit observer follows parsed CSI requests, not text", () => {
+  const e = new SessionEmulator(60, 10, 100);
+  let exits = 0;
+  e.onNormalScreen(() => exits++);
+  e.write("plain 1049l and \x1b[?25l"); expect(exits).toBe(0);
+  e.write("\x1b[?10"); expect(exits).toBe(0);
+  e.write("49l"); expect(exits).toBe(1);
+  e.write("\x1b[?1047l\x1b[?47l"); expect(exits).toBe(3);
+  e.dispose();
+});

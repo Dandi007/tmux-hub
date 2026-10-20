@@ -71,6 +71,14 @@ export class SessionEmulator {
     return this.shadow.serializeModes();
   }
 
+  /** Observe live requests to leave alt, including when priming missed entry. */
+  onNormalScreen(listener: () => void): void {
+    this.term.parser.registerCsiHandler({ prefix: "?", final: "l" }, params => {
+      if (params.some(p => p === 47 || p === 1047 || p === 1049)) listener();
+      return false;
+    });
+  }
+
   resize(cols: number, rows: number): void {
     if (this.disposed) return;
     if (cols === this.cols && rows === this.rows) return;
