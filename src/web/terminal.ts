@@ -40,6 +40,8 @@ export type TerminalProbe = {
   readonly state: TerminalState;
   readonly cols: number;
   readonly rows: number;
+  /** Current public FitAddon cell measurement, without resizing the terminal. */
+  readonly measuredSize: string | null;
   /** Visible screen rows as text (trailing blanks trimmed). */
   screen: () => string[];
   dropSocket: () => void;
@@ -98,7 +100,6 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // run while that build is pending, before a WebSocket exists.
   let publishRendererViewport = (): void => {};
   let connectionPending = true;
-  let rendererMayPin = true;
   let rendererOwnsViewport = false;
   let pendingExplicitSize: { cols: number; rows: number } | null = null;
   let pendingRendererSize: { cols: number; rows: number } | null = null;
@@ -680,10 +681,8 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                 // A later automatic renderer fit must not reclaim a newer
                 // peer/native viewport. Explicit local navigation still may.
                 if (msg.peer || msg.owner === "native") {
-                  rendererMayPin = false;
                   rendererOwnsViewport = false;
                 } else if (msg.applied) {
-                  rendererMayPin = true;
                   rendererOwnsViewport = true;
                 }
                 const result = handleViewportMessage(msg, viewportState);
@@ -781,6 +780,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
 
   const buildWsUrl = async (): Promise<string> => {
     try { fit.fit(); } catch {}
+    const coveredIntent = pendingExplicitSize;
     const c = term.cols > 0 ? term.cols : (opts.cols ?? 200);
     const r = term.rows > 0 ? term.rows : (opts.rows ?? 50);
     const base = await hubWsUrl(`/ws/sessions/${encodeURIComponent(opts.sessionName)}`);
@@ -788,7 +788,11 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     // Checked after the await: the pool marks the active slot in the same tick
     // it starts attaching. A hidden slot asks the server not to pin the pane on
     // open (same rule as sendResizeIfVisible); activation pins it via fit().
-    const pin = isTermVisible() ? "" : "&pin=0";
+    const visible = isTermVisible();
+    // The URL covers this intent even if its renderer measurement is refined
+    // while auth resolves. A later explicit action creates a different object.
+    if (visible && pendingExplicitSize === coveredIntent) pendingExplicitSize = null;
+    const pin = visible ? "" : "&pin=0";
     return `${base}${sep}cols=${c}&rows=${r}&resync=1${pin}`;
   };
 
@@ -936,7 +940,6 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     const c = term.cols;
     const r = term.rows;
     if (c > 0 && r > 0 && isTermVisible() && shouldSendResize(viewportState)) {
-      rendererMayPin = true;
       if (pendingRendererSize) pendingRendererSize = { cols: c, rows: r };
       // One latest geometry from actual activation/resize, never a resize
       // history. A connection that closes before open discards this intent.
@@ -948,10 +951,12 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     }
   };
   publishRendererViewport = () => {
-    if (disposed || !rendererMayPin || !isTermVisible() || !shouldSendResize(viewportState)) return;
-    try { fit.fit(); } catch {}
-    pendingRendererSize = { cols: term.cols, rows: term.rows };
-    if (pendingExplicitSize) pendingExplicitSize = pendingRendererSize;
+    if (disposed || !isTermVisible() || !shouldSendResize(viewportState)) return;
+    // Measure without changing a newer peer's authoritative displayed grid.
+    const measured = fit.proposeDimensions();
+    if (!measured) return;
+    pendingRendererSize = measured;
+    if (pendingExplicitSize) Object.assign(pendingExplicitSize, measured);
     flushRendererViewport();
   };
   flushRendererViewport = () => {
@@ -960,6 +965,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     // The server checks ownership again, including peer notifications in flight.
     const size = pendingRendererSize;
     pendingRendererSize = null;
+    if (size.cols === viewportState.cols && size.rows === viewportState.rows) return;
     queuedSend({ kind: "resize", ...size, ifPinned: true });
   };
   const flushExplicitViewport = (): void => {
@@ -1015,6 +1021,10 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     get state() { return currentState; },
     get cols() { return term.cols; },
     get rows() { return term.rows; },
+    get measuredSize() {
+      const size = fit.proposeDimensions();
+      return size ? `${size.cols}x${size.rows}` : null;
+    },
     screen: () => {
       const buf = term.buffer.active;
       const lines: string[] = [];
