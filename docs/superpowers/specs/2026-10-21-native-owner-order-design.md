@@ -64,3 +64,5 @@ PR165首CI39540182006真实红：手机busy reconnect在overlapCount>3注入前�
 最终收敛：删除全部正向hint/mismatch去重与snapshot source参数；attached>0每次真实activity或snapshot都requestNative(probe)，沿用single-flight+generation drain，隐藏不发送。Registry默认2秒轮询且仅真实字段变化emit；probe只query/广播/checked、不pin/不input/不emit SSE，因此没有query→SSE自激。三种往返顺序各在输出停止后观察超过两个registry周期，要求activity/probe/checked计数持续4.5秒不变，同WS、grid/screen断言保留。不扩展协议。
 
 最终测试校准：关键往返提示交付后不再输入；marker在竞态前准备。随后暂停实际SSE并保持同一WS，必须先取得grid/screen收敛，再恢复真实SSE、观察4.5秒计数静止并复核最终尺寸/画面/连接数。避免额外activity掩盖丢需求。私有全套full8的vim WS错误已定位为测试写死3202、连接到另一个CI实例；vim测试改从本树emulator env文件读取端口，产品无变化。最终精确head CI仍作为完整门禁，原失败及未运行不计通过。
+
+收尾断言同时固定native仍attached1、pane与browser均80×23，分别在暂停SSE的首次收敛点及静止窗口结束后验证，不能仅两端相等而允许共同错误pin。peer/detach/native子进程清理分别执行并收集错误，保留主异常；独立清理失败仍报错。产品源码继续与ccc相同。

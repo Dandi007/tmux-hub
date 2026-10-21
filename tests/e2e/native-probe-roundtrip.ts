@@ -23,6 +23,7 @@ export function defineNativeProbeRoundtripTests() {
     const native = spawn("script", process.platform === "linux" ? ["-q", "-c", `tmux -L ${ctx.socket} attach -t ${name}`, "/dev/null"] : ["-q", "/dev/null", "tmux", "-L", ctx.socket, "attach", "-t", name], { env, stdio: ["pipe", "ignore", "ignore"] });
     let error: Error | undefined; native.once("error", e => { error = e; });
     let peer: import("@playwright/test").Page | undefined;
+    let primaryFailure: { error: unknown } | undefined;
     try {
       await expect.poll(() => { if (error) throw error; return attached(); }).toBe(1); await expect.poll(pane).toBe("80x23"); await expect.poll(synced).toBe(true);
       const clients = tmux("list-clients", "-t", name, "-F", "#{client_tty}|#{client_pid}").split("\n"); expect(clients).toHaveLength(1);
@@ -81,6 +82,7 @@ export function defineNativeProbeRoundtripTests() {
       });
       await page.evaluate(() => (window as any).__releaseNative());
       await expect.poll(synced).toBe(true);
+      expect(attached()).toBe(1); expect(pane()).toBe("80x23"); expect((await read())!.size).toBe("80x23");
       const converged = await read();
       writeFileSync(info.outputPath("native-critical-convergence.json"), JSON.stringify({ actual: converged, pane: pane(), events: await page.evaluate(() => { const g = (window as any).__nativeOrder; return { activity: g.activity, probes: g.probes, checks: g.checks, sockets: g.sockets.length }; }) }));
       // Resume actual SSE before checking quiescence: a feedback loop must
@@ -109,13 +111,21 @@ export function defineNativeProbeRoundtripTests() {
         return Date.now() - unchangedSince >= 4500;
       }, { timeout: 12_000, intervals: [250] }).toBe(true);
       writeFileSync(info.outputPath("native-query-quiet.json"), JSON.stringify(quietSamples));
+      expect(attached()).toBe(1); expect(pane()).toBe("80x23"); expect((await read())!.size).toBe("80x23");
       expect(await synced()).toBe(true);
       expect(await page.evaluate(() => (window as any).__nativeOrder.sockets.length)).toBe(1);
+    } catch (error) {
+      primaryFailure = { error }; throw error;
     } finally {
       try { writeFileSync(info.outputPath("native-roundtrip.json"), JSON.stringify({ actual: await read(), pane: pane(), events: await page.evaluate(() => { const g = (window as any).__nativeOrder; return { messages: g.messages, checks: g.checks, positives: g.positives, activity: g.activity, probes: g.probes, sockets: g.sockets.length }; }) }, null, 2)); } catch {}
       await page.screenshot({ path: info.outputPath("native-roundtrip.png") }).catch(() => {});
-      await peer?.close();
-      try { if (attached() > 0) tmux("detach-client", "-s", name); } finally { await stopNative(native); }
+      const cleanupErrors: unknown[] = [];
+      const clean = async (task: () => unknown) => { try { await task(); } catch (error) { cleanupErrors.push(error); } };
+      await clean(() => peer?.close());
+      await clean(() => { if (attached() > 0) tmux("detach-client", "-s", name); });
+      await clean(() => stopNative(native));
+      try { writeFileSync(info.outputPath("native-cleanup.json"), JSON.stringify({ errors: cleanupErrors.map(String), primaryFailure: primaryFailure ? String(primaryFailure.error) : null, nativeExitCode: native.exitCode, nativeSignal: native.signalCode })); } catch {}
+      if (!primaryFailure && cleanupErrors.length) throw new AggregateError(cleanupErrors, "native fixture cleanup failed");
     }
   });
 }
