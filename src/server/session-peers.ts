@@ -26,6 +26,10 @@ export class SessionPeers<T> {
     this.pinner.set(session, peer);
   }
 
+  isPinner(session: string, peer: T): boolean {
+    return this.pinner.get(session) === peer;
+  }
+
   others(session: string, peer: T): T[] {
     return [...(this.bySession.get(session) ?? [])].filter((p) => p !== peer);
   }

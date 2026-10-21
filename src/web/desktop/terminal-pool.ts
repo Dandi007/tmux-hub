@@ -54,7 +54,7 @@ export function createTerminalPool(parent: HTMLElement): TerminalPoolHandle {
           if (activeName === name) notifyState(state, attempt);
         });
         if (activeName === name) {
-          handle.fit();
+          handle.fit(false);
           notifyState(handle.state);
         }
       },

@@ -175,3 +175,40 @@ test("a viewport wait does not block keys or another session's pin", async () =>
     await until(() => other.attached);
   } finally { g.release(); }
 });
+
+
+test("automatic renderer correction cannot reclaim a newer peer viewport", async () => {
+  const hub = start();
+  const a = await hub.connect(177), b = await hub.connect(169);
+  a.ws.send(JSON.stringify({ kind: "resize", cols: 197, rows: 24, ifPinned: true }));
+  a.ws.send(JSON.stringify({ kind: "ping", ts: 101 }));
+  await until(() => a.messages.some(m => m.kind === "pong" && m.ts === 101));
+  hub.resize(b, 169); // Queued after the automatic request reached the server.
+  await until(() => hub.applied.at(-1) === 169);
+  expect(hub.applied).toEqual([169]);
+  expect(hub.pane()).toBe(169);
+  expect(a.cols).toBe(169); expect(b.cols).toBe(169);
+});
+
+test("automatic correction from the current pinner is applied normally", async () => {
+  const hub = start(); const a = await hub.connect(177);
+  a.ws.send(JSON.stringify({ kind: "resize", cols: 197, rows: 24, ifPinned: true }));
+  await until(() => a.cols === 197);
+  expect(hub.applied).toEqual([197]); expect(hub.pane()).toBe(197);
+});
+
+test("automatic correction checks the pinner when its queued mutation executes", async () => {
+  const g = gate();
+  const hub = start({ send: async (_n, m) => { if (m.cols === 169) await g.wait(); return { cols: m.cols, rows: m.rows }; } });
+  const a = await hub.connect(177), b = await hub.connect(150);
+  hub.resize(a, 177); await until(() => a.cols === 177 && b.cols === 177);
+  hub.resize(b, 169); await g.reached;
+  a.ws.send(JSON.stringify({ kind: "resize", cols: 197, rows: 24, ifPinned: true }));
+  a.ws.send(JSON.stringify({ kind: "ping", ts: 102 }));
+  try {
+    await until(() => a.messages.some(m => m.kind === "pong" && m.ts === 102));
+    hub.resize(b, 169);
+  } finally { g.release(); }
+  await until(() => hub.applied.filter(c => c === 169).length === 2);
+  expect(hub.applied).toEqual([177, 169, 169]); expect(hub.pane()).toBe(169);
+});

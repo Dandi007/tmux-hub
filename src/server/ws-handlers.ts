@@ -292,6 +292,14 @@ export function createWsHandlers(deps: WsDeps) {
         return;
       }
       const send = async (): Promise<void> => {
+        // Renderer initialization is not new user intent. Check inside the
+        // serialized mutation, since a peer pin may already be queued ahead.
+        const msg = parsed as { kind?: string; ifPinned?: unknown };
+        if (msg.kind === "resize" && msg.ifPinned === true && !peers.isPinner(sessionName, ws)) {
+          // The peer's ordered publication is already in flight. Do not
+          // synthesize web ownership here: a native client may now own it.
+          return;
+        }
         const result = await input.send(sessionName, parsed as Parameters<typeof input.send>[1]);
         // If resize was skipped (native attached), send authoritative viewport back
         if (result?.skipped && result.cols && result.rows) {

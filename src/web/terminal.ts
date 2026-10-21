@@ -28,7 +28,8 @@ export type TerminalHandle = {
   close: () => void;
   probeNow: () => void;
   retry: () => void;
-  fit: () => void;
+  /** false: automatic attach completion, which must respect a newer peer pin. */
+  fit: (reclaim?: boolean) => void;
   notifySessionActivity: (attached: number, cols: number, rows: number) => void;
   readonly isConnected: boolean;
   readonly state: TerminalState;
@@ -39,6 +40,8 @@ export type TerminalProbe = {
   readonly state: TerminalState;
   readonly cols: number;
   readonly rows: number;
+  /** Current public FitAddon cell measurement, without resizing the terminal. */
+  readonly measuredSize: string | null;
   /** Visible screen rows as text (trailing blanks trimmed). */
   screen: () => string[];
   dropSocket: () => void;
@@ -93,6 +96,15 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // Render telemetry — only created when `?debug=perf`; assigned once the send
   // queue exists (below). Hoisted here so writeTerm/CanvasAddon can reference it.
   let perf: PerfTelemetry | null = null;
+  // Assigned before the first asynchronous URL build. Renderer callbacks may
+  // run while that build is pending, before a WebSocket exists.
+  let publishRendererViewport = (): void => {};
+  let connectionPending = true;
+  let rendererOwnsViewport = false;
+  let pendingExplicitSize: { cols: number; rows: number } | null = null;
+  let coveredExplicitIntent: { cols: number; rows: number } | null = null;
+  let pendingRendererSize: { cols: number; rows: number } | null = null;
+  let flushRendererViewport = (): void => {};
   const term = new Terminal({
     convertEol: true,
     cursorBlink: false,
@@ -171,12 +183,12 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     if (disposed) return;
     try {
       term.loadAddon(new CanvasAddon());
-      fit.fit();
       perf?.setRenderer("canvas");
     } catch (e) {
       console.warn("[tmux-hub] CanvasAddon failed to load, falling back to DOM:", e);
       perf?.setRenderer("dom");
     }
+    publishRendererViewport();
   }, 50);
 
   // Safety net for the ensureTerminalFonts() timeout path: if the webfont
@@ -667,6 +679,20 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
               }
               if (kind === "viewport") {
                 const msg = parsed as Extract<ServerWsMessage, { kind: "viewport" }>;
+                // A later automatic renderer fit must not reclaim a newer
+                // peer/native viewport. Explicit local navigation still may.
+                if (msg.peer || msg.owner === "native") {
+                  rendererOwnsViewport = false;
+                } else if (msg.applied) {
+                  rendererOwnsViewport = true;
+                }
+                if (msg.owner === "native") {
+                  pendingExplicitSize = null;
+                  coveredExplicitIntent = null;
+                } else if (msg.applied && pendingExplicitSize === coveredExplicitIntent) {
+                  pendingExplicitSize = null;
+                  coveredExplicitIntent = null;
+                }
                 const result = handleViewportMessage(msg, viewportState);
                 viewportState = result.next;
                 if (result.action.type === "resize") {
@@ -676,6 +702,13 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                 } else if (result.action.type === "reclaim") {
                   reassertViewport();
                 }
+                // A failed initial web pin has no own applied ack. Its plain
+                // viewport permits the still-unsatisfied explicit intent once.
+                if (msg.owner === "web" && !msg.applied && !msg.peer && !msg.released) {
+                  coveredExplicitIntent = null;
+                  flushExplicitViewport();
+                }
+                flushRendererViewport();
                 return;
               }
               if (kind === "resync") {
@@ -761,6 +794,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
 
   const buildWsUrl = async (): Promise<string> => {
     try { fit.fit(); } catch {}
+    const coveredIntent = pendingExplicitSize;
     const c = term.cols > 0 ? term.cols : (opts.cols ?? 200);
     const r = term.rows > 0 ? term.rows : (opts.rows ?? 50);
     const base = await hubWsUrl(`/ws/sessions/${encodeURIComponent(opts.sessionName)}`);
@@ -768,7 +802,11 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     // Checked after the await: the pool marks the active slot in the same tick
     // it starts attaching. A hidden slot asks the server not to pin the pane on
     // open (same rule as sendResizeIfVisible); activation pins it via fit().
-    const pin = isTermVisible() ? "" : "&pin=0";
+    const visible = isTermVisible();
+    // The URL covers this intent even if its renderer measurement is refined
+    // while auth resolves. A later explicit action creates a different object.
+    coveredExplicitIntent = visible ? coveredIntent : null;
+    const pin = visible ? "" : "&pin=0";
     return `${base}${sep}cols=${c}&rows=${r}&resync=1${pin}`;
   };
 
@@ -813,6 +851,10 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     saveLocalLfbForReplay();
     console.log(`[tmux-hub] entering reconnect for ${opts.sessionName}`);
     stopHeartbeat();
+    pendingRendererSize = null;
+    coveredExplicitIntent = null;
+    connectionPending = true;
+    rendererOwnsViewport = false;
     try { ws.onmessage = null; ws.onclose = null; ws.onerror = null; ws.close(); } catch {}
     predictions.length = 0;
     reconnectAttempt = 0;
@@ -833,6 +875,8 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   const attemptReconnect = async (): Promise<void> => {
     if (disposed) return;
     reconnectAttempt++;
+    pendingRendererSize = null;
+    coveredExplicitIntent = null;
     console.log(`[tmux-hub] reconnect attempt ${reconnectAttempt}/${RECONNECT_MAX_RETRIES} for ${opts.sessionName}`);
     setState("reconnecting", reconnectAttempt);
 
@@ -861,13 +905,14 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       if (disposed) { try { socket.close(); } catch {} return; }
       console.log(`[tmux-hub] reconnect: ws open — success`);
       ws = socket;
+      connectionPending = false;
       wireWs(ws);
       reconnectAttempt = 0;
       predictions.length = 0;
       setState("connected");
       flushSendQueue();
       startHeartbeat();
-      sendResizeIfVisible();
+      flushExplicitViewport();
     };
 
     socket.onclose = (ev) => {
@@ -911,8 +956,44 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     const c = term.cols;
     const r = term.rows;
     if (c > 0 && r > 0 && isTermVisible() && shouldSendResize(viewportState)) {
+      if (pendingRendererSize) pendingRendererSize = { cols: c, rows: r };
+      // One latest geometry from actual activation/resize, never a resize
+      // history. Unsent intent survives backoff until a URL ack or actual send.
+      if (connectionPending) {
+        pendingExplicitSize = { cols: c, rows: r };
+        return;
+      }
+      pendingExplicitSize = null;
+      coveredExplicitIntent = null;
       queuedSend({ kind: "resize", cols: c, rows: r });
     }
+  };
+  publishRendererViewport = () => {
+    if (disposed || !isTermVisible() || !shouldSendResize(viewportState)) return;
+    // Measure without changing a newer peer's authoritative displayed grid.
+    const measured = fit.proposeDimensions();
+    if (!measured) return;
+    pendingRendererSize = measured;
+    if (pendingExplicitSize) Object.assign(pendingExplicitSize, measured);
+    flushRendererViewport();
+  };
+  flushRendererViewport = () => {
+    if (disposed || !rendererOwnsViewport || !pendingRendererSize || ws.readyState !== WebSocket.OPEN) return;
+    // A visible measurement remains valid if the tab hid before connection.
+    // The server checks ownership again, including peer notifications in flight.
+    const size = pendingRendererSize;
+    pendingRendererSize = null;
+    if (size.cols === viewportState.cols && size.rows === viewportState.rows) return;
+    queuedSend({ kind: "resize", ...size, ifPinned: true });
+  };
+  const flushExplicitViewport = (): void => {
+    if (!pendingExplicitSize || disposed || ws.readyState !== WebSocket.OPEN) return;
+    if (pendingExplicitSize === coveredExplicitIntent) return;
+    const size = pendingExplicitSize;
+    pendingExplicitSize = null;
+    coveredExplicitIntent = null;
+    pendingRendererSize = null; // This measured grid is covered by the explicit pin.
+    queuedSend({ kind: "resize", ...size });
   };
   const onResize = () => {
     try { fit.fit(); } catch {}
@@ -960,6 +1041,10 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     get state() { return currentState; },
     get cols() { return term.cols; },
     get rows() { return term.rows; },
+    get measuredSize() {
+      const size = fit.proposeDimensions();
+      return size ? `${size.cols}x${size.rows}` : null;
+    },
     screen: () => {
       const buf = term.buffer.active;
       const lines: string[] = [];
@@ -980,17 +1065,12 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
 
   ws.addEventListener("open", () => {
     if (disposed) return;
+    connectionPending = false;
     flushSendQueue();
     startHeartbeat();
-    setTimeout(() => {
-      if (ws.readyState === WebSocket.OPEN && isTermVisible()) {
-        // The canvas renderer may have measured new cell widths since the
-        // initial pin. Re-fit the local layout before publishing: its applied
-        // acknowledgement can have restored the earlier grid in the meantime.
-        try { fit.fit(); } catch {}
-        sendResizeIfVisible();
-      }
-    }, 100);
+    flushExplicitViewport();
+    // Renderer work waits for the ordered initial viewport acknowledgement.
+    // Publishing on open could race a peer pin whose message is still in flight.
   });
 
   if (!opts.readOnly) {
@@ -1029,8 +1109,13 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       setState("reconnecting", 0);
       scheduleReconnectAttempt();
     },
-    fit: () => {
+    fit: (reclaim = true) => {
       if (disposed) return;
+      if (!reclaim) {
+        publishRendererViewport();
+        applyPendingScrollDecision();
+        return;
+      }
       try { fit.fit(); } catch {}
       // Pool activation: pin the pane to this (now visible) slot — catches up a
       // resize deferred while hidden, and makes "latest active client wins" hold
