@@ -46,3 +46,5 @@ PR164 merge push CI39530842019 的 CONNECTING hidden activation 在调用 render
 补充独立审查路径：初始web pin失败必须关闭而不是以请求grid宣布成功；截断代理完整缓存HTTP101头后一次发送，显式分片测试与浏览器open计数证明实际Upgrade成功后才断流。
 
 复核补充：native需求/在途对象明确kind、generation、requestId；peer只取消reclaim，probe保留。只读probe不依赖fit；失败保留需求，单一250/500/1000ms最多3次自动退避，后台/重连保留需求待重新可见/权威初始化。相同hint可drain未完成需求，不创建无穷新代。新增真实初始化peer交错及实际查询故障回归；晚接入用例记录连接创建/open/close，要求全程同一WS。
+
+全量full6中continuous-exit weak历史wheel前置竞态：先前瞬时pending=false后，弱网队列又宣布resync，实际wheel before已pending=true。只修测试同步：代理按当前连接ID计queued/delivered，generator停止后正常历史操作等待当前队列清空、浏览器实际收到相同帧数、最后宣布resync解析完成。在DOM实际wheel事件捕获pending/resync/replay；若仍在replay归setup失败。只发一次wheel，不重试输入，不放宽原正滚动/重连保留断言；replay中输入仍由原确定性持帧用例覆盖。

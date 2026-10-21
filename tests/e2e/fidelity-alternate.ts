@@ -19,11 +19,43 @@ export function defineAlternateTests(
       try {
       const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
       let delayed = 0;
+      const queues = new Map<string, { queued: number; delivered: number; failed: number }>();
+      await page.addInitScript(n => {
+        const W = window.WebSocket;
+        window.WebSocket = class extends W {
+          constructor(raw: string | URL, protocols?: string | string[]) {
+            const u = new URL(raw), own = decodeURIComponent(u.pathname.split("/").at(-1)!) === n;
+            if (own) u.searchParams.set("alternateTestId", crypto.randomUUID());
+            super(u, protocols);
+            if (own) (window as any).__alternateWire = { id: u.searchParams.get("alternateTestId"), received: 0, resync: 0, completed: 0, wheels: [] };
+          }
+          set onmessage(handler) {
+            super.onmessage = handler ? function(event) {
+              if (decodeURIComponent(new URL(this.url).pathname.split("/").at(-1)!) === n) {
+                const g = (window as any).__alternateWire; g.received++;
+                if (typeof event.data === "string") try {
+                  const m = JSON.parse(event.data);
+                  if (m.kind === "resync") g.resync++;
+                  if (m.kind === "scrollpos") g.completed = g.resync;
+                } catch {}
+              }
+              handler.call(this, event);
+            } : null;
+          }
+        };
+        document.addEventListener("wheel", () => {
+          const p = window.__tmuxHubTerms?.[n], g = (window as any).__alternateWire;
+          if (p && g) g.wheels.push({ at: performance.now(), pending: p.replayPending, resyncs: p.resyncs, replays: p.replays });
+        }, { capture: true });
+      }, name);
       if (weak) await page.routeWebSocket(u => u.pathname === `/ws/sessions/${name}`, route => {
         const server = route.connectToServer(); let tail = Promise.resolve();
+        const id = new URL(route.url()).searchParams.get("alternateTestId")!;
+        const queue = { queued: 0, delivered: 0, failed: 0 }; queues.set(id, queue);
         server.onMessage(message => {
           // Delay only actual frames, in order; no replacement snapshots.
-          tail = tail.then(async () => { await sleep(25); delayed++; try { route.send(message); } catch {} });
+          queue.queued++;
+          tail = tail.then(async () => { await sleep(25); delayed++; try { route.send(message); queue.delivered++; } catch { queue.failed++; } });
         });
       });
       ctx.tmuxE2E(["send-keys", "-t", name,
@@ -50,7 +82,7 @@ export function defineAlternateTests(
         await expect.poll(() => page.evaluate(n => window.__tmuxHubTerms?.[n]?.visible, name)).toBe(true);
       }
       await expectInSync(page, ctx, name, "alternate replay");
-      const wheel = async () => {
+      const wheel = async (normalHistory = false) => {
         const box = await page.locator(".xterm-screen:visible").first().boundingBox();
         if (!box) throw new Error("no visible terminal");
         const sample = () => page.evaluate(n => {
@@ -59,10 +91,22 @@ export function defineAlternateTests(
           return { replays: p.replays, resyncs: p.resyncs, replayPending: p.replayPending, scroll: p.linesFromBottom,
             dom: v ? { top: v.scrollTop, height: v.scrollHeight, client: v.clientHeight } : null };
         }, name);
+        await page.mouse.move(box.x + 50, box.y + 50);
+        if (normalHistory) await expect.poll(async () => {
+          await page.evaluate(n => window.__tmuxHubTerms![n]!.afterParsed(), name);
+          const wire = await page.evaluate(n => ({ ...(window as any).__alternateWire, pending: window.__tmuxHubTerms![n]!.replayPending }), name);
+          const queue = queues.get(wire.id);
+          return !wire.pending && wire.completed === wire.resync
+            && (!weak || (!!queue && !queue.failed && queue.queued === queue.delivered && wire.received === queue.delivered));
+        }, { message: "normal history setup waits for current weak queue and last announced replay to parse" }).toBe(true);
         const before = await sample();
-        await page.mouse.move(box.x + 50, box.y + 50); await page.mouse.wheel(0, -420);
+        const count = await page.evaluate(() => (window as any).__alternateWire.wheels.length);
+        await page.mouse.wheel(0, -420);
+        await expect.poll(() => page.evaluate(() => (window as any).__alternateWire.wheels.length)).toBeGreaterThan(count);
+        const actualInput = await page.evaluate(() => (window as any).__alternateWire.wheels.at(-1));
         await page.waitForTimeout(250);
-        wheelSamples.push({ before, after: await sample() });
+        wheelSamples.push({ before, actualInput, queue: [...queues.values()].map(q => ({ ...q })), after: await sample() });
+        if (normalHistory) expect(actualInput.pending, "normal history setup: actual wheel arrived during replay").toBe(false);
       };
       const grid = (await view()).size;
       await wheel();
@@ -101,7 +145,7 @@ export function defineAlternateTests(
       // normal-history navigation after all announced snapshots complete;
       // navigation during replay has its own fidelity-scroll-intent cases.
       await expect.poll(() => page.evaluate(n => window.__tmuxHubTerms![n]!.replayPending, name)).toBe(false);
-      await wheel(); expect((await view()).scroll).toBeGreaterThan(0);
+      await wheel(true); expect((await view()).scroll).toBeGreaterThan(0);
       const chosen = (await view()).scroll, replay = (await view()).replays;
       await page.evaluate(n => window.__tmuxHubTerms![n]!.dropSocket(), name);
       await expect.poll(async () => (await view()).replays).toBeGreaterThan(replay);
