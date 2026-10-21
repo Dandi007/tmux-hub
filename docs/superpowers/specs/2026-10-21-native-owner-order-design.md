@@ -14,6 +14,7 @@ PR164 merge push CI39530842019 的 CONNECTING hidden activation 在调用 render
 
 - released 仅是旧 web pinner 退出的提示，当前 native 状态保持不动，等待真正 detach。
 - SSE attached→0（或首次0且 native 状态尚未交付）请求当前测量 grid 的真实 resize；本地不提前 fit，等同一有序 WS 上 applied/native 回复决定显示。普通 attached0 不产生 pin；已采用 native 时复核，若 native 元数据迟于 detach SSE 则在实际收到它后复核一次。复核 resize 标记 afterNative，服务端在串行 mutation 中只允许 native 确认后没有更新 web pin 的请求；较新 peer pin 的有序通知继续获胜。隐藏 slot 记住复核请求，激活后再发布。
+- 每次新 detach 需求有独立代次，旧回复只能消费发送时覆盖的代次。初始化无法取得权威尺寸则关闭该WS重试，不维持无权威但心跳正常的连接。SSE恢复snapshot向已有终端同步attached状态。
 - 复核保留到显式 viewport_checked 回复；在途 resize 保留最新测量，成功后仍为自身 web pin 才有条件补发。错误保留需求供下一次交互重试，跨连接等待新初始权威回复再复核；新连接的 pinVersion 在初始化建立，自己的 applied 更新基准。
 - 测试代理只计活连接，解析并保存无凭据的测试连接ID、pin/grid和101状态。当前导航/连接的真实101作为 CONNECTING 前置 barrier；取消该用例多余导航。
 - native race 回归仅暂缓真实 WS 的整个有序消息队列，SSE正常交付；不伪造 viewport/snapshot 字节。
@@ -21,6 +22,7 @@ PR164 merge push CI39530842019 的 CONNECTING hidden activation 在调用 render
 ## 4. 改动清单
 
 - `src/shared/protocol.ts` / `src/server/session-peers.ts` / `src/server/ws-handlers.ts`：native 确认记录 web pin 代次，条件复核不覆盖较新 peer。
+- `src/web/desktop/desktop-view.ts` / `src/web/mobile/mobile-view.ts`：SSE恢复snapshot同步native状态。
 - `src/web/viewport-owner.ts`：native 状态忽略 web released。
 - `src/web/terminal.ts`：detach 状态变化请求权威 resize，保持显示直到回复。
 - `tests/e2e/helpers.ts` / `renderer-proxy.ts` / `desktop-renderer-fit.ts`：活连接/导航握手前置。

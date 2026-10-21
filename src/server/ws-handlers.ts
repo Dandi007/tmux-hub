@@ -108,6 +108,7 @@ export function createWsHandlers(deps: WsDeps) {
       // native client owns the pane, it is overwritten with the queried size.
       let paneCols = cols;
       let paneRows = rows;
+      let viewportReady = true;
 
       await updateViewport(ws, async () => {
         // Ownership guard: skip pin if native client attached
@@ -147,12 +148,22 @@ export function createWsHandlers(deps: WsDeps) {
           // Hidden slot: web still owns (it may pin later), but snapshot at the
           // pane's real size so the attach stays aligned until then.
           const size = await queryPaneSize();
+          if (!size) {
+            viewportReady = false;
+            try { ws.close(1011, "viewport unavailable"); } catch {}
+            return;
+          }
           if (size) { paneCols = size.cols; paneRows = size.rows; }
           try { ws.send(JSON.stringify({ kind: "viewport", cols: paneCols, rows: paneRows, owner: "web" })); } catch {}
         } else {
           logger.debug({ session: sessionName, attachCount }, "native client attached, skipping viewport pin");
           // R3: send viewport message — native owns, query current size
           const size = await queryPaneSize();
+          if (!size) {
+            viewportReady = false;
+            try { ws.close(1011, "viewport unavailable"); } catch {}
+            return;
+          }
           if (size) {
             paneCols = size.cols;
             paneRows = size.rows;
@@ -164,7 +175,7 @@ export function createWsHandlers(deps: WsDeps) {
         ws.data.viewport = { cols: paneCols, rows: paneRows };
         ws.data.nativePinVersion = peers.pinVersion(sessionName);
       });
-      if (ws.data.closed) return;
+      if (!viewportReady || ws.data.closed) return;
 
       let b: Awaited<ReturnType<typeof broadcasters.get>>;
       try {

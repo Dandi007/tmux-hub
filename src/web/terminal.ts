@@ -467,6 +467,8 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
 
   let nativeRecheckPending = false;
   let nativeRecheckInFlight = false;
+  let nativeRecheckGeneration = 0;
+  let nativeRecheckSentGeneration = 0;
   let nativeRecheckSize: { cols: number; rows: number } | null = null;
   let initialViewportConfirmed = false;
   let nativeReplyNeedsRecheck = false;
@@ -730,6 +732,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                 if (msg.owner === "native" && nativeReplyNeedsRecheck) {
                   nativeReplyNeedsRecheck = false;
                   nativeRecheckPending = true;
+                  nativeRecheckGeneration++;
                 }
                 recheckNativeViewport();
                 return;
@@ -737,10 +740,14 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
               if (kind === "viewport_checked") {
                 if (!nativeRecheckInFlight) return;
                 nativeRecheckInFlight = false;
-                if (!(parsed as { ok: boolean }).ok) return; // Keep pending for next interaction.
+                if (!(parsed as { ok: boolean }).ok) {
+                  if (nativeRecheckGeneration !== nativeRecheckSentGeneration) recheckNativeViewport();
+                  return; // Otherwise keep pending for the next visible interaction.
+                }
                 const size = fit.proposeDimensions();
-                nativeRecheckPending = viewportState.owner === "web" && rendererOwnsViewport && !!size
-                  && (size.cols !== nativeRecheckSize?.cols || size.rows !== nativeRecheckSize?.rows);
+                nativeRecheckPending = nativeRecheckGeneration !== nativeRecheckSentGeneration
+                  || (viewportState.owner === "web" && rendererOwnsViewport && !!size
+                    && (size.cols !== nativeRecheckSize?.cols || size.rows !== nativeRecheckSize?.rows));
                 nativeRecheckSize = null;
                 recheckNativeViewport();
                 return;
@@ -1037,6 +1044,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     const size = fit.proposeDimensions();
     if (!size) return;
     nativeRecheckInFlight = true;
+    nativeRecheckSentGeneration = nativeRecheckGeneration;
     nativeRecheckSize = size;
     pendingRendererSize = null; // This current measurement covers old renderer work.
     queuedSend({ kind: "resize", ...size, afterNative: true });
@@ -1190,6 +1198,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
         // earlier native reply is still in flight; leave the displayed grid
         // alone until the ordered applied/native response actually arrives.
         nativeRecheckPending = true;
+        nativeRecheckGeneration++;
         recheckNativeViewport();
       }
     },

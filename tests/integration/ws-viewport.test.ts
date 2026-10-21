@@ -26,6 +26,7 @@ afterEach(async () => { for (const fn of cleanups.splice(0)) await fn(); });
 // timings are controlled; assertions concern the final pane and client grids.
 function start(opts: {
   native?: () => number;
+  paneQuery?: () => { stdout: string; stderr: string; code: number };
   send?: (session: string, msg: any) => Promise<any>;
   pin?: (cols: number) => Promise<void>;
   attach?: (cols: number) => Promise<void>;
@@ -47,7 +48,7 @@ function start(opts: {
     broadcasters: { get: async () => { await opts.get?.(); return broadcaster as any; } },
     getNativeAttachCount: async () => opts.native?.() ?? 0,
     pinViewport: async (_name, cols) => { pane = cols; await opts.pin?.(cols); },
-    tmux: async () => ({ stdout: `${pane}|24`, stderr: "", code: 0 }),
+    tmux: async () => opts.paneQuery?.() ?? ({ stdout: `${pane}|24`, stderr: "", code: 0 }),
     sse: { emit() {} }, managedDb: { getScrollPos: () => null, setScrollPos() {} },
     input: { send: async (name: string, msg: any) => {
       if (msg.kind === "resize" && opts.native?.()) return { skipped: true, cols: pane, rows: 24 };
@@ -287,4 +288,17 @@ test("failed native recheck gets its own completion so a client can retry", asyn
   a.ws.send(JSON.stringify({ kind: "resize", cols: 134, rows: 24, afterNative: true }));
   await until(() => a.messages.some(m => m.kind === "viewport_checked" && m.ok));
   expect(hub.pane()).toBe(134);
+});
+
+
+test("failed initial native geometry closes for retry instead of leaving an uninitialized live socket", async () => {
+  let fail = true;
+  const hub = start({ native: () => 1, paneQuery: () => {
+    if (fail) { fail = false; return { stdout: "", stderr: "temporary query failure", code: 1 }; }
+    return { stdout: "80|24", stderr: "", code: 0 };
+  } });
+  const a = await hub.connect(120, false);
+  await until(() => a.ws.readyState === WebSocket.CLOSED);
+  const b = await hub.connect(120);
+  expect(b.messages.some(m => m.owner === "native" && m.cols === 80)).toBe(true);
 });

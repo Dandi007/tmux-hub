@@ -9,7 +9,14 @@ import type { Page } from "@playwright/test";
 // bytes on that socket. SSE remains independently delivered.
 export async function gateNative(page: Page, name: string, armed: boolean, proxyPort = 0) {
   await page.addInitScript(({ n, armed, proxyPort }) => {
-    const g = (window as any).__nativeOrder = { armed, blocked: false, held: [] as (() => void)[], messages: [] as unknown[], sockets: [] as WebSocket[], holdApplied: false, failNextApplied: false, injectedErrors: 0, rejectCheck: false, holdZeroAfter: Number.POSITIVE_INFINITY, heldActivity: [] as (() => void)[], zeros: 0, positives: 0 };
+    const g = (window as any).__nativeOrder = { armed, blocked: false, held: [] as (() => void)[], messages: [] as unknown[], sockets: [] as WebSocket[], holdApplied: false, failNextApplied: false, injectedErrors: 0, rejectCheck: false, holdZeroAfter: Number.POSITIVE_INFINITY, heldActivity: [] as (() => void)[], events: [] as EventSource[], snapshots: 0, holdSseRetry: false, sseTimers: [] as (() => void)[], zeros: 0, positives: 0 };
+    const schedule = window.setTimeout;
+    window.setTimeout = ((fn: TimerHandler, delay?: number, ...args: unknown[]) => {
+      if (g.holdSseRetry && delay === 1000 && typeof fn === "function") {
+        g.sseTimers.push(() => fn(...args)); return schedule(() => {}, 60_000);
+      }
+      return schedule(fn, delay, ...args);
+    }) as typeof window.setTimeout;
     const W = window.WebSocket;
     window.WebSocket = class extends W {
       constructor(raw: string | URL, protocols?: string | string[]) {
@@ -44,9 +51,11 @@ export async function gateNative(page: Page, name: string, armed: boolean, proxy
     };
     const E = window.EventSource;
     window.EventSource = class extends E {
+      constructor(url: string | URL, options?: EventSourceInit) { super(url, options); g.events.push(this); }
       set onmessage(handler) {
         super.onmessage = handler ? function(event) {
           const m = JSON.parse(event.data);
+          if (m.event === "snapshot") g.snapshots++;
           if (m.event === "session_activity" && m.payload.name === n && m.payload.attached === 0 && g.zeros >= g.holdZeroAfter) {
             g.heldActivity.push(() => handler.call(this, event)); return;
           }

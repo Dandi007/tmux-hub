@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
 export function defineNativeRecheckProgressTests() {
-  for (const scenario of ["resize-before-reply", "hidden-reconnect-activation", "retry-after-error"] as const) {
+  for (const scenario of ["resize-before-reply", "hidden-reconnect-activation", "retry-after-error", "second-detach", "sse-snapshot"] as const) {
     test(`native detach completes current layout across ${scenario}`, async ({ page, ctx, baseURL }, info) => {
       const name = await ctx.createSession();
       const other = scenario === "hidden-reconnect-activation" ? await ctx.createSession() : null;
@@ -32,9 +32,11 @@ export function defineNativeRecheckProgressTests() {
       tmux("set-hook", "-g", "client-attached", "resize-window -A");
       tmux("set-hook", "-g", "client-resized", "resize-window -A");
       const env = { ...process.env, TMUX_TMPDIR: ctx.tmuxTmpdir, TERM: "xterm-256color" }; delete env.TMUX;
-      const native = spawn("script", process.platform === "linux"
+      const launchNative = () => spawn("script", process.platform === "linux"
         ? ["-q", "-c", `tmux -L ${ctx.socket} attach -t ${name}`, "/dev/null"]
         : ["-q", "/dev/null", "tmux", "-L", ctx.socket, "attach", "-t", name], { env, stdio: ["pipe", "ignore", "ignore"] });
+      const native = launchNative();
+      let repeatNative: ReturnType<typeof spawn> | undefined;
       let launchError: Error | undefined; native.once("error", e => { launchError = e; });
       try {
         await expect.poll(() => { if (launchError) throw launchError; return attached(); }).toBeGreaterThan(0);
@@ -52,13 +54,54 @@ export function defineNativeRecheckProgressTests() {
         else await page.evaluate(scenario => {
           const g = (window as any).__nativeOrder;
           if (scenario === "resize-before-reply") g.holdApplied = true;
-          else g.failNextApplied = true;
+          else if (scenario === "retry-after-error") g.failNextApplied = true;
+          else if (scenario === "sse-snapshot") {
+            g.holdSseRetry = true;
+            const es = g.events.at(-1); es.close(); es.onerror(new Event("error"));
+          }
         }, scenario);
-        const zeros = await page.evaluate(() => {
-          const g = (window as any).__nativeOrder; g.holdZeroAfter = g.zeros + 1; return g.zeros;
-        });
+        const zeros = await page.evaluate(scenario => {
+          const g = (window as any).__nativeOrder;
+          g.holdZeroAfter = g.zeros + (scenario === "second-detach" || scenario === "sse-snapshot" ? 0 : 1); return g.zeros;
+        }, scenario);
         tmux("detach-client", "-s", name); await expect.poll(attached).toBe(0);
-        await expect.poll(() => page.evaluate(() => (window as any).__nativeOrder.zeros)).toBeGreaterThan(zeros);
+        if (scenario === "second-detach") {
+          await expect.poll(() => page.evaluate(() => (window as any).__nativeOrder.heldActivity.length)).toBeGreaterThan(0);
+          const positives = await page.evaluate(() => (window as any).__nativeOrder.positives);
+          repeatNative = launchNative(); repeatNative.once("error", e => { launchError = e; });
+          await expect.poll(attached).toBeGreaterThan(0);
+          await expect.poll(() => page.evaluate(() => (window as any).__nativeOrder.positives)).toBeGreaterThan(positives);
+          await page.evaluate(() => {
+            const g = (window as any).__nativeOrder; g.armed = true;
+            g.heldActivity.shift()();
+          });
+          await expect.poll(() => page.evaluate(() => (window as any).__nativeOrder.blocked)).toBe(true);
+          await page.evaluate(() => { const g = (window as any).__nativeOrder; g.holdZeroAfter = g.zeros + 1; });
+          tmux("detach-client", "-s", name); await expect.poll(attached).toBe(0);
+          await expect.poll(() => page.evaluate(() => (window as any).__nativeOrder.zeros)).toBeGreaterThan(zeros);
+          await page.evaluate(() => (window as any).__releaseNative());
+        } else if (scenario === "sse-snapshot") {
+          // Keep WS alive. Wait for the server registry to observe detach while
+          // the app's SSE transport is actually closed and its retry is paused.
+          await expect.poll(async () => {
+            const response = await fetch(new URL("/events", baseURL)); const reader = response.body!.getReader();
+            try {
+              const chunk = await reader.read(), line = new TextDecoder().decode(chunk.value).split("\n").find(s => s.startsWith("data:"));
+              const event = line ? JSON.parse(line.slice(5)) : null;
+              return event?.payload?.find((s: any) => s.name === name)?.attached;
+            } finally { await reader.cancel(); }
+          }).toBe(0);
+          const snapshots = await page.evaluate(() => (window as any).__nativeOrder.snapshots);
+          await expect.poll(() => page.evaluate(() => (window as any).__nativeOrder.sseTimers.length)).toBe(1);
+          await page.evaluate(() => {
+            const g = (window as any).__nativeOrder; g.holdSseRetry = false;
+            for (const run of g.sseTimers.splice(0)) run();
+          });
+          await expect.poll(() => page.evaluate(() => (window as any).__nativeOrder.snapshots)).toBeGreaterThan(snapshots);
+          expect(await page.evaluate(() => (window as any).__nativeOrder.zeros)).toBe(zeros);
+          expect(await page.evaluate(() => (window as any).__nativeOrder.sockets.length)).toBe(1);
+        } else await expect.poll(() => page.evaluate(() => (window as any).__nativeOrder.zeros)).toBeGreaterThan(zeros);
+
         if (other) {
           proxy.hold(); await page.evaluate(n => window.__tmuxHubTerms![n]!.dropSocket(), name);
           await expect.poll(() => page.evaluate(() => (window as any).__nativeOrder.sockets.length)).toBe(2);
@@ -66,7 +109,7 @@ export function defineNativeRecheckProgressTests() {
           expect(await page.evaluate(() => (window as any).__nativeOrder.sockets.at(-1).readyState)).toBe(0);
           await page.locator(`.tab-bar__tab[data-session="${name}"]`).click();
           proxy.release();
-        } else {
+        } else if (scenario === "resize-before-reply" || scenario === "retry-after-error") {
           await expect.poll(() => page.evaluate(scenario => {
             const g = (window as any).__nativeOrder;
             return scenario === "resize-before-reply" ? g.blocked : g.injectedErrors === 1;
@@ -82,7 +125,7 @@ export function defineNativeRecheckProgressTests() {
         try { writeFileSync(info.outputPath("native-progress-final.json"), JSON.stringify({ scenario, actual: await read(), pane: pane(), attached: attached() }, null, 2)); } catch {}
         await page.screenshot({ path: info.outputPath("native-progress.png") }).catch(() => {});
         try { await proxy.close(); }
-        finally { try { if (attached() > 0) tmux("detach-client", "-s", name); } finally { await stopNative(native); } }
+        finally { try { if (attached() > 0) tmux("detach-client", "-s", name); } finally { try { await stopNative(native); } finally { if (repeatNative) await stopNative(repeatNative); } } }
       }
     });
   }
