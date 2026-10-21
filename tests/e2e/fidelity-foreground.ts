@@ -62,6 +62,16 @@ export function defineForegroundTests(
                 if ((overlap || pending) && gate) {
                   let kind = "";
                   if (typeof event.data === "string") { try { kind = JSON.parse(data).kind; } catch {} }
+                  if (pending) {
+                    const p = window.__tmuxHubTerms?.[n];
+                    (gate.events ??= []).push({ at: performance.now(), kind, phase: gate.phase, size: p ? `${p.cols}x${p.rows}` : null, scroll: p?.linesFromBottom, data: kind ? data : null });
+                  }
+                  if (pending && kind === "viewport" && gate.foregroundSize && !gate.foregroundApplied) {
+                    const m = JSON.parse(data);
+                    if (m.applied && `${m.cols}x${m.rows}` === gate.foregroundSize) gate.foregroundApplied = true;
+                  }
+                  if (pending && kind === "resync" && gate.foregroundApplied) { gate.foregroundResync = true; gate.foregroundComplete = false; }
+                  if (pending && kind === "scrollpos" && gate.foregroundResync) gate.foregroundComplete = true;
                   if (pending && kind === "resync" && gate.phase === "armedUser") gate.phase = "userB";
                   if (pending && kind === "scrollpos" && (gate.phase === "userB" || gate.phase === "heldUserB")) {
                     gate.phase = "heldUserB"; return;
@@ -203,9 +213,21 @@ export function defineForegroundTests(
           }, name);
           await expect.poll(() => page.evaluate(() => (window as any).__overlap.phase)).toBe("heldUserB");
           expect(await page.evaluate(() => document.visibilityState)).toBe("hidden");
+          await page.evaluate(n => { (window as any).__overlap.foregroundSize = window.__tmuxHubTerms![n]!.measuredSize; }, name);
           await page.bringToFront();
           await expectInSync(page, ctx, name, "foreground replay bytes parsed with completion held");
+          await expect.poll(() => page.evaluate(() => (window as any).__overlap.foregroundComplete), { message: "foreground fit replay bytes received with completion held" }).toBe(true);
+          await page.evaluate(n => window.__tmuxHubTerms![n]!.afterParsed(), name);
+          expect(await page.evaluate(n => window.__tmuxHubTerms![n]!.replayPending, name)).toBe(true);
+          await expectInSync(page, ctx, name, "current foreground replay parsed, completion still held");
           if (scenario === "history-pending-wheel") {
+            await page.evaluate(n => {
+              window.addEventListener("wheel", e => {
+                const p = window.__tmuxHubTerms![n]!;
+                const gate = (window as any).__overlap;
+                (gate.events ??= []).push({ at: performance.now(), kind: "real-wheel", trusted: e.isTrusted, phase: gate.phase, scroll: p.linesFromBottom, size: `${p.cols}x${p.rows}`, target: (e.target as Element).className, dom: Array.from(document.querySelectorAll(".xterm-viewport")).map(el=>({scrollHeight:el.scrollHeight,clientHeight:el.clientHeight,scrollTop:el.scrollTop})) });
+              }, { capture: true, once: true });
+            }, name);
             const box = await page.locator(".xterm-screen:visible").first().boundingBox();
             expect(box).not.toBeNull();
             await page.mouse.move(box!.x + 80, box!.y + 80);
@@ -271,10 +293,12 @@ export function defineForegroundTests(
         expect(await page.evaluate((n) => {
           const p = window.__tmuxHubTerms![n]!; return `${p.cols}x${p.rows}`;
         }, name)).toBe(capturedGeometry);
+        if (pending) writeFileSync(info.outputPath("pending-events.json"), JSON.stringify(await page.evaluate(() => (window as any).__overlap)));
         stage("close-pages");
         await cover.close(); await page.close();
         stage("complete");
         } catch (error) {
+          if (pending) writeFileSync(info.outputPath("pending-events.json"), JSON.stringify(await page.evaluate(() => (window as any).__overlap).catch(() => null)));
           const evidence = await page.evaluate((n) => {
             const p = window.__tmuxHubTerms?.[n];
             return { visibility: document.visibilityState, events: (window as any).__visibilityEvents,

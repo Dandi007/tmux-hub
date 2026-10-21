@@ -40,6 +40,8 @@
 
 - [Renderer viewport publication](docs/superpowers/specs/2026-10-21-renderer-viewport-publication-design.md) —— publish measured grids without a delayed hidden-tab pin.
 
+- [Native viewport fit](docs/superpowers/specs/2026-10-21-native-viewport-fit-design.md) —— preserve native grids through online browser layout changes.
+
 ## 5  运行命令速查
 
 ```bash
