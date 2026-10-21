@@ -267,3 +267,24 @@ test("native detach condition is checked after a queued peer mutation publishes"
   await until(() => b.messages.some(m => m.applied && m.cols === 166));
   expect(hub.applied).toEqual([155, 166]);
 });
+
+test("a fresh web connection can finish a native recheck carried across reconnect", async () => {
+  const hub = start(); const a = await hub.connect(120);
+  a.ws.send(JSON.stringify({ kind: "resize", cols: 133, rows: 24, afterNative: true }));
+  await until(() => a.messages.some(m => m.kind === "viewport_checked" && m.ok));
+  expect(hub.pane()).toBe(133);
+});
+
+test("failed native recheck gets its own completion so a client can retry", async () => {
+  let native = 1, fail = true;
+  const hub = start({ native: () => native, send: async (_name, msg) => {
+    if (fail) { fail = false; throw new Error("temporary mutation failure"); }
+    return { cols: msg.cols, rows: 24 };
+  } });
+  const a = await hub.connect(120); native = 0;
+  a.ws.send(JSON.stringify({ kind: "resize", cols: 133, rows: 24, afterNative: true }));
+  await until(() => a.messages.some(m => m.kind === "viewport_checked" && m.ok === false));
+  a.ws.send(JSON.stringify({ kind: "resize", cols: 134, rows: 24, afterNative: true }));
+  await until(() => a.messages.some(m => m.kind === "viewport_checked" && m.ok));
+  expect(hub.pane()).toBe(134);
+});

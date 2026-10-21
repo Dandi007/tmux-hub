@@ -103,7 +103,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   let publishRendererViewport = (): void => {};
   let connectionPending = true;
   let rendererOwnsViewport = false;
-  let pendingExplicitSize: { cols: number; rows: number; afterNative?: true } | null = null;
+  let pendingExplicitSize: { cols: number; rows: number } | null = null;
   let coveredExplicitIntent: { cols: number; rows: number } | null = null;
   let pendingRendererSize: { cols: number; rows: number } | null = null;
   let flushRendererViewport = (): void => {};
@@ -466,6 +466,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   };
 
   let nativeRecheckPending = false;
+  let nativeRecheckInFlight = false;
+  let nativeRecheckSize: { cols: number; rows: number } | null = null;
+  let initialViewportConfirmed = false;
   let nativeReplyNeedsRecheck = false;
 
   // ── State machine ──────────────────────────────────────────────────
@@ -684,6 +687,13 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
               }
               if (kind === "viewport") {
                 const msg = parsed as Extract<ServerWsMessage, { kind: "viewport" }>;
+                if (!msg.peer && !msg.released) initialViewportConfirmed = true;
+                if (msg.peer) {
+                  // A newer explicit peer pin supersedes automatic recovery.
+                  nativeRecheckPending = false;
+                  nativeRecheckInFlight = false;
+                  nativeRecheckSize = null;
+                }
                 // A later automatic renderer fit must not reclaim a newer
                 // peer/native viewport. Explicit local navigation still may.
                 if (msg.peer || msg.owner === "native") {
@@ -720,8 +730,19 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                 if (msg.owner === "native" && nativeReplyNeedsRecheck) {
                   nativeReplyNeedsRecheck = false;
                   nativeRecheckPending = true;
-                  recheckNativeViewport();
                 }
+                recheckNativeViewport();
+                return;
+              }
+              if (kind === "viewport_checked") {
+                if (!nativeRecheckInFlight) return;
+                nativeRecheckInFlight = false;
+                if (!(parsed as { ok: boolean }).ok) return; // Keep pending for next interaction.
+                const size = fit.proposeDimensions();
+                nativeRecheckPending = viewportState.owner === "web" && rendererOwnsViewport && !!size
+                  && (size.cols !== nativeRecheckSize?.cols || size.rows !== nativeRecheckSize?.rows);
+                nativeRecheckSize = null;
+                recheckNativeViewport();
                 return;
               }
               if (kind === "resync") {
@@ -867,6 +888,8 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     pendingRendererSize = null;
     coveredExplicitIntent = null;
     connectionPending = true;
+    initialViewportConfirmed = false;
+    nativeRecheckInFlight = false;
     rendererOwnsViewport = false;
     try { ws.onmessage = null; ws.onclose = null; ws.onerror = null; ws.close(); } catch {}
     predictions.length = 0;
@@ -1009,13 +1032,14 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     queuedSend({ kind: "resize", ...size });
   };
   const recheckNativeViewport = (): void => {
-    if (!nativeRecheckPending || !isTermVisible()) return;
+    if (!nativeRecheckPending || nativeRecheckInFlight || !initialViewportConfirmed || !isTermVisible()
+      || currentState !== "connected" || ws.readyState !== WebSocket.OPEN) return;
     const size = fit.proposeDimensions();
     if (!size) return;
-    nativeRecheckPending = false;
-    pendingExplicitSize = { ...size, afterNative: true };
-    coveredExplicitIntent = null;
-    flushExplicitViewport();
+    nativeRecheckInFlight = true;
+    nativeRecheckSize = size;
+    pendingRendererSize = null; // This current measurement covers old renderer work.
+    queuedSend({ kind: "resize", ...size, afterNative: true });
   };
   const onResize = () => {
     // Native owns the displayed grid too: fitting locally would reflow the

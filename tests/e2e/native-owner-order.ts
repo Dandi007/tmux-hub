@@ -7,20 +7,33 @@ import type { Page } from "@playwright/test";
 
 // Delay a real ordered WS stream, never individual metadata ahead of later
 // bytes on that socket. SSE remains independently delivered.
-async function gateNative(page: Page, name: string, armed: boolean) {
-  await page.addInitScript(({ n, armed }) => {
-    const g = (window as any).__nativeOrder = { armed, blocked: false, held: [] as (() => void)[], messages: [] as unknown[], zeros: 0, positives: 0 };
+export async function gateNative(page: Page, name: string, armed: boolean, proxyPort = 0) {
+  await page.addInitScript(({ n, armed, proxyPort }) => {
+    const g = (window as any).__nativeOrder = { armed, blocked: false, held: [] as (() => void)[], messages: [] as unknown[], sockets: [] as WebSocket[], holdApplied: false, failNextApplied: false, injectedErrors: 0, rejectCheck: false, holdZeroAfter: Number.POSITIVE_INFINITY, heldActivity: [] as (() => void)[], zeros: 0, positives: 0 };
     const W = window.WebSocket;
     window.WebSocket = class extends W {
+      constructor(raw: string | URL, protocols?: string | string[]) {
+        const u = new URL(raw), own = decodeURIComponent(u.pathname.split("/").at(-1)!) === n;
+        if (own && proxyPort) u.port = String(proxyPort);
+        super(u, protocols); if (own) g.sockets.push(this);
+      }
       set onmessage(handler) {
         super.onmessage = handler ? function(event) {
           if (decodeURIComponent(new URL(this.url).pathname.split("/").at(-1)!) !== n) { handler.call(this, event); return; }
           if (typeof event.data === "string") {
             try {
               const m = JSON.parse(event.data);
+              if (m.kind === "viewport_checked" && g.rejectCheck) {
+                g.rejectCheck = false;
+                handler.call(this, new MessageEvent("message", { data: JSON.stringify({ ...m, ok: false }) })); return;
+              }
               if (m.kind === "viewport") {
                 g.messages.push(m);
-                if (g.armed && m.owner === "native") g.blocked = true;
+                if (m.applied && g.failNextApplied) {
+                  g.failNextApplied = false; g.injectedErrors++; g.rejectCheck = true;
+                  handler.call(this, new MessageEvent("message", { data: JSON.stringify({ error: "injected transient viewport failure" }) })); return;
+                }
+                if ((g.armed && m.owner === "native") || (g.holdApplied && m.applied)) g.blocked = true;
               }
             } catch {}
           }
@@ -33,8 +46,11 @@ async function gateNative(page: Page, name: string, armed: boolean) {
     window.EventSource = class extends E {
       set onmessage(handler) {
         super.onmessage = handler ? function(event) {
-          handler.call(this, event);
           const m = JSON.parse(event.data);
+          if (m.event === "session_activity" && m.payload.name === n && m.payload.attached === 0 && g.zeros >= g.holdZeroAfter) {
+            g.heldActivity.push(() => handler.call(this, event)); return;
+          }
+          handler.call(this, event);
           if (m.event === "session_activity" && m.payload.name === n) {
             if (m.payload.attached === 0) g.zeros++; else g.positives++;
           }
@@ -42,10 +58,10 @@ async function gateNative(page: Page, name: string, armed: boolean) {
       }
     };
     (window as any).__releaseNative = () => {
-      g.armed = false; g.blocked = false;
+      g.armed = false; g.holdApplied = false; g.blocked = false;
       for (const deliver of g.held.splice(0)) deliver();
     };
-  }, { n: name, armed });
+  }, { n: name, armed, proxyPort });
 }
 
 export function defineNativeOwnerOrderTests() {
@@ -53,7 +69,13 @@ export function defineNativeOwnerOrderTests() {
     test(`native ownership remains authoritative across ${scenario}`, async ({ page, ctx }, info) => {
       const name = await ctx.createSession();
       const other = scenario === "hidden-detach" ? await ctx.createSession() : null;
-      if (other) await page.setViewportSize({ width: 1400, height: 900 });
+      if (other) {
+        // This case exercises the desktop pool, including under the Pixel
+        // project. Width alone keeps its coarse-pointer mobile layout.
+        await (await page.context().newCDPSession(page)).send("Emulation.setTouchEmulationEnabled", { enabled: false });
+        await page.setViewportSize({ width: 1400, height: 900 });
+        expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(false);
+      }
       const tmux = (...args: string[]) => ctx.tmuxE2E(args);
       const attached = () => Number(tmux("display", "-p", "-t", name, "#{session_attached}"));
       const paneSize = () => tmux("display", "-p", "-t", name, "#{pane_width}x#{pane_height}");
@@ -140,6 +162,7 @@ export function defineNativeOwnerOrderTests() {
         writeFileSync(info.outputPath("native-owner-order.json"), JSON.stringify({ scenario, nativeSize, actual: await read(), pane: paneSize(), attached: attached(), events: await page.evaluate(() => { const g = (window as any).__nativeOrder; return { messages: g.messages, zeros: g.zeros, positives: g.positives }; }) }, null, 2));
         await page.screenshot({ path: info.outputPath("native-owner-order.png") });
       } finally {
+        try { writeFileSync(info.outputPath("native-owner-final.json"), JSON.stringify({ scenario, actual: await read(), pane: paneSize(), attached: attached(), messages: await page.evaluate(() => (window as any).__nativeOrder?.messages) }, null, 2)); } catch {}
         await page.screenshot({ path: info.outputPath("native-owner-final.png") }).catch(() => {});
         try { await peer?.close(); }
         finally {

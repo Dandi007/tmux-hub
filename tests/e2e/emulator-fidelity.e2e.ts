@@ -8,3 +8,5 @@ defineNativeViewportFitTests();
 
 import { defineNativeOwnerOrderTests } from "./native-owner-order";
 defineNativeOwnerOrderTests();
+import { defineNativeRecheckProgressTests } from "./native-recheck-progress";
+defineNativeRecheckProgressTests();

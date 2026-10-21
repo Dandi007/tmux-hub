@@ -83,6 +83,7 @@ export function createWsHandlers(deps: WsDeps) {
     // pages reclaim it instead of recording the dead ws as pinner.
     if (ws.data.closed) { released(ws); return; }
     peers.pinned(sessionName, ws);
+    ws.data.nativePinVersion = peers.pinVersion(sessionName);
     ws.data.broadcaster?.syncEmulatorSize(cols, rows);
     for (const p of [ws, ...peers.others(sessionName, ws)]) {
       p.data.viewport = { cols, rows };
@@ -161,6 +162,7 @@ export function createWsHandlers(deps: WsDeps) {
         }
 
         ws.data.viewport = { cols: paneCols, rows: paneRows };
+        ws.data.nativePinVersion = peers.pinVersion(sessionName);
       });
       if (ws.data.closed) return;
 
@@ -300,7 +302,10 @@ export function createWsHandlers(deps: WsDeps) {
         const msg = parsed as { kind?: string; ifPinned?: unknown; afterNative?: unknown };
         // An SSE detach hint is not newer user intent. A web pin published
         // after this native confirmation already has its peer notice in flight.
-        if (msg.kind === "resize" && msg.afterNative === true && ws.data.nativePinVersion !== peers.pinVersion(sessionName)) return;
+        if (msg.kind === "resize" && msg.afterNative === true && ws.data.nativePinVersion !== peers.pinVersion(sessionName)) {
+          try { ws.send(JSON.stringify({ kind: "viewport_checked", ok: true })); } catch {}
+          return;
+        }
         if (msg.kind === "resize" && msg.ifPinned === true && !peers.isPinner(sessionName, ws)) {
           // The peer's ordered publication is already in flight. Do not
           // synthesize web ownership here: a native client may now own it.
@@ -318,6 +323,9 @@ export function createWsHandlers(deps: WsDeps) {
           // so later snapshots stay coherent at the new width.
           pinnedBy(ws, result.cols, result.rows);
         }
+        if (msg.kind === "resize" && msg.afterNative === true) {
+          try { ws.send(JSON.stringify({ kind: "viewport_checked", ok: true })); } catch {}
+        }
       };
       const resize = typeof parsed === "object" && parsed !== null && (parsed as { kind?: string }).kind === "resize";
       (resize ? updateViewport(ws, send) : send()).catch((e: unknown) => {
@@ -329,6 +337,9 @@ export function createWsHandlers(deps: WsDeps) {
           logger.error({ session: sessionName, connId, err: e }, "input send failed");
         }
         try { ws.send(JSON.stringify({ error: msg })); } catch {}
+        if (resize && (parsed as { afterNative?: unknown }).afterNative === true) {
+          try { ws.send(JSON.stringify({ kind: "viewport_checked", ok: false })); } catch {}
+        }
       });
     },
   };

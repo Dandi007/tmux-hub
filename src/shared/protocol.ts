@@ -48,6 +48,8 @@ export type ServerWsMessage =
   // scrollpos replay-done message. The client treats it like a reconnect.
   | { kind: "resync" }
   | { kind: "pong"; ts: number }
+  // Completion for an afterNative resize, including rejection or transient error.
+  | { kind: "viewport_checked"; ok: boolean }
   // owner "web" + peer: another page pinned the pane to cols×rows (adopt it, a
   // resync follows). applied: acknowledgement of our own applied size (also
   // adopt: an intervening peer update may have changed our local grid).
