@@ -166,8 +166,13 @@ export function defineFidelitySuite(test: TestType<PlaywrightTestArgs & { ctx: C
       await page.reload(); await expectInSync(page, ctx, name, "tracked connection before busy output");
       const counters = async () => {
         const text = await (await page.request.get("/metrics")).text();
-        const metric = (name: string) => Number(new RegExp(`^tmux_hub_snapshot_${name}_total (\\d+)$`, "m").exec(text)?.[1] ?? -1);
-        return { snapshots: metric("snapshots"), retries: metric("retries"), overlaps: metric("overlaps") };
+        const metric = (key: string) => {
+          const raw = text.split("\n").find(line => line.startsWith(key + " "))?.slice(key.length + 1);
+          const value = Number(raw);
+          if (raw === undefined || !Number.isFinite(value)) throw Error(`missing snapshot metric: ${key}`);
+          return value;
+        };
+        return { snapshots: metric("tmux_hub_snapshots_total"), retries: metric("tmux_hub_snapshot_retries_total"), overlaps: metric("tmux_hub_snapshot_overlaps_total") };
       };
       const frame = () => existsSync(progress) ? Number(readFileSync(progress, "utf8")) : 0;
       const observe = async (phase: string) => {
@@ -178,7 +183,7 @@ export function defineFidelitySuite(test: TestType<PlaywrightTestArgs & { ctx: C
       writeFileSync(script, `printf '\\033[2J\\033[HHEADER\\nfirst\\nsecond\\nthird\\n'
 ` +
         `i=0; while [ ! -f '${stop}' ]; do i=$((i+1)); printf '\\033[3A'; sleep 0.008; ` +
-        `for row in 0 1 2; do printf '\\r\\033[Kframe %04d row %d\\n' "$i" "$row"; sleep 0.008; done; printf '%s' "$i" > '${progress}'; done; : > '${done}' 
+        `for row in 0 1 2; do printf '\\r\\033[Kframe %04d row %d\\n' "$i" "$row"; sleep 0.008; done; printf '%s' "$i" > '${progress}'; done; : > '${done}'
 ` +
         `while :; do sleep 10; done
 `);
@@ -195,8 +200,10 @@ export function defineFidelitySuite(test: TestType<PlaywrightTestArgs & { ctx: C
         expect(before.scroll).toBe(30);
         const beforeFrame = frame(); await observe("before-disconnect");
         await page.evaluate((n) => window.__tmuxHubTerms![n]!.dropSocket(), name);
+        await expect.poll(() => page.evaluate(() => (window as any).__busyConnections.opens)).toBe(before.connection.opens + 1);
+        const reconnectedFrame = frame();
         await expect.poll(() => page.evaluate(n => window.__tmuxHubTerms![n]!.replays, name)).toBeGreaterThan(before.replays);
-        await expect.poll(frame).toBeGreaterThan(beforeFrame);
+        await expect.poll(frame).toBeGreaterThan(Math.max(beforeFrame, reconnectedFrame));
         await observe("busy-reconnected");
         // Continuous-five-capture overlap + quiet repair is deterministic in
         // ws-busy-recovery.test.ts (real handlers/broadcaster/scheduler/WS).
