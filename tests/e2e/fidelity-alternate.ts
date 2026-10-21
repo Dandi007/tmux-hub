@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { stopOwnedGenerator } from "../helpers/stop-owned-generator";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import type { Page, TestType, Expect, PlaywrightTestArgs, PlaywrightWorkerArgs } from "@playwright/test";
@@ -18,41 +19,38 @@ export function defineAlternateTests(
       const wheelSamples: unknown[] = [];
       const queues = new Map<string, { queued: number; delivered: number; failed: number }>();
       let lastBarrier: unknown = null;
+      const barrierSamples: unknown[] = [];
       try {
       const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
       let delayed = 0;
       await page.addInitScript(n => {
-        const W = window.WebSocket;
-        window.WebSocket = class extends W {
-          constructor(raw: string | URL, protocols?: string | string[]) {
-            const u = new URL(raw), own = decodeURIComponent(u.pathname.split("/").at(-1)!) === n;
-            if (own) u.searchParams.set("alternateTestId", crypto.randomUUID());
-            super(u, protocols);
-            if (own) (window as any).__alternateWire = { id: u.searchParams.get("alternateTestId"), received: 0, resync: 0, completed: 0, wheels: [] };
+        (window as any).__alternateWire = { id: null, received: 0, resync: 0, completed: 0, wheels: [] };
+        // Playwright's routed socket is an EventTarget mock. Count its JS
+        // application dispatch, never the underlying native transport arrival.
+        const dispatch = EventTarget.prototype.dispatchEvent;
+        EventTarget.prototype.dispatchEvent = function(event: Event): boolean {
+          const raw = (this as { url?: string }).url;
+          if (event.type === "message" && raw && decodeURIComponent(new URL(raw).pathname.split("/").at(-1)!) === n) {
+            const g = (window as any).__alternateWire; g.received++;
+            const data = (event as MessageEvent).data;
+            if (typeof data === "string") try {
+              const m = JSON.parse(data);
+              if (m.kind === "resync") g.resync++;
+              if (m.kind === "scrollpos") g.completed = g.resync;
+            } catch {}
           }
-          set onmessage(handler) {
-            super.onmessage = handler ? function(event) {
-              if (decodeURIComponent(new URL(this.url).pathname.split("/").at(-1)!) === n) {
-                const g = (window as any).__alternateWire; g.received++;
-                if (typeof event.data === "string") try {
-                  const m = JSON.parse(event.data);
-                  if (m.kind === "resync") g.resync++;
-                  if (m.kind === "scrollpos") g.completed = g.resync;
-                } catch {}
-              }
-              handler.call(this, event);
-            } : null;
-          }
+          return dispatch.call(this, event);
         };
         document.addEventListener("wheel", () => {
           const p = window.__tmuxHubTerms?.[n], g = (window as any).__alternateWire;
           if (p && g) g.wheels.push({ at: performance.now(), pending: p.replayPending, resyncs: p.resyncs, replays: p.replays });
         }, { capture: true });
       }, name);
-      if (weak) await page.routeWebSocket(u => u.pathname === `/ws/sessions/${name}`, route => {
+      if (weak) await page.routeWebSocket(u => u.pathname === `/ws/sessions/${name}`, async route => {
+        const id = randomUUID(), queue = { queued: 0, delivered: 0, failed: 0 }; queues.set(id, queue);
+        // Assign route identity explicitly before this route can receive data.
+        await page.evaluate(id => { (window as any).__alternateWire = { id, received: 0, resync: 0, completed: 0, wheels: [] }; }, id);
         const server = route.connectToServer(); let tail = Promise.resolve();
-        const id = new URL(route.url()).searchParams.get("alternateTestId")!;
-        const queue = { queued: 0, delivered: 0, failed: 0 }; queues.set(id, queue);
         server.onMessage(message => {
           // Delay only actual frames, in order; no replacement snapshots.
           queue.queued++;
@@ -100,6 +98,7 @@ export function defineAlternateTests(
           const checks = { parsed: !wire.pending, completed: wire.completed === wire.resync,
             queuePresent: !!queue, noDeliveryError: !queue?.failed, queueDrained: queue?.queued === queue?.delivered, browserReceived: wire.received === queue?.delivered };
           lastBarrier = { at: Date.now(), wire, queue: queue ? { ...queue } : null, checks };
+          barrierSamples.push(lastBarrier);
           return checks.parsed && checks.completed && (!weak || (checks.queuePresent && checks.noDeliveryError && checks.queueDrained && checks.browserReceived));
         }, { message: "normal history setup waits for current weak queue and last announced replay to parse" }).toBe(true);
         const before = await sample();
@@ -109,7 +108,10 @@ export function defineAlternateTests(
         const actualInput = await page.evaluate(() => (window as any).__alternateWire.wheels.at(-1));
         await page.waitForTimeout(250);
         wheelSamples.push({ before, actualInput, queue: [...queues.values()].map(q => ({ ...q })), after: await sample() });
-        if (normalHistory) expect(actualInput.pending, "normal history setup: actual wheel arrived during replay").toBe(false);
+        if (normalHistory) {
+          writeFileSync(info.outputPath("alternate-barrier.json"), JSON.stringify({ barrierSamples, wheelSamples }, null, 2));
+          expect(actualInput.pending, "normal history setup: actual wheel arrived during replay").toBe(false);
+        }
       };
       const grid = (await view()).size;
       await wheel();
@@ -156,7 +158,7 @@ export function defineAlternateTests(
       await expectInSync(page, ctx, name, "normal history still navigates and reconnects");
       if (weak) expect(delayed).toBeGreaterThan(0);
       } catch (error) {
-        writeFileSync(info.outputPath("alternate-failure.json"), JSON.stringify({ originalError: error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : String(error), lastBarrier, wheelSamples, queues: [...queues.entries()], wire: await page.evaluate(() => (window as any).__alternateWire),
+        writeFileSync(info.outputPath("alternate-failure.json"), JSON.stringify({ originalError: error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : String(error), lastBarrier, barrierSamples, wheelSamples, queues: [...queues.entries()], wire: await page.evaluate(() => (window as any).__alternateWire),
           probe: await page.evaluate(n => { const p = window.__tmuxHubTerms?.[n]; return p ? { state: p.state, scroll: p.linesFromBottom, replays: p.replays, resyncs: p.resyncs, lines: p.screen() } : null; }, name).catch(() => null),
           pane: ctx.tmuxE2E(["capture-pane", "-p", "-t", name]),
           modes: ctx.tmuxE2E(["display", "-p", "-t", name, "#{alternate_on} #{history_size} #{mouse_standard_flag} #{mouse_sgr_flag}"]),
