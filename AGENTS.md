@@ -42,6 +42,8 @@
 
 - [Native viewport fit](docs/superpowers/specs/2026-10-21-native-viewport-fit-design.md) —— preserve native grids through online browser layout changes.
 
+- [Native ownership event ordering](docs/superpowers/specs/2026-10-21-native-owner-order-design.md) —— native release/detach 与真实 CONNECTING 握手验收。
+
 ## 5  运行命令速查
 
 ```bash

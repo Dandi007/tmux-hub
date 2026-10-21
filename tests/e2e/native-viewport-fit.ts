@@ -11,7 +11,7 @@ const normalized = (lines: string[]) => {
   return result;
 };
 
-async function stopNative(child: ChildProcess): Promise<void> {
+export async function stopNative(child: ChildProcess): Promise<void> {
   const alive = () => child.exitCode === null && child.signalCode === null && child.pid !== undefined;
   if (!alive()) return;
   let timer: ReturnType<typeof setTimeout> | undefined;

@@ -96,30 +96,30 @@ describe("shouldSendResize", () => {
 });
 
 describe("handleSessionActivity", () => {
-  test("native→web: attached drops to 0 triggers reclaim", () => {
+  test("detach requests authority without changing displayed native grid", () => {
     const current: ViewportState = { owner: "native", cols: 120, rows: 40 };
-    const result = handleSessionActivity(current, 0, 100, 30);
-    expect(result.next).toEqual({ owner: "web", cols: 100, rows: 30 });
-    expect(result.action).toEqual({ type: "resize", cols: 100, rows: 30 });
+    const result = handleSessionActivity(current, 0);
+    expect(result.next).toEqual(current);
+    expect(result.action).toEqual({ type: "reclaim" });
   });
 
   test("native→native: attached remains >0 no action", () => {
     const current: ViewportState = { owner: "native", cols: 120, rows: 40 };
-    const result = handleSessionActivity(current, 1, 100, 30);
+    const result = handleSessionActivity(current, 1);
     expect(result.next).toEqual(current);
     expect(result.action).toEqual({ type: "none" });
   });
 
   test("web→web: attached changes but already web owner", () => {
     const current: ViewportState = { owner: "web", cols: 100, rows: 30 };
-    const result = handleSessionActivity(current, 0, 110, 35);
+    const result = handleSessionActivity(current, 0);
     expect(result.next).toEqual(current);
     expect(result.action).toEqual({ type: "none" });
   });
 
   test("web→web: attached becomes >0 but already web owner", () => {
     const current: ViewportState = { owner: "web", cols: 100, rows: 30 };
-    const result = handleSessionActivity(current, 1, 110, 35);
+    const result = handleSessionActivity(current, 1);
     expect(result.next).toEqual(current);
     expect(result.action).toEqual({ type: "none" });
   });
@@ -146,3 +146,25 @@ describe("handleViewportMessage: another web page on the session", () => {
     expect(shouldSendResize(r.next)).toBe(true);
   });
 });
+
+ test("old web pinner release cannot take ownership from native", () => {
+   const native: ViewportState = { owner: "native", cols: 80, rows: 23 };
+   expect(handleViewportMessage({ kind: "viewport", cols: 197, rows: 47, owner: "web", released: true }, native))
+     .toEqual({ next: native, action: { type: "none" } });
+ });
+
+ test("ordinary web zero activity waits for native metadata before any reclaim", () => {
+   const web: ViewportState = { owner: "web", cols: 197, rows: 47 };
+   expect(handleSessionActivity(web, 0)).toEqual({ next: web, action: { type: "none" } });
+ });
+
+ test("a still-native display rechecks a repeated zero without stealing a web peer", () => {
+   const native: ViewportState = { owner: "native", cols: 80, rows: 23 };
+   expect(handleSessionActivity(native, 0).action).toEqual({ type: "reclaim" });
+   expect(handleSessionActivity({ ...native, owner: "web" }, 0).action).toEqual({ type: "none" });
+ });
+
+ test("first ordinary zero activity does not reclaim a confirmed web peer", () => {
+   const web: ViewportState = { owner: "web", cols: 56, rows: 40 };
+   expect(handleSessionActivity(web, 0).action).toEqual({ type: "none" });
+ });

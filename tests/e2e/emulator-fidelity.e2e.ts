@@ -5,3 +5,6 @@ defineFidelitySuite(test, expect);
 
 import { defineNativeViewportFitTests } from "./native-viewport-fit";
 defineNativeViewportFitTests();
+
+import { defineNativeOwnerOrderTests } from "./native-owner-order";
+defineNativeOwnerOrderTests();

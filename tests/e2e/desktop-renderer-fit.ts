@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures";
-import { bindSecret } from "./helpers";
+import { bindSecret, waitForRegisteredSessions } from "./helpers";
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
@@ -12,7 +12,7 @@ async function open(page: Page) {
 async function gate(page: Page, armed: boolean, target = "", proxyPort = 0, holdViewport = false) {
   await page.addInitScript(({ armed, target, proxyPort, holdViewport }) => {
     const schedule = window.setTimeout;
-    const g = (window as any).__rendererGate = { armed, callbacks: [] as { phase: number; run: () => void }[], messages: [] as unknown[], sockets: [] as WebSocket[], holdRetry: false, holdActivity: false, heldActivity: [] as (() => void)[], holdViewport, heldViewport: [] as (() => void)[] };
+    const g = (window as any).__rendererGate = { armed, callbacks: [] as { phase: number; run: () => void }[], messages: [] as unknown[], sockets: [] as WebSocket[], holdRetry: false, holdActivity: false, heldActivity: [] as (() => void)[], navigation: crypto.randomUUID(), connection: 0, holdViewport, heldViewport: [] as (() => void)[] };
     window.setTimeout = ((fn: TimerHandler, delay?: number, ...args: unknown[]) => {
       const source = typeof fn === "function" ? String(fn) : "";
       const host = Array.from(document.querySelectorAll(".terminal-host")).at(-1);
@@ -31,7 +31,10 @@ async function gate(page: Page, armed: boolean, target = "", proxyPort = 0, hold
     window.WebSocket = class extends Native {
       constructor(url: string | URL, protocols?: string | string[]) {
         const u = new URL(url);
-        if (proxyPort && decodeURIComponent(u.pathname.split("/").at(-1)!) === target) u.port = String(proxyPort);
+        if (proxyPort && decodeURIComponent(u.pathname.split("/").at(-1)!) === target) {
+          u.port = String(proxyPort);
+          u.searchParams.set("rendererTestId", `${g.navigation}:${++g.connection}`);
+        }
         super(u, protocols);
         if (decodeURIComponent(u.pathname.split("/").at(-1)!) === target) g.sockets.push(this);
       }
@@ -115,13 +118,26 @@ export function defineRendererFitTests() {
     const proxy = await holdWebSocketUpgrade(Number(ctx.port));
     const pane = () => ctx.tmuxE2E(["display", "-p", "-t", b, "#{pane_width}x#{pane_height}"]);
     try {
+      // No app runs before the gated navigation: old Upgrade requests can pin
+      // even after reload cancels their browser side.
+      await page.goto("/system/health"); await bindSecret(page);
+      await waitForRegisteredSessions(page, [a, b]);
       await gate(page, true, b, proxy.port);
       await page.addInitScript(n => localStorage.setItem("tmux-hub.last-session", n), initiallyPinned ? b : a);
-      await page.setViewportSize({ width: 1400, height: 900 }); await open(page);
+      await page.setViewportSize({ width: 1400, height: 900 }); await page.goto("/?debug=term");
       await expect(tab(page, b)).toBeVisible();
-      await page.reload(); // Restore B from a registry snapshot containing both owned sessions.
       await expect.poll(() => page.evaluate(() => (window as any).__rendererGate.callbacks.filter((x: any) => x.phase === 50).length)).toBe(1);
-      await expect.poll(() => proxy.buffered()).toBeGreaterThan(0);
+      await expect.poll(() => page.evaluate(() => (window as any).__rendererGate.sockets.length)).toBe(1);
+      const connection = await page.evaluate(() => {
+        const g = (window as any).__rendererGate, socket = g.sockets[0], u = new URL(socket.url);
+        return { id: u.searchParams.get("rendererTestId"), pin: u.searchParams.get("pin") ?? "1", ready: socket.readyState };
+      });
+      await expect.poll(() => proxy.upgrades().find(u => u.id === connection.id)?.accepted).toBe(true);
+      expect(proxy.upgrades()).toHaveLength(1);
+      expect(connection.pin).toBe(initiallyPinned ? "1" : "0"); expect(connection.ready).toBe(0);
+      await expect.poll(async () => ({ a: (await view(page, a))?.visible, b: (await view(page, b))?.visible }))
+        .toEqual({ a: !initiallyPinned, b: initiallyPinned });
+      if (!initiallyPinned) expect(pane()).toBe("80x24");
       await tab(page, b).click();
       expect(await page.evaluate(() => (window as any).__rendererGate.sockets[0]?.readyState)).toBe(0);
       const before = await view(page, b);
@@ -136,7 +152,7 @@ export function defineRendererFitTests() {
       proxy.release();
       await expect.poll(async () => (await view(page, b))?.replays ?? 0).toBeGreaterThan(0);
       await page.evaluate(() => (window as any).__fireRenderer(100));
-      writeFileSync(info.outputPath("connecting-renderer.json"), JSON.stringify({ before, measured, pane: pane(), messages: await page.evaluate(() => (window as any).__rendererGate.messages) }));
+      writeFileSync(info.outputPath("connecting-renderer.json"), JSON.stringify({ connection, upstream: proxy.upgrades(), before, measured, pane: pane(), messages: await page.evaluate(() => (window as any).__rendererGate.messages) }));
       expect((await view(page, b))?.visible).toBe(false);
       await expect.poll(() => pane()).toBe(measured.size);
     } finally {

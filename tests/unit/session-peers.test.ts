@@ -25,3 +25,11 @@ test("a pinner that never joined (closed mid-attach) still clears on remove", ()
   expect(p.remove("s", "a")).toBe(true);
   expect(p.size()).toBe(0);
 });
+
+
+test("pin generations distinguish repeated pins by the same page and clear with peers", () => {
+  const p = new SessionPeers<string>(); p.add("s", "a");
+  p.pinned("s", "a"); const first = p.pinVersion("s");
+  p.pinned("s", "a"); expect(p.pinVersion("s")).toBeGreaterThan(first);
+  p.remove("s", "a"); expect(p.pinVersion("s")).toBe(0);
+});

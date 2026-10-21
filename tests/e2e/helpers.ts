@@ -77,3 +77,21 @@ export function makeCreateSession(baseUrl: string): {
   };
   return { createSession, cleanup };
 }
+
+/** Finish fixture registration before the single application navigation. */
+export async function waitForRegisteredSessions(page: Page, names: string[]): Promise<void> {
+  await page.evaluate(names => new Promise<void>((resolve, reject) => {
+    const events = new EventSource("/events");
+    const known = new Set<string>();
+    const finish = (error?: Error) => { clearTimeout(timer); events.close(); error ? reject(error) : resolve(); };
+    const timer = setTimeout(() => finish(new Error("fixture sessions missing from registry")), 5000);
+    events.onerror = () => finish(new Error("registry SSE failed"));
+    events.onmessage = event => {
+      const m = JSON.parse(event.data);
+      if (m.event === "snapshot") for (const s of m.payload) known.add(s.name);
+      if (m.event === "session_created") known.add(m.payload.name);
+      if (m.event === "session_removed") known.delete(m.payload.name);
+      if (names.every(n => known.has(n))) finish();
+    };
+  }), names);
+}

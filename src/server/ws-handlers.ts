@@ -29,6 +29,8 @@ export type WsData = {
   // Latest applied web size, including updates received before attach is ready.
   viewport?: { cols: number; rows: number };
   closed?: boolean;
+  // Web pin generation when this connection last received native authority.
+  nativePinVersion?: number;
 };
 
 export function clampInt(v: number, lo: number, hi: number, fallback: number): number {
@@ -153,6 +155,7 @@ export function createWsHandlers(deps: WsDeps) {
           if (size) {
             paneCols = size.cols;
             paneRows = size.rows;
+            ws.data.nativePinVersion = peers.pinVersion(sessionName);
             try { ws.send(JSON.stringify({ kind: "viewport", cols: size.cols, rows: size.rows, owner: "native" })); } catch {}
           }
         }
@@ -294,7 +297,10 @@ export function createWsHandlers(deps: WsDeps) {
       const send = async (): Promise<void> => {
         // Renderer initialization is not new user intent. Check inside the
         // serialized mutation, since a peer pin may already be queued ahead.
-        const msg = parsed as { kind?: string; ifPinned?: unknown };
+        const msg = parsed as { kind?: string; ifPinned?: unknown; afterNative?: unknown };
+        // An SSE detach hint is not newer user intent. A web pin published
+        // after this native confirmation already has its peer notice in flight.
+        if (msg.kind === "resize" && msg.afterNative === true && ws.data.nativePinVersion !== peers.pinVersion(sessionName)) return;
         if (msg.kind === "resize" && msg.ifPinned === true && !peers.isPinner(sessionName, ws)) {
           // The peer's ordered publication is already in flight. Do not
           // synthesize web ownership here: a native client may now own it.
@@ -303,6 +309,7 @@ export function createWsHandlers(deps: WsDeps) {
         const result = await input.send(sessionName, parsed as Parameters<typeof input.send>[1]);
         // If resize was skipped (native attached), send authoritative viewport back
         if (result?.skipped && result.cols && result.rows) {
+          ws.data.nativePinVersion = peers.pinVersion(sessionName);
           try {
             ws.send(JSON.stringify({ kind: "viewport", cols: result.cols, rows: result.rows, owner: "native" }));
           } catch {}

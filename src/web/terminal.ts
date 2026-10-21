@@ -103,7 +103,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   let publishRendererViewport = (): void => {};
   let connectionPending = true;
   let rendererOwnsViewport = false;
-  let pendingExplicitSize: { cols: number; rows: number } | null = null;
+  let pendingExplicitSize: { cols: number; rows: number; afterNative?: true } | null = null;
   let coveredExplicitIntent: { cols: number; rows: number } | null = null;
   let pendingRendererSize: { cols: number; rows: number } | null = null;
   let flushRendererViewport = (): void => {};
@@ -465,6 +465,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     rows: term.rows,
   };
 
+  let nativeRecheckPending = false;
+  let nativeReplyNeedsRecheck = false;
+
   // ── State machine ──────────────────────────────────────────────────
   let currentState: TerminalState = "connected";
   let stateListeners: Array<(state: TerminalState, attempt?: number) => void> = [];
@@ -711,6 +714,14 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                   flushExplicitViewport();
                 }
                 flushRendererViewport();
+                // A detach SSE may have arrived before this older native
+                // reply. Recheck once on the same ordered WS, after adopting
+                // it, without treating ordinary web activity as new pin intent.
+                if (msg.owner === "native" && nativeReplyNeedsRecheck) {
+                  nativeReplyNeedsRecheck = false;
+                  nativeRecheckPending = true;
+                  recheckNativeViewport();
+                }
                 return;
               }
               if (kind === "resync") {
@@ -997,6 +1008,15 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     pendingRendererSize = null; // This measured grid is covered by the explicit pin.
     queuedSend({ kind: "resize", ...size });
   };
+  const recheckNativeViewport = (): void => {
+    if (!nativeRecheckPending || !isTermVisible()) return;
+    const size = fit.proposeDimensions();
+    if (!size) return;
+    nativeRecheckPending = false;
+    pendingExplicitSize = { ...size, afterNative: true };
+    coveredExplicitIntent = null;
+    flushExplicitViewport();
+  };
   const onResize = () => {
     // Native owns the displayed grid too: fitting locally would reflow the
     // screen without resizing the pane or receiving an aligned snapshot.
@@ -1007,6 +1027,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     // Capture this fit now: a delayed viewport acknowledgement could replace
     // term.cols/rows before a debounced sender reads them.
     sendResizeIfVisible();
+    recheckNativeViewport();
   };
   window.addEventListener("resize", onResize);
 
@@ -1132,17 +1153,20 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       // now, not debounced: a quick switch away would hide the slot before a
       // debounced send fires, and the catch-up would be lost.
       sendResizeIfVisible();
+      recheckNativeViewport();
       applyPendingScrollDecision();
     },
-    notifySessionActivity: (attached: number, cols: number, rows: number) => {
+    notifySessionActivity: (attached: number) => {
       if (disposed) return;
-      const result = handleSessionActivity(viewportState, attached, cols, rows);
-      viewportState = result.next;
-      if (result.action.type === "resize") {
-        // Native detached → web reclaims ownership, fit and send resize
-        try { fit.fit(); } catch {}
-        sendResizeIfVisible();
-        console.log(`[tmux-hub] viewport reclaimed by web: ${term.cols}x${term.rows}`);
+      const result = handleSessionActivity(viewportState, attached);
+      nativeReplyNeedsRecheck = attached === 0;
+      if (result.action.type === "reclaim") {
+        nativeReplyNeedsRecheck = false;
+        // SSE and WS have independent ordering. Ask on the WS even if its
+        // earlier native reply is still in flight; leave the displayed grid
+        // alone until the ordered applied/native response actually arrives.
+        nativeRecheckPending = true;
+        recheckNativeViewport();
       }
     },
     close: () => {

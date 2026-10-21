@@ -25,6 +25,7 @@ afterEach(async () => { for (const fn of cleanups.splice(0)) await fn(); });
 // Real WS + production handlers/reducer. Only the tmux and snapshot boundary
 // timings are controlled; assertions concern the final pane and client grids.
 function start(opts: {
+  native?: () => number;
   send?: (session: string, msg: any) => Promise<any>;
   pin?: (cols: number) => Promise<void>;
   attach?: (cols: number) => Promise<void>;
@@ -44,17 +45,19 @@ function start(opts: {
   };
   const h = createWsHandlers({
     broadcasters: { get: async () => { await opts.get?.(); return broadcaster as any; } },
-    getNativeAttachCount: async () => 0,
+    getNativeAttachCount: async () => opts.native?.() ?? 0,
     pinViewport: async (_name, cols) => { pane = cols; await opts.pin?.(cols); },
     tmux: async () => ({ stdout: `${pane}|24`, stderr: "", code: 0 }),
     sse: { emit() {} }, managedDb: { getScrollPos: () => null, setScrollPos() {} },
     input: { send: async (name: string, msg: any) => {
+      if (msg.kind === "resize" && opts.native?.()) return { skipped: true, cols: pane, rows: 24 };
       if (msg.kind === "resize") { applied.push(msg.cols); pane = msg.cols; }
       return opts.send ? opts.send(name, msg) : { cols: msg.cols, rows: msg.rows };
     } } as any,
     logger: { info() {}, warn() {}, error() {}, debug() {} } as any,
   });
   let id = 0;
+  let received = 0;
   const server = Bun.serve({
     hostname: "127.0.0.1", port: 0,
     fetch(req, srv) {
@@ -64,7 +67,7 @@ function start(opts: {
         connId: `c${++id}`, unsubs: [], resyncCapable: true, pin: true,
       };
       return srv.upgrade(req, { data }) ? undefined : new Response("no", { status: 426 });
-    }, websocket: h,
+    }, websocket: { ...h, message(ws, raw) { received++; h.message(ws, raw); } },
   });
   async function connect(cols: number, attached = true, session = "s"): Promise<Client> {
     const c = { cols, attached: false, messages: [] as any[], ws: new WebSocket(`ws://127.0.0.1:${server.port}/?cols=${cols}&session=${session}`) };
@@ -90,7 +93,7 @@ function start(opts: {
     await until(() => h.connections() === 0); server.stop(true);
     expect(listeners.size).toBe(0); expect(h.peers.size()).toBe(0);
   });
-  return { connect, resize, applied, snapshots, resyncs, pane: () => pane, connections: h.connections };
+  return { connect, resize, applied, snapshots, resyncs, pane: () => pane, connections: h.connections, received: () => received };
 }
 
 test("concurrent resizes publish in applied order and both pages adopt the final size", async () => {
@@ -211,4 +214,56 @@ test("automatic correction checks the pinner when its queued mutation executes",
   } finally { g.release(); }
   await until(() => hub.applied.filter(c => c === 169).length === 2);
   expect(hub.applied).toEqual([177, 169, 169]); expect(hub.pane()).toBe(169);
+});
+
+
+test("late native detach recheck cannot overwrite a newer peer pin", async () => {
+  let native = 0;
+  const hub = start({ native: () => native });
+  const a = await hub.connect(120), b = await hub.connect(183);
+  native = 1;
+  hub.resize(a, 121);
+  await until(() => a.messages.some(m => m.owner === "native"));
+  native = 0;
+  hub.resize(b, 155);
+  await until(() => a.messages.some(m => m.peer && m.cols === 155));
+  const before = hub.received();
+  a.ws.send(JSON.stringify({ kind: "resize", cols: 121, rows: 24, afterNative: true }));
+  await until(() => hub.received() > before);
+  // This actual later mutation must pass through the same session queue.
+  hub.resize(b, 166);
+  await until(() => b.messages.some(m => m.applied && m.cols === 166));
+  expect(hub.pane()).toBe(166);
+  expect(hub.applied).toEqual([155, 166]);
+});
+
+test("native detach recheck can reclaim when no later web pin intervened", async () => {
+  let native = 1;
+  const hub = start({ native: () => native });
+  const a = await hub.connect(120);
+  await until(() => a.messages.some(m => m.owner === "native"));
+  native = 0;
+  a.ws.send(JSON.stringify({ kind: "resize", cols: 121, rows: 24, afterNative: true }));
+  await until(() => a.messages.some(m => m.applied && m.cols === 121));
+  expect(hub.pane()).toBe(121);
+});
+
+
+test("native detach condition is checked after a queued peer mutation publishes", async () => {
+  let native = 0;
+  const g = gate();
+  const hub = start({ native: () => native, send: async (_name, msg) => {
+    if (msg.cols === 155) await g.wait();
+    return { cols: msg.cols, rows: 24 };
+  } });
+  const a = await hub.connect(120), b = await hub.connect(183);
+  native = 1; hub.resize(a, 121);
+  await until(() => a.messages.some(m => m.owner === "native"));
+  native = 0; hub.resize(b, 155); await g.reached;
+  const before = hub.received();
+  a.ws.send(JSON.stringify({ kind: "resize", cols: 121, rows: 24, afterNative: true }));
+  await until(() => hub.received() > before); g.release();
+  hub.resize(b, 166);
+  await until(() => b.messages.some(m => m.applied && m.cols === 166));
+  expect(hub.applied).toEqual([155, 166]);
 });

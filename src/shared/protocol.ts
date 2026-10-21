@@ -26,7 +26,8 @@ export type ClientWsMessage =
   // xterm onBinary carries Latin1 bytes (legacy mouse), not UTF8 text.
   | { kind: "binary"; data: string }
   | { kind: "key"; name: string }
-  | { kind: "resize"; cols: number; rows: number; ifPinned?: true }
+  // afterNative: automatic detach recheck; never supersede a later web pin.
+  | { kind: "resize"; cols: number; rows: number; ifPinned?: true; afterNative?: true }
   // Mouse-wheel forwarding: alternate-screen TUI apps (claude code, vim, less)
   // own their off-screen content and run in mouse mode, so a mobile touch-drag
   // is translated into wheel reports the app scrolls itself. col/row are 1-based
