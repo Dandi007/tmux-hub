@@ -1,6 +1,7 @@
 import { test, expect } from "./emulator-fixtures";
 import { bindSecret } from "./helpers";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
+import type { BrowserContext, Page } from "@playwright/test";
 import { writeFileSync } from "node:fs";
 
 const normalized = (lines: string[]) => {
@@ -8,6 +9,28 @@ const normalized = (lines: string[]) => {
   while (result.at(-1) === "") result.pop();
   return result;
 };
+
+async function stopNative(child: ChildProcess): Promise<void> {
+  const alive = () => child.exitCode === null && child.signalCode === null && child.pid !== undefined;
+  if (!alive()) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let ended!: () => void;
+  const exited = new Promise<void>(resolve => { ended = resolve; });
+  child.once("exit", ended);
+  try {
+    child.kill();
+    await Promise.race([exited, new Promise<void>(resolve => { timer = setTimeout(resolve, 1000); })]);
+    clearTimeout(timer);
+    if (alive()) {
+      child.kill("SIGKILL");
+      await Promise.race([exited, new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("native TTY child did not exit")), 2000);
+      })]);
+    }
+  } finally {
+    clearTimeout(timer); child.removeListener("exit", ended); child.stdin?.destroy();
+  }
+}
 
 export function defineNativeViewportFitTests() {
   for (const mobile of [false, true]) {
@@ -22,12 +45,14 @@ export function defineNativeViewportFitTests() {
         ? ["-q", "-c", `tmux -L ${ctx.socket} attach -t ${name}`, "/dev/null"]
         : ["-q", "/dev/null", "tmux", "-L", ctx.socket, "attach", "-t", name];
       const native = spawn("script", args, { env, stdio: ["pipe", "ignore", "ignore"] });
-      const context = await browser.newContext({ baseURL, viewport: mobile ? { width: 430, height: 900 } : { width: 1400, height: 900 }, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 1 });
-      const page = await context.newPage();
+      let launchError: Error | undefined;
+      native.once("error", error => { launchError = error; });
+      let context: BrowserContext | undefined;
+      let page: Page;
       const observations: unknown[] = [];
       const read = () => page.evaluate(n => {
         const p = window.__tmuxHubTerms?.[n];
-        return p ? { size: `${p.cols}x${p.rows}`, measured: p.measuredSize, screen: p.screen(), state: p.state, visible: p.visible, replays: p.replays, pending: p.replayPending } : null;
+        return p ? { size: `${p.cols}x${p.rows}`, measured: p.measuredSize, screen: p.screen(), state: p.state, visible: p.visible, replays: p.replays, pending: p.replayPending, scroll: p.linesFromBottom } : null;
       }, name);
       const snapshot = async (phase: string) => {
         const value = { phase, browser: await read(), pane: { size: paneSize(), screen: tmux("capture-pane", "-p", "-t", name).split("\n") }, attached: attached() };
@@ -38,11 +63,13 @@ export function defineNativeViewportFitTests() {
       };
       const inSync = async () => {
         const b = await read();
-        return b?.state === "connected" && b.visible && !b.pending && b.size === paneSize()
+        return b?.state === "connected" && b.visible && !b.pending && b.scroll === 0 && b.size === paneSize()
           && JSON.stringify(normalized(b.screen)) === JSON.stringify(normalized(tmux("capture-pane", "-p", "-t", name).split("\n")));
       };
       try {
-        await expect.poll(attached).toBeGreaterThan(0);
+        context = await browser.newContext({ baseURL, viewport: mobile ? { width: 430, height: 900 } : { width: 1400, height: 900 }, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 1 });
+        page = await context.newPage();
+        await expect.poll(() => { if (launchError) throw launchError; return attached(); }).toBeGreaterThan(0);
         const nativeSize = paneSize();
         tmux("send-keys", "-t", name, "printf '\\033[2J\\033[H'; i=1; while [ $i -le 80 ]; do printf 'NATIVE %03d 中文 │ output\\n' $i; i=$((i+1)); done; printf '%79sX\\nNATIVE_END\\n' ''", "Enter");
         await expect.poll(() => tmux("capture-pane", "-p", "-t", name).split("\n").some(line => line.trim() === "NATIVE_END")).toBe(true);
@@ -83,9 +110,11 @@ export function defineNativeViewportFitTests() {
         await expect.poll(inSync).toBe(true);
         await snapshot("reclaimed");
       } finally {
-        if (attached() > 0) tmux("detach-client", "-s", name);
-        await context.close();
-        if (native.exitCode === null) await new Promise<void>(resolve => { native.once("exit", () => resolve()); native.kill(); });
+        try {
+          if (attached() > 0) tmux("detach-client", "-s", name);
+        } finally {
+          try { await context?.close(); } finally { await stopNative(native); }
+        }
       }
     });
   }
