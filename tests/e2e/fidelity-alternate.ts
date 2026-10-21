@@ -153,7 +153,7 @@ export function defineAlternateTests(
       await expectInSync(page, ctx, name, "normal history still navigates and reconnects");
       if (weak) expect(delayed).toBeGreaterThan(0);
       } catch (error) {
-        writeFileSync(info.outputPath("alternate-failure.json"), JSON.stringify({ wheelSamples,
+        writeFileSync(info.outputPath("alternate-failure.json"), JSON.stringify({ wheelSamples, queues: [...queues.entries()], wire: await page.evaluate(() => (window as any).__alternateWire),
           probe: await page.evaluate(n => { const p = window.__tmuxHubTerms?.[n]; return p ? { state: p.state, scroll: p.linesFromBottom, replays: p.replays, resyncs: p.resyncs, lines: p.screen() } : null; }, name).catch(() => null),
           pane: ctx.tmuxE2E(["capture-pane", "-p", "-t", name]),
           modes: ctx.tmuxE2E(["display", "-p", "-t", name, "#{alternate_on} #{history_size} #{mouse_standard_flag} #{mouse_sgr_flag}"]),
