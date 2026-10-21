@@ -996,7 +996,11 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     queuedSend({ kind: "resize", ...size });
   };
   const onResize = () => {
-    try { fit.fit(); } catch {}
+    // Native owns the displayed grid too: fitting locally would reflow the
+    // screen without resizing the pane or receiving an aligned snapshot.
+    if (shouldSendResize(viewportState)) {
+      try { fit.fit(); } catch {}
+    }
     applyPendingScrollDecision();
     // Capture this fit now: a delayed viewport acknowledgement could replace
     // term.cols/rows before a debounced sender reads them.
@@ -1116,7 +1120,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
         applyPendingScrollDecision();
         return;
       }
-      try { fit.fit(); } catch {}
+      if (shouldSendResize(viewportState)) {
+        try { fit.fit(); } catch {}
+      }
       // Pool activation: pin the pane to this (now visible) slot — catches up a
       // resize deferred while hidden, and makes "latest active client wins" hold
       // for tab switches too. Same size → server-side no-op (no resync). Sent
