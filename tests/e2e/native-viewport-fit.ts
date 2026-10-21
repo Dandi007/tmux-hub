@@ -84,7 +84,7 @@ export function defineNativeViewportFitTests() {
         await expect.poll(() => tmux("capture-pane", "-p", "-t", name).split("\n").some(line => line.trim() === "NATIVE_END")).toBe(true);
         await page.goto(new URL("/?debug=term", baseURL).href); await bindSecret(page);
         await page.evaluate(n => localStorage.setItem("tmux-hub.last-session", n), name);
-        await page.reload();
+        await page.reload(); await page.bringToFront();
         await expect.poll(async () => {
           await page.evaluate(n => window.__tmuxHub?.openSession?.(n), name);
           return inSync();
@@ -98,6 +98,7 @@ export function defineNativeViewportFitTests() {
         await expect.poll(inSync, { message: "native online resize must preserve actual pane grid and screen" }).toBe(true);
         // Real pointer interaction runs the shared reassert path on both views.
         await page.locator(".xterm-screen:visible").first().click({ position: { x: 20, y: 20 } });
+        await page.evaluate(() => { (window as any).__nativeVisibility = []; });
         const cover = await context.newPage();
         await (await context.newCDPSession(cover)).send("Emulation.setFocusEmulationEnabled", { enabled: false });
         await cover.goto("about:blank"); await cover.bringToFront();
