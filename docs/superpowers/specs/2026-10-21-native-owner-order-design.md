@@ -66,3 +66,5 @@ PR165首CI39540182006真实红：手机busy reconnect在overlapCount>3注入前�
 最终测试校准：关键往返提示交付后不再输入；marker在竞态前准备。随后暂停实际SSE并保持同一WS，必须先取得grid/screen收敛，再恢复真实SSE、观察4.5秒计数静止并复核最终尺寸/画面/连接数。避免额外activity掩盖丢需求。私有全套full8的vim WS错误已定位为测试写死3202、连接到另一个CI实例；vim测试改从本树emulator env文件读取端口，产品无变化。最终精确head CI仍作为完整门禁，原失败及未运行不计通过。
 
 收尾断言同时固定native仍attached1、pane与browser均80×23，分别在暂停SSE的首次收敛点及静止窗口结束后验证，不能仅两端相等而允许共同错误pin。peer/detach/native子进程清理分别执行并收集错误，保留主异常；独立清理失败仍报错。产品源码继续与ccc相同。
+
+CI整套预算：精确c515/run39544868261的GitHub check119040634587确认超过15m0s，job04:37:15→04:52:42；713单元通过，152E2E已启动但无完整终态汇总。不是产品断言失败或人工取消，不算绿。按主控明确授权仅把CI job timeout-minutes设30，保留全部152项、每项断言及个测timeout。产品src/tests与c515完全相同，最新准确head及merge CI都须完整成功；不沿用超时结果。

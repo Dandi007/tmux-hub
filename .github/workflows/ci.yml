@@ -10,7 +10,9 @@ on:
 jobs:
   build-and-test:
     runs-on: self-hosted
-    timeout-minutes: 15
+    # Full 152-case fidelity gate exceeded the former 15-minute job budget.
+    # Keep all per-case timeouts/assertions; budget build + unit + all profiles.
+    timeout-minutes: 30
     env:
       # Per-run tmux socket: keeps CI's tmux server isolated from the
       # production hub and any other tmux servers on the runner host.
