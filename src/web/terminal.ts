@@ -44,6 +44,8 @@ export type TerminalProbe = {
   readonly measuredSize: string | null;
   /** Visible screen rows as text (trailing blanks trimmed). */
   screen: () => string[];
+  /** Wait for already received bytes to parse without delivering replay-done. */
+  afterParsed: () => Promise<void>;
   dropSocket: () => void;
   /** Viewport distance from the buffer bottom (0 = following the tail). */
   readonly linesFromBottom: number;
@@ -1057,6 +1059,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       }
       return lines;
     },
+    afterParsed: () => new Promise<void>(resolve => { if (disposed) resolve(); else term.write("", resolve); }),
     dropSocket: () => { try { ws.close(); } catch {} },
     get linesFromBottom() { const b = term.buffer.active; return Math.max(0, b.baseY - b.viewportY); },
     get resyncs() { return resyncCount; },
