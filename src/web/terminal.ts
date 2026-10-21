@@ -466,6 +466,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   };
 
   let nativeRecheckPending = false;
+  let nativeProbePending = false;
+  let nativeSentProbe = false;
+  let lastNativeHint = "";
   let nativeRecheckInFlight = false;
   let nativeRequestSequence = 0;
   let nativeRequestId: number | null = null;
@@ -723,8 +726,8 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                 } else if (result.action.type === "reclaim") {
                   reassertViewport();
                 }
-                // A failed initial web pin has no own applied ack. Its plain
-                // viewport permits the still-unsatisfied explicit intent once.
+                // A plain initial web viewport permits still-unsatisfied
+                // explicit intent once the connection has authority.
                 if (msg.owner === "web" && !msg.applied && !msg.peer && !msg.released) {
                   coveredExplicitIntent = null;
                   flushExplicitViewport();
@@ -751,8 +754,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                 }
                 const size = fit.proposeDimensions();
                 nativeRecheckPending = nativeRecheckGeneration !== nativeRecheckSentGeneration
-                  || (viewportState.owner === "web" && rendererOwnsViewport && !!size
+                  || (!nativeSentProbe && viewportState.owner === "web" && rendererOwnsViewport && !!size
                     && (size.cols !== nativeRecheckSize?.cols || size.rows !== nativeRecheckSize?.rows));
+                if (nativeRecheckGeneration === nativeRecheckSentGeneration) nativeProbePending = false;
                 nativeRecheckSize = null;
                 recheckNativeViewport();
                 return;
@@ -1064,7 +1068,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     nativeRecheckSize = size;
     pendingRendererSize = null; // This current measurement covers old renderer work.
     nativeRequestId = ++nativeRequestSequence;
-    queuedSend({ kind: "resize", ...size, afterNative: true, requestId: nativeRequestId });
+    nativeSentProbe = nativeProbePending;
+    if (nativeSentProbe) queuedSend({ kind: "viewport_probe", requestId: nativeRequestId });
+    else queuedSend({ kind: "resize", ...size, afterNative: true, requestId: nativeRequestId });
   };
   const onResize = () => {
     // Native owns the displayed grid too: fitting locally would reflow the
@@ -1205,8 +1211,22 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       recheckNativeViewport();
       applyPendingScrollDecision();
     },
-    notifySessionActivity: (attached: number) => {
+    notifySessionActivity: (attached: number, cols: number, rows: number) => {
       if (disposed) return;
+      if (attached > 0) {
+        nativeReplyNeedsRecheck = false;
+        const hint = `${attached}:${cols}x${rows}`;
+        if (hint !== lastNativeHint && (viewportState.owner !== "native" || viewportState.cols !== cols || viewportState.rows !== rows)) {
+          nativeProbePending = true;
+          nativeRecheckPending = true;
+          nativeRecheckGeneration++;
+          recheckNativeViewport();
+        }
+        lastNativeHint = hint;
+        return;
+      }
+      lastNativeHint = "";
+      nativeProbePending = false;
       const result = handleSessionActivity(viewportState, attached);
       nativeReplyNeedsRecheck = attached === 0;
       if (result.action.type === "reclaim") {

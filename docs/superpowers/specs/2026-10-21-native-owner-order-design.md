@@ -41,4 +41,6 @@ PR164 merge push CI39530842019 的 CONNECTING hidden activation 在调用 render
 
 不改语音、prod/accepted、harness、外部infra；非发布阻断生命周期/VT细节单列backlog。移动视口是Chromium模拟，不冒充物理手机/WebKit/HIL。
 
-未改路径的“网页先连接、native后来接入/调尺寸”SSE正向同步是独立审查发现的静态既有缺口，单列backlog与handoff待真实复核。本spec的native先连接、退出/旧pinner关闭验收不代替该方向；不据此声明完整生产验收通过。
+网页先连接后native attach/实际TTY resize属于本次既定独立发布验收。已在dogfood42c3adfe真实复现桌面197×47、手机56×42未采用native80×23/100×31；补同页无交互、无重连的grid+screen回归。SSE正向提示通过只读viewport_probe在串行WS上查询真实native状态，不凭SSE直接fit，也不因过期正向提示抢web pin；native尺寸发布给该session所有peer并调度对齐snapshot。隐藏页保存需求待激活；detach仍走已有条件resize。
+
+补充独立审查路径：初始web pin失败必须关闭而不是以请求grid宣布成功；截断代理完整缓存HTTP101头后一次发送，显式分片测试与浏览器open计数证明实际Upgrade成功后才断流。

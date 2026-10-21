@@ -47,7 +47,7 @@ function start(opts: {
   const h = createWsHandlers({
     broadcasters: { get: async () => { await opts.get?.(); return broadcaster as any; } },
     getNativeAttachCount: async () => opts.native?.() ?? 0,
-    pinViewport: async (_name, cols) => { pane = cols; await opts.pin?.(cols); },
+    pinViewport: async (_name, cols) => { await opts.pin?.(cols); pane = cols; },
     tmux: async () => opts.paneQuery?.() ?? ({ stdout: `${pane}|24`, stderr: "", code: 0 }),
     sse: { emit() {} }, managedDb: { getScrollPos: () => null, setScrollPos() {} },
     input: { send: async (name: string, msg: any) => {
@@ -74,7 +74,7 @@ function start(opts: {
     const c = { cols, attached: false, messages: [] as any[], ws: new WebSocket(`ws://127.0.0.1:${server.port}/?cols=${cols}&session=${session}`) };
     c.ws.onmessage = (ev) => {
       if (typeof ev.data !== "string") return;
-      const m = JSON.parse(ev.data); c.messages.push(m);
+      let m; try { m = JSON.parse(ev.data); } catch { return; } c.messages.push(m);
       if (m.kind === "scrollpos") c.attached = true;
       if (m.kind === "viewport") {
         const { action } = handleViewportMessage(m, { owner: "web", cols: c.cols, rows: 24 });
@@ -314,4 +314,36 @@ test("native completion preserves its request identity across success and supers
   a.ws.send(JSON.stringify({ kind: "resize", cols: 133, rows: 24, afterNative: true, requestId: 72 }));
   await until(() => a.messages.filter(m => m.kind === "viewport_checked").length === 2);
   expect(a.messages.filter(m => m.kind === "viewport_checked").map(m => m.requestId)).toEqual([71, 72]);
+});
+
+
+test("initial pin failure before pane mutation closes without claiming requested authority", async () => {
+  let fail = true;
+  const hub = start({ pin: async () => { if (fail) { fail = false; throw new Error("pin unavailable"); } } });
+  const a = await hub.connect(140, false);
+  await until(() => a.ws.readyState === WebSocket.CLOSED);
+  expect(hub.pane()).toBe(80); expect(a.messages.some(m => m.kind === "viewport")).toBe(false);
+  const b = await hub.connect(140); expect(b.attached).toBe(true); expect(hub.pane()).toBe(140);
+});
+
+test("positive native hint queries actual grid and resyncs all existing pages", async () => {
+  let native = 0;
+  const hub = start({ native: () => native, paneQuery: () => ({ stdout: "80|24", stderr: "", code: 0 }) });
+  const a = await hub.connect(120), b = await hub.connect(183); native = 1;
+  a.ws.send(JSON.stringify({ kind: "viewport_probe", requestId: 81 }));
+  await until(() => a.messages.some(m => m.kind === "viewport_checked" && m.requestId === 81));
+  await until(() => a.cols === 80 && b.cols === 80 && hub.resyncs.filter(c => c === 80).length === 2);
+  expect(hub.applied).toEqual([]); expect(hub.pane()).toBe(183); // Probe never mutates tmux.
+});
+
+test("stale positive native hint cannot resize a newer web peer, query failure completes false", async () => {
+  let native = 0;
+  const hub = start({ native: () => native, paneQuery: () => ({ stdout: "", stderr: "unavailable", code: 1 }) });
+  const a = await hub.connect(120), b = await hub.connect(183);
+  a.ws.send(JSON.stringify({ kind: "viewport_probe", requestId: 82 }));
+  await until(() => a.messages.some(m => m.kind === "viewport_checked" && m.requestId === 82 && m.ok));
+  expect(hub.pane()).toBe(183); expect(hub.applied).toEqual([]);
+  native = 1; a.ws.send(JSON.stringify({ kind: "viewport_probe", requestId: 83 }));
+  await until(() => a.messages.some(m => m.kind === "viewport_checked" && m.requestId === 83 && !m.ok));
+  expect(a.cols).toBe(183); expect(b.cols).toBe(183);
 });

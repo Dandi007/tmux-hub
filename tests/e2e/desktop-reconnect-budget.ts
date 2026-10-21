@@ -6,12 +6,12 @@ import { writeFileSync } from "node:fs";
 
 export function defineReconnectBudgetTests() {
   test("successful Upgrades without viewport authority obey retry budget and recover on retry", async ({ page, ctx }, info) => {
-    const name = await ctx.createSession(), proxy = await holdWebSocketUpgrade(Number(ctx.port));
+    const name = await ctx.createSession(), proxy = await holdWebSocketUpgrade(Number(ctx.port), true);
     proxy.release(); proxy.cutBeforeViewport(true);
     try {
       await gateNative(page, name, false, proxy.port);
       await page.addInitScript(n => {
-        const g = (window as any).__retryBudget = { inClose: false, delays: [] as number[] };
+        const g = (window as any).__retryBudget = { inClose: false, opens: 0, delays: [] as number[] };
         const schedule = window.setTimeout;
         window.setTimeout = ((fn: TimerHandler, delay?: number, ...args: unknown[]) => {
           if (g.inClose && typeof fn === "function" && delay! >= 300 && delay! <= 60_000) {
@@ -21,6 +21,10 @@ export function defineReconnectBudgetTests() {
         }) as typeof window.setTimeout;
         const W = window.WebSocket;
         window.WebSocket = class extends W {
+          constructor(url: string | URL, protocols?: string | string[]) {
+            super(url, protocols);
+            if (decodeURIComponent(new URL(url).pathname.split("/").at(-1)!) === n) this.addEventListener("open", () => g.opens++);
+          }
           set onclose(handler) {
             super.onclose = handler ? function(event) {
               const own = decodeURIComponent(new URL(this.url).pathname.split("/").at(-1)!) === n;
@@ -36,6 +40,7 @@ export function defineReconnectBudgetTests() {
       await expect.poll(() => page.evaluate(n => window.__tmuxHubTerms?.[n]?.state, name)).toBe("dead");
       const delays = await page.evaluate(() => (window as any).__retryBudget.delays as number[]);
       writeFileSync(info.outputPath("retry-budget.json"), JSON.stringify({ delays, rejected: proxy.rejections() }));
+      expect(await page.evaluate(() => (window as any).__retryBudget.opens)).toBe(9);
       expect(delays).toHaveLength(8); expect(proxy.rejections()).toBe(9);
       expect(Math.max(...delays)).toBeGreaterThan(delays[0]! * 2);
       proxy.cutBeforeViewport(false);

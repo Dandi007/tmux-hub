@@ -4,7 +4,7 @@ type Upgrade = { id: string; cols: string | null; rows: string | null; pin: stri
 
 // Hold real server→browser TCP bytes, including HTTP101. The upstream request
 // still runs: tests must await THIS live navigation's101 before activating it.
-export async function holdWebSocketUpgrade(targetPort: number) {
+export async function holdWebSocketUpgrade(targetPort: number, fragmentHeaders = false) {
   const sockets = new Set<Socket>();
   const waiting = new Set<{ client: Socket; chunks: Buffer[]; upgrade?: Upgrade; rejected?: boolean }>();
   let held = true, cutInitial = false, rejections = 0;
@@ -26,21 +26,27 @@ export async function holdWebSocketUpgrade(targetPort: number) {
       request = "";
     });
     client.pipe(upstream);
-    upstream.on("data", chunk => {
+    let headers: Buffer[] = [];
+    const receive = (chunk: Buffer) => {
       if (queue.rejected) return;
-      if (!queue.upgrade?.accepted) {
-        response += chunk.toString("latin1");
-        if (response.includes("\r\n\r\n")) {
-          if (queue.upgrade) queue.upgrade.accepted = /^HTTP\/1\.[01] 101\b/.test(response);
-          if (cutInitial && queue.upgrade?.accepted) {
-            queue.rejected = true; rejections++;
-            client.end(Buffer.from(response.slice(0, response.indexOf("\r\n\r\n") + 4), "latin1"));
-            return;
-          }
-          response = "";
+      // Buffer the entire header before forwarding any prefix. In cut mode
+      // the browser must receive one valid101, then EOF before viewport data.
+      if (response !== "done") {
+        headers.push(chunk);
+        const all = Buffer.concat(headers), end = all.indexOf("\r\n\r\n");
+        if (end < 0) return;
+        if (queue.upgrade) queue.upgrade.accepted = /^HTTP\/1\.[01] 101\b/.test(all.toString("latin1", 0, end));
+        if (cutInitial && queue.upgrade?.accepted) {
+          queue.rejected = true; rejections++;
+          client.end(all.subarray(0, end + 4)); return;
         }
+        chunk = all; headers = []; response = "done";
       }
       if (held) queue.chunks.push(chunk); else client.write(chunk);
+    };
+    upstream.on("data", chunk => {
+      if (fragmentHeaders && !queue.upgrade?.accepted && chunk.length > 7) { receive(chunk.subarray(0, 7)); receive(chunk.subarray(7)); }
+      else receive(chunk);
     });
     const close = () => { waiting.delete(queue); sockets.delete(client); sockets.delete(upstream); client.destroy(); upstream.destroy(); };
     for (const socket of [client, upstream]) { socket.on("error", close); socket.on("close", close); }
