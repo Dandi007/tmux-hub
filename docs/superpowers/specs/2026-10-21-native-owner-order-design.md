@@ -56,3 +56,7 @@ PR165首CI39540182006真实红：手机busy reconnect在overlapCount>3注入前�
 最终独审补充：往返提示屏障记录应用回调完成后的实际attached/cols/rows及序号，明确等本次80×23提示交付；不以任意正向事件计数代替。新增双网页路径：A实际SSE连接中断且重连受控暂停，B触发真实native100×31广播并延迟A整条WS流；TTY恢复80×23，A先采用旧广播，再恢复真实SSE snapshot。验证同一A WS无交互最终grid/screen收敛。失败诊断先保存原error及已有queue/barrier样本，各外部读取单独兜底，页面失效不能覆盖原始异常。
 
 双网页冻结1d341ff（产品仍220）桌面/手机真实失败：A恢复snapshot已交付attached1/80×23，但显示100×31、pane80×23且同一WS。修复在没有未完成需求时允许相同hint纠正显示mismatch；在途相同hint只drain，不反复创建代次。
+
+补充相反交付顺序：SSE恢复snapshot先到且显示仍80×23，随后旧peer广播100×31才到。snapshot来源作为显式source传到terminal，正向snapshot总安排一次有代次的只读probe；回复位于同一有序WS的旧广播之后，不依赖下一次交互或activity。活动提示仍沿用已有去重/有界退避。新增同一WS的snapshot-first两端回归。失败取证与generator清理各自保存错误，主行为已失败时保留主错误，独立清理失败仍使测试失败。
+
+220精确CI39542391096：713单元过，112E2E过/1失败，其余未跑；手机continuous-exit weak在route分配连接ID时被旧应用导航reload销毁上下文，尚未执行scroll结果，取证也覆盖原异常。fidelity共用openSession改为health页认证+registry前置，再一次进入应用，避免旧导航创建目标WS；刻意fresh-attach reload仍发生在已确认连接/画面之后。原CI日志保留，不直接重跑。snapshot-first冻结aa2ad9a（产品9b）桌面/手机均实测同WS显示100×31/pane80×23。

@@ -6,7 +6,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
 export function defineNativeProbeRoundtripTests() {
-  for (const scenario of ["own-probe", "peer-broadcast"] as const) test(`native TTY size round-trip preserves newer hint ahead of an old ${scenario} reply`, async ({ page, ctx }, info) => {
+  for (const scenario of ["own-probe", "peer-broadcast", "peer-snapshot-first"] as const) test(`native TTY size round-trip preserves newer hint ahead of an old ${scenario} reply`, async ({ page, ctx }, info) => {
     const name = await ctx.createSession(), tmux = (...args: string[]) => ctx.tmuxE2E(args);
     const pane = () => tmux("display", "-p", "-t", name, "#{pane_width}x#{pane_height}");
     const attached = () => Number(tmux("display", "-p", "-t", name, "#{session_attached}"));
@@ -34,7 +34,7 @@ export function defineNativeProbeRoundtripTests() {
       await expect.poll(() => page.evaluate(() => (window as any).__nativeOrder.activity
         .some((s: any) => s.attached > 0 && s.cols === 80 && s.rows === 23))).toBe(true);
       await page.evaluate(() => { (window as any).__nativeOrder.armed = true; });
-      if (scenario === "peer-broadcast") {
+      if (scenario !== "own-probe") {
         // Interrupt this page's actual SSE connection. Hold its reconnect,
         // so only the peer observes the intermediate native size.
         await page.evaluate(() => {
@@ -44,7 +44,7 @@ export function defineNativeProbeRoundtripTests() {
         await expect.poll(() => page.evaluate(() => (window as any).__nativeOrder.sseTimers.length)).toBe(1);
       }
       resize(100, 32); await expect.poll(pane).toBe("100x31");
-      if (scenario === "peer-broadcast") {
+      if (scenario !== "own-probe") {
         peer = await page.context().newPage();
         await peer.goto("/system/health"); await bindSecret(peer);
         await peer.evaluate(n => localStorage.setItem("tmux-hub.last-session", n), name);
@@ -55,11 +55,13 @@ export function defineNativeProbeRoundtripTests() {
       await peer?.close(); peer = undefined;
       const activity = await page.evaluate(() => (window as any).__nativeOrder.activity.length);
       resize(80, 24); await expect.poll(pane).toBe("80x23");
-      if (scenario === "peer-broadcast") {
+      if (scenario !== "own-probe") {
         // Deliver the old broadcast with no local probe in flight, then
         // restore real SSE and wait for its fresh 80x23 snapshot callback.
-        await page.evaluate(() => (window as any).__releaseNative());
-        await expect.poll(async () => (await read())?.size).toBe("100x31");
+        if (scenario === "peer-broadcast") {
+          await page.evaluate(() => (window as any).__releaseNative());
+          await expect.poll(async () => (await read())?.size).toBe("100x31");
+        }
         await page.evaluate(() => {
           const g = (window as any).__nativeOrder; g.holdSseRetry = false;
           for (const reconnect of g.sseTimers.splice(0)) reconnect();
@@ -67,7 +69,7 @@ export function defineNativeProbeRoundtripTests() {
       }
       await expect.poll(() => page.evaluate(start => (window as any).__nativeOrder.activity.slice(start)
         .some((s: any) => s.attached > 0 && s.cols === 80 && s.rows === 23), activity)).toBe(true);
-      if (scenario === "own-probe") expect((await read())!.size).toBe("80x23"); // The 100 reply remains held, in order.
+      if (scenario !== "peer-broadcast") expect((await read())!.size).toBe("80x23"); // The 100 reply remains held, in order.
       tmux("send-keys", "-t", name, "printf '\\033[2J\\033[H'; printf '%79sX\\nROUNDTRIP_END\\n' ''", "Enter");
       await expect.poll(() => tmux("capture-pane", "-p", "-t", name).split("\n").some(s => s.trim() === "ROUNDTRIP_END")).toBe(true);
       await page.evaluate(() => (window as any).__releaseNative());

@@ -30,7 +30,7 @@ export type TerminalHandle = {
   retry: () => void;
   /** false: automatic attach completion, which must respect a newer peer pin. */
   fit: (reclaim?: boolean) => void;
-  notifySessionActivity: (attached: number, cols: number, rows: number) => void;
+  notifySessionActivity: (attached: number, cols: number, rows: number, source?: "activity" | "snapshot") => void;
   readonly isConnected: boolean;
   readonly state: TerminalState;
   onStateChange: (cb: (state: TerminalState, attempt?: number) => void) => void;
@@ -1216,7 +1216,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       recheckNativeViewport();
       applyPendingScrollDecision();
     },
-    notifySessionActivity: (attached: number, cols: number, rows: number) => {
+    notifySessionActivity: (attached: number, cols: number, rows: number, source = "activity") => {
       if (disposed) return;
       if (attached > 0) {
         nativeReplyNeedsRecheck = false;
@@ -1226,7 +1226,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
         // A peer's delayed authority can change the display while our SSE was
         // disconnected. An identical fresh hint must repair that idle mismatch;
         // while a check is unfinished, identical hints only drain existing work.
-        if ((hint !== lastNativeHint && unfinished)
+        if (source === "snapshot" || (hint !== lastNativeHint && unfinished)
           || (mismatch && (hint !== lastNativeHint || !unfinished))) requestNative("probe");
         lastNativeHint = hint;
         // Repeated hints drain unfinished work without replacing its generation.

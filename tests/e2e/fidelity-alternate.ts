@@ -16,6 +16,7 @@ export function defineAlternateTests(
       const name = await ctx.createSession();
       const owned = mkdtempSync("/tmp/e2e-alt-exit-");
       let continuousStarted = false;
+      let primaryFailure: { error: unknown } | undefined;
       const wheelSamples: unknown[] = [];
       const queues = new Map<string, { queued: number; delivered: number; failed: number }>();
       let lastBarrier: unknown = null;
@@ -162,6 +163,7 @@ export function defineAlternateTests(
       await expectInSync(page, ctx, name, "normal history still navigates and reconnects");
       if (weak) expect(delayed).toBeGreaterThan(0);
       } catch (error) {
+        primaryFailure = { error };
         const diagnostic: Record<string, unknown> = {
           originalError: error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : String(error),
           lastBarrier, barrierSamples, wheelSamples, queues: [...queues.entries()],
@@ -186,13 +188,18 @@ export function defineAlternateTests(
           await page.screenshot({ path: info.outputPath("alternate-failure.png") }).catch(() => {});
         } finally { throw error; }
       } finally {
-        if (continuousStarted) {
-          const cleanup = await stopOwnedGenerator(owned, name, {
-            listSessions: () => ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n"),
-            killSession: n => { ctx.tmuxE2E(["kill-session", "-t", n]); },
-          });
-          writeFileSync(info.outputPath("generator-cleanup.json"), JSON.stringify(cleanup));
-        } else rmSync(owned, { recursive: true, force: true });
+        try {
+          if (continuousStarted) {
+            const cleanup = await stopOwnedGenerator(owned, name, {
+              listSessions: () => ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n"),
+              killSession: n => { ctx.tmuxE2E(["kill-session", "-t", n]); },
+            });
+            writeFileSync(info.outputPath("generator-cleanup.json"), JSON.stringify(cleanup));
+          } else rmSync(owned, { recursive: true, force: true });
+        } catch (cleanupError) {
+          try { writeFileSync(info.outputPath("generator-cleanup.json"), JSON.stringify({ error: String(cleanupError), primaryFailure: primaryFailure ? String(primaryFailure.error) : null })); } catch {}
+          if (!primaryFailure) throw cleanupError;
+        }
       }
     });
   }

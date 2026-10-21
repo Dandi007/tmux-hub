@@ -13,7 +13,7 @@ import { defineForegroundCleanupTests } from "./foreground-cleanup";
 import { writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
 import type { Page, TestType, Expect, PlaywrightTestArgs, PlaywrightWorkerArgs } from "@playwright/test";
 import type { TerminalProbe } from "../../src/web/terminal";
-import { bindSecret } from "./helpers";
+import { bindSecret, waitForRegisteredSessions } from "./helpers";
 import { defineForegroundTests } from "./fidelity-foreground";
 import { defineScrollIntentTests } from "./fidelity-scroll-intent";
 import { defineReconnectQueueTest } from "./fidelity-reconnect-queue";
@@ -87,13 +87,15 @@ export function defineFidelitySuite(test: TestType<PlaywrightTestArgs & { ctx: C
   defineForegroundCleanupTests(test, expect);
 
   async function openSession(page: Page, name: string): Promise<void> {
-    await page.goto("/?debug=term");
+    // Prepare auth and registry on a document that cannot start an old WS.
+    await page.goto("/system/health");
     await bindSecret(page);
+    await waitForRegisteredSessions(page, [name]);
     // Both views restore the last-opened session once their list loads; make
     // that our session, so a late restore cannot switch away from it (the
     // mobile view has a single terminal: switching closes our probe).
     await page.evaluate((n) => localStorage.setItem("tmux-hub.last-session", n), name);
-    await page.reload();
+    await page.goto("/?debug=term");
     // Opening a session the hub has not listed yet gets the ws rejected (410);
     // wait until the list (desktop tab / mobile picker item) shows it.
     await expect(page.locator(`[data-session="${name}"]`).first()).toBeAttached({ timeout: 10_000 });
