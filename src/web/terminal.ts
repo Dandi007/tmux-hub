@@ -465,17 +465,13 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     rows: term.rows,
   };
 
-  let nativeRecheckPending = false;
-  let nativeProbePending = false;
-  let nativeSentProbe = false;
+  type NativeDemand = { kind: "probe" | "reclaim"; generation: number; retries: number };
+  let nativeDemand: NativeDemand | null = null;
+  let nativeFlight: { id: number; demand: NativeDemand; size?: { cols: number; rows: number } } | null = null;
+  let nativeRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  let nativeGeneration = 0, nativeRequestSequence = 0;
   let lastNativeHint = "";
-  let nativeRecheckInFlight = false;
-  let nativeRequestSequence = 0;
-  let nativeRequestId: number | null = null;
   let connectionReady = false;
-  let nativeRecheckGeneration = 0;
-  let nativeRecheckSentGeneration = 0;
-  let nativeRecheckSize: { cols: number; rows: number } | null = null;
   let initialViewportConfirmed = false;
   let nativeReplyNeedsRecheck = false;
 
@@ -698,10 +694,8 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                 if (!msg.peer && !msg.released) initialViewportConfirmed = true;
                 if (msg.peer) {
                   // A newer explicit peer pin supersedes automatic recovery.
-                  nativeRecheckPending = false;
-                  nativeRecheckInFlight = false;
-                  nativeRequestId = null;
-                  nativeRecheckSize = null;
+                  if (nativeDemand?.kind === "reclaim") { nativeDemand = null; cancelNativeRetry(); }
+                  if (nativeFlight?.demand.kind === "reclaim") nativeFlight = null;
                 }
                 // A later automatic renderer fit must not reclaim a newer
                 // peer/native viewport. Explicit local navigation still may.
@@ -738,26 +732,29 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                 // it, without treating ordinary web activity as new pin intent.
                 if (msg.owner === "native" && nativeReplyNeedsRecheck) {
                   nativeReplyNeedsRecheck = false;
-                  nativeRecheckPending = true;
-                  nativeRecheckGeneration++;
+                  requestNative("reclaim");
                 }
                 recheckNativeViewport();
                 return;
               }
               if (kind === "viewport_checked") {
-                if (!nativeRecheckInFlight || (parsed as { requestId?: number }).requestId !== nativeRequestId) return;
-                nativeRecheckInFlight = false;
-                nativeRequestId = null;
+                const flight = nativeFlight;
+                if (!flight || (parsed as { requestId?: number }).requestId !== flight.id) return;
+                nativeFlight = null;
                 if (!(parsed as { ok: boolean }).ok) {
-                  if (nativeRecheckGeneration !== nativeRecheckSentGeneration) recheckNativeViewport();
-                  return; // Otherwise keep pending for the next visible interaction.
+                  if (nativeDemand?.generation !== flight.demand.generation) recheckNativeViewport();
+                  else if (nativeDemand?.kind === "probe" && nativeDemand.retries < 3) {
+                    const delay = 250 * 2 ** nativeDemand.retries++;
+                    nativeRetryTimer = setTimeout(() => { nativeRetryTimer = null; recheckNativeViewport(); }, delay);
+                  }
+                  return; // Keep failed demand; only one bounded probe retry timer.
                 }
-                const size = fit.proposeDimensions();
-                nativeRecheckPending = nativeRecheckGeneration !== nativeRecheckSentGeneration
-                  || (!nativeSentProbe && viewportState.owner === "web" && rendererOwnsViewport && !!size
-                    && (size.cols !== nativeRecheckSize?.cols || size.rows !== nativeRecheckSize?.rows));
-                if (nativeRecheckGeneration === nativeRecheckSentGeneration) nativeProbePending = false;
-                nativeRecheckSize = null;
+                if (nativeDemand?.generation === flight.demand.generation) {
+                  const size = flight.demand.kind === "reclaim" ? fit.proposeDimensions() : undefined;
+                  if (viewportState.owner === "web" && rendererOwnsViewport && size && flight.size
+                    && (size.cols !== flight.size.cols || size.rows !== flight.size.rows)) requestNative("reclaim");
+                  else { nativeDemand = null; cancelNativeRetry(); }
+                }
                 recheckNativeViewport();
                 return;
               }
@@ -911,8 +908,8 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     connectionPending = true;
     initialViewportConfirmed = false;
     connectionReady = false;
-    nativeRecheckInFlight = false;
-    nativeRequestId = null;
+    nativeFlight = null;
+    cancelNativeRetry();
     rendererOwnsViewport = false;
     try { ws.onmessage = null; ws.onclose = null; ws.onerror = null; ws.close(); } catch {}
     predictions.length = 0;
@@ -1058,19 +1055,27 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     pendingRendererSize = null; // This measured grid is covered by the explicit pin.
     queuedSend({ kind: "resize", ...size });
   };
+  function cancelNativeRetry(): void {
+    if (nativeRetryTimer !== null) { clearTimeout(nativeRetryTimer); nativeRetryTimer = null; }
+  }
+  function requestNative(kind: NativeDemand["kind"]): void {
+    cancelNativeRetry();
+    nativeDemand = { kind, generation: ++nativeGeneration, retries: 0 };
+  }
   const recheckNativeViewport = (): void => {
-    if (!nativeRecheckPending || nativeRecheckInFlight || !initialViewportConfirmed || !isTermVisible()
+    const demand = nativeDemand;
+    if (!demand || nativeFlight || nativeRetryTimer !== null || !initialViewportConfirmed || !isTermVisible()
       || currentState !== "connected" || ws.readyState !== WebSocket.OPEN) return;
-    const size = fit.proposeDimensions();
-    if (!size) return;
-    nativeRecheckInFlight = true;
-    nativeRecheckSentGeneration = nativeRecheckGeneration;
-    nativeRecheckSize = size;
-    pendingRendererSize = null; // This current measurement covers old renderer work.
-    nativeRequestId = ++nativeRequestSequence;
-    nativeSentProbe = nativeProbePending;
-    if (nativeSentProbe) queuedSend({ kind: "viewport_probe", requestId: nativeRequestId });
-    else queuedSend({ kind: "resize", ...size, afterNative: true, requestId: nativeRequestId });
+    // A read-only authority query must not depend on local fit being measurable.
+    const size = demand.kind === "reclaim" ? fit.proposeDimensions() : undefined;
+    if (demand.kind === "reclaim" && !size) return;
+    const id = ++nativeRequestSequence;
+    nativeFlight = { id, demand, ...(size ? { size } : {}) };
+    if (demand.kind === "probe") queuedSend({ kind: "viewport_probe", requestId: id });
+    else {
+      pendingRendererSize = null; // Current measurement covers old renderer work.
+      queuedSend({ kind: "resize", ...size!, afterNative: true, requestId: id });
+    }
   };
   const onResize = () => {
     // Native owns the displayed grid too: fitting locally would reflow the
@@ -1216,26 +1221,19 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       if (attached > 0) {
         nativeReplyNeedsRecheck = false;
         const hint = `${attached}:${cols}x${rows}`;
-        if (hint !== lastNativeHint && (viewportState.owner !== "native" || viewportState.cols !== cols || viewportState.rows !== rows)) {
-          nativeProbePending = true;
-          nativeRecheckPending = true;
-          nativeRecheckGeneration++;
-          recheckNativeViewport();
-        }
+        if (hint !== lastNativeHint && (viewportState.owner !== "native" || viewportState.cols !== cols || viewportState.rows !== rows)) requestNative("probe");
         lastNativeHint = hint;
+        // Identical hints do not create demands, but can drain unfinished work.
+        recheckNativeViewport();
         return;
       }
       lastNativeHint = "";
-      nativeProbePending = false;
+      const hadProbe = nativeDemand?.kind === "probe" || nativeFlight?.demand.kind === "probe";
       const result = handleSessionActivity(viewportState, attached);
       nativeReplyNeedsRecheck = attached === 0;
-      if (result.action.type === "reclaim") {
+      if (result.action.type === "reclaim" || hadProbe) {
         nativeReplyNeedsRecheck = false;
-        // SSE and WS have independent ordering. Ask on the WS even if its
-        // earlier native reply is still in flight; leave the displayed grid
-        // alone until the ordered applied/native response actually arrives.
-        nativeRecheckPending = true;
-        nativeRecheckGeneration++;
+        requestNative("reclaim");
         recheckNativeViewport();
       }
     },
@@ -1247,6 +1245,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       perf?.stop();
       stopHeartbeat();
       clearInterval(scrollPosTimer);
+      cancelNativeRetry();
       stopDeadProbe();
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       window.removeEventListener("resize", onResize);

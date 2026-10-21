@@ -9,7 +9,7 @@ import type { Page } from "@playwright/test";
 // bytes on that socket. SSE remains independently delivered.
 export async function gateNative(page: Page, name: string, armed: boolean, proxyPort = 0) {
   await page.addInitScript(({ n, armed, proxyPort }) => {
-    const g = (window as any).__nativeOrder = { armed, blocked: false, held: [] as (() => void)[], messages: [] as unknown[], sockets: [] as WebSocket[], holdApplied: false, failNextApplied: false, injectedErrors: 0, rejectCheck: false, holdZeroAfter: Number.POSITIVE_INFINITY, heldActivity: [] as (() => void)[], events: [] as EventSource[], snapshots: 0, holdSseRetry: false, sseTimers: [] as (() => void)[], zeros: 0, positives: 0 };
+    const g = (window as any).__nativeOrder = { armed, blocked: false, held: [] as (() => void)[], messages: [] as unknown[], checks: [] as unknown[], holdPositive: false, positiveHeld: [] as (() => void)[], sockets: [] as WebSocket[], holdApplied: false, failNextApplied: false, injectedErrors: 0, rejectCheck: false, holdZeroAfter: Number.POSITIVE_INFINITY, heldActivity: [] as (() => void)[], events: [] as EventSource[], snapshots: 0, holdSseRetry: false, sseTimers: [] as (() => void)[], zeros: 0, positives: 0 };
     const schedule = window.setTimeout;
     window.setTimeout = ((fn: TimerHandler, delay?: number, ...args: unknown[]) => {
       if (g.holdSseRetry && delay === 1000 && typeof fn === "function") {
@@ -30,6 +30,7 @@ export async function gateNative(page: Page, name: string, armed: boolean, proxy
           if (typeof event.data === "string") {
             try {
               const m = JSON.parse(event.data);
+              if (m.kind === "viewport_checked") g.checks.push(m);
               if (m.kind === "viewport_checked" && g.rejectCheck) {
                 g.rejectCheck = false;
                 handler.call(this, new MessageEvent("message", { data: JSON.stringify({ ...m, ok: false }) })); return;
@@ -55,7 +56,11 @@ export async function gateNative(page: Page, name: string, armed: boolean, proxy
       set onmessage(handler) {
         super.onmessage = handler ? function(event) {
           const m = JSON.parse(event.data);
+              if (m.kind === "viewport_checked") g.checks.push(m);
           if (m.event === "snapshot") g.snapshots++;
+          if (g.holdPositive && m.event === "session_activity" && m.payload.name === n && m.payload.attached > 0) {
+            g.positiveHeld.push(() => { handler.call(this, event); g.positives++; }); return;
+          }
           if (m.event === "session_activity" && m.payload.name === n && m.payload.attached === 0 && g.zeros >= g.holdZeroAfter) {
             g.heldActivity.push(() => handler.call(this, event)); return;
           }

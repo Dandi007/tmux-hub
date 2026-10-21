@@ -13,3 +13,6 @@ defineNativeRecheckProgressTests();
 
 import { defineNativeLateAttachTests } from "./native-late-attach";
 defineNativeLateAttachTests();
+
+import { defineNativeProbeProgressTests } from "./native-probe-progress";
+defineNativeProbeProgressTests();

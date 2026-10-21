@@ -1,6 +1,7 @@
 import { test, expect } from "./emulator-fixtures";
 import { bindSecret, waitForRegisteredSessions } from "./helpers";
 import { captureForegroundScreenshot, withForegroundContext } from "./foreground-browser";
+import { gateNative } from "./native-owner-order";
 import { stopNative } from "./native-viewport-fit";
 import { spawn, spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -24,9 +25,22 @@ export function defineNativeLateAttachTests() {
           await cdp.send("Emulation.setDeviceMetricsOverride", { width: mobile ? 430 : 1400, height: 900, deviceScaleFactor: 1, mobile });
           await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: false });
           if (mobile) await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+          await gateNative(page, name, false);
+          await page.addInitScript(n => {
+            const g = (window as any).__lateConnection = { opens: 0, closes: 0 };
+            const W = window.WebSocket;
+            window.WebSocket = class extends W {
+              constructor(url: string | URL, protocols?: string | string[]) {
+                super(url, protocols);
+                if (decodeURIComponent(new URL(url).pathname.split("/").at(-1)!) === n) {
+                  this.addEventListener("open", () => g.opens++); this.addEventListener("close", () => g.closes++);
+                }
+              }
+            };
+          }, name);
           await page.goto(new URL("/system/health", baseURL).href); await bindSecret(page);
           await waitForRegisteredSessions(page, [name]);
-          await page.evaluate(n => localStorage.setItem("tmux-hub.last-session", n), name);
+          await page.evaluate(n => { localStorage.setItem("tmux-hub.last-session", n); sessionStorage.setItem("tmux-hub.pwa-install-toast-shown", "true"); }, name);
           await page.goto(new URL("/?debug=term", baseURL).href); await page.bringToFront();
           const read = () => page.evaluate(n => {
             const p = window.__tmuxHubTerms?.[n];
@@ -37,8 +51,10 @@ export function defineNativeLateAttachTests() {
             return p?.state === "connected" && p.visible && !p.pending && p.scroll === 0 && p.size === size()
               && JSON.stringify(normalized(p.screen)) === JSON.stringify(normalized(tmux("capture-pane", "-p", "-t", name).split("\n")));
           };
+          const connection = () => page.evaluate(() => ({ ...(window as any).__lateConnection, created: (window as any).__nativeOrder.sockets.length, open: (window as any).__nativeOrder.sockets[0]?.readyState }));
           const snapshot = async (phase: string) => {
-            observations.push({ phase, actual: await read(), pane: size(), attached: attached(), expected: tmux("capture-pane", "-p", "-t", name).split("\n") });
+            expect(await connection()).toEqual({ created: 1, opens: 1, closes: 0, open: 1 });
+            observations.push({ phase, connection: await connection(), actual: await read(), pane: size(), attached: attached(), expected: tmux("capture-pane", "-p", "-t", name).split("\n") });
             writeFileSync(info.outputPath("native-late.json"), JSON.stringify(observations, null, 2));
             await captureForegroundScreenshot(cdp, info.outputPath(`native-late-${phase}.png`));
           };

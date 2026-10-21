@@ -44,3 +44,5 @@ PR164 merge push CI39530842019 的 CONNECTING hidden activation 在调用 render
 网页先连接后native attach/实际TTY resize属于本次既定独立发布验收。已在dogfood42c3adfe真实复现桌面197×47、手机56×42未采用native80×23/100×31；补同页无交互、无重连的grid+screen回归。SSE正向提示通过只读viewport_probe在串行WS上查询真实native状态，不凭SSE直接fit，也不因过期正向提示抢web pin；native尺寸发布给该session所有peer并调度对齐snapshot。隐藏页保存需求待激活；detach仍走已有条件resize。
 
 补充独立审查路径：初始web pin失败必须关闭而不是以请求grid宣布成功；截断代理完整缓存HTTP101头后一次发送，显式分片测试与浏览器open计数证明实际Upgrade成功后才断流。
+
+复核补充：native需求/在途对象明确kind、generation、requestId；peer只取消reclaim，probe保留。只读probe不依赖fit；失败保留需求，单一250/500/1000ms最多3次自动退避，后台/重连保留需求待重新可见/权威初始化。相同hint可drain未完成需求，不创建无穷新代。新增真实初始化peer交错及实际查询故障回归；晚接入用例记录连接创建/open/close，要求全程同一WS。
