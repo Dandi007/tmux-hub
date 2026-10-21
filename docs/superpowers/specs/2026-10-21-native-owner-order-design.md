@@ -52,3 +52,7 @@ PR164 merge push CI39530842019 的 CONNECTING hidden activation 在调用 render
 Native实际TTY80×24→100×32→80×24的往返变化：当100×31的旧权威WS流尚在途，而较新80×23 SSE先到，即使新hint等于当前显示grid也要保留新代需求；旧completion只能消费自己代次。真实TTY调整、有序持帧、同一WS的桌面/手机回归，在冻结旧产品6c两端均实测browser100×31/pane80×23失败。修复仅补充“有未完成需求/在途时保留新hint”条件。
 
 PR165首CI39540182006真实红：手机busy reconnect在overlapCount>3注入前置超时，121pass/1fail/24未运行；已真实重连，未进入画面/scroll验收。sleep0.008不保证5个30ms窗口都收到字节，任次quiet后不会再补overlap。覆盖拆分：新增真实WS+生产handlers/broadcaster/ResyncScheduler集成，在每次真实capture tap期间写私有log并等待poll确认，确证5captures/4retries/1overlap、随后静默同WS自动resync和scrollpos30契约；负控关闭onOverlap修复回调应使该集成失败。E2E保持真实busy输出进度、一次真实重连、停输出后screen==pane、scroll30及无额外WS，记录snapshot/retry/overlap而不再随机要求五次都重叠。
+
+最终独审补充：往返提示屏障记录应用回调完成后的实际attached/cols/rows及序号，明确等本次80×23提示交付；不以任意正向事件计数代替。新增双网页路径：A实际SSE连接中断且重连受控暂停，B触发真实native100×31广播并延迟A整条WS流；TTY恢复80×23，A先采用旧广播，再恢复真实SSE snapshot。验证同一A WS无交互最终grid/screen收敛。失败诊断先保存原error及已有queue/barrier样本，各外部读取单独兜底，页面失效不能覆盖原始异常。
+
+双网页冻结1d341ff（产品仍220）桌面/手机真实失败：A恢复snapshot已交付attached1/80×23，但显示100×31、pane80×23且同一WS。修复在没有未完成需求时允许相同hint纠正显示mismatch；在途相同hint只drain，不反复创建代次。

@@ -1221,10 +1221,15 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       if (attached > 0) {
         nativeReplyNeedsRecheck = false;
         const hint = `${attached}:${cols}x${rows}`;
-        if (hint !== lastNativeHint && (nativeDemand !== null || nativeFlight !== null
-          || viewportState.owner !== "native" || viewportState.cols !== cols || viewportState.rows !== rows)) requestNative("probe");
+        const unfinished = nativeDemand !== null || nativeFlight !== null;
+        const mismatch = viewportState.owner !== "native" || viewportState.cols !== cols || viewportState.rows !== rows;
+        // A peer's delayed authority can change the display while our SSE was
+        // disconnected. An identical fresh hint must repair that idle mismatch;
+        // while a check is unfinished, identical hints only drain existing work.
+        if ((hint !== lastNativeHint && unfinished)
+          || (mismatch && (hint !== lastNativeHint || !unfinished))) requestNative("probe");
         lastNativeHint = hint;
-        // Identical hints do not create demands, but can drain unfinished work.
+        // Repeated hints drain unfinished work without replacing its generation.
         recheckNativeViewport();
         return;
       }
