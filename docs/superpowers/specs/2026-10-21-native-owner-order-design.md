@@ -62,3 +62,5 @@ PR165首CI39540182006真实红：手机busy reconnect在overlapCount>3注入前�
 220精确CI39542391096：713单元过，112E2E过/1失败，其余未跑；手机continuous-exit weak在route分配连接ID时被旧应用导航reload销毁上下文，尚未执行scroll结果，取证也覆盖原异常。fidelity共用openSession改为health页认证+registry前置，再一次进入应用，避免旧导航创建目标WS；刻意fresh-attach reload仍发生在已确认连接/画面之后。原CI日志保留，不直接重跑。snapshot-first冻结aa2ad9a（产品9b）桌面/手机均实测同WS显示100×31/pane80×23。
 
 最终收敛：删除全部正向hint/mismatch去重与snapshot source参数；attached>0每次真实activity或snapshot都requestNative(probe)，沿用single-flight+generation drain，隐藏不发送。Registry默认2秒轮询且仅真实字段变化emit；probe只query/广播/checked、不pin/不input/不emit SSE，因此没有query→SSE自激。三种往返顺序各在输出停止后观察超过两个registry周期，要求activity/probe/checked计数持续4.5秒不变，同WS、grid/screen断言保留。不扩展协议。
+
+最终测试校准：关键往返提示交付后不再输入；marker在竞态前准备。随后暂停实际SSE并保持同一WS，必须先取得grid/screen收敛，再恢复真实SSE、观察4.5秒计数静止并复核最终尺寸/画面/连接数。避免额外activity掩盖丢需求。私有全套full8的vim WS错误已定位为测试写死3202、连接到另一个CI实例；vim测试改从本树emulator env文件读取端口，产品无变化。最终精确head CI仍作为完整门禁，原失败及未运行不计通过。

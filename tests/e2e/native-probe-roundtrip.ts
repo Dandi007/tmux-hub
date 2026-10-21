@@ -33,6 +33,9 @@ export function defineNativeProbeRoundtripTests() {
       };
       await expect.poll(() => page.evaluate(() => (window as any).__nativeOrder.activity
         .some((s: any) => s.attached > 0 && s.cols === 80 && s.rows === 23))).toBe(true);
+      tmux("send-keys", "-t", name, "printf '\\033[2J\\033[H'; printf '%79sX\\nROUNDTRIP_END\\n' ''", "Enter");
+      await expect.poll(() => tmux("capture-pane", "-p", "-t", name).split("\n").some(s => s.trim() === "ROUNDTRIP_END")).toBe(true);
+      await expect.poll(synced).toBe(true);
       await page.evaluate(() => { (window as any).__nativeOrder.armed = true; });
       if (scenario !== "own-probe") {
         // Interrupt this page's actual SSE connection. Hold its reconnect,
@@ -70,9 +73,25 @@ export function defineNativeProbeRoundtripTests() {
       await expect.poll(() => page.evaluate(start => (window as any).__nativeOrder.activity.slice(start)
         .some((s: any) => s.attached > 0 && s.cols === 80 && s.rows === 23), activity)).toBe(true);
       if (scenario !== "peer-broadcast") expect((await read())!.size).toBe("80x23"); // The 100 reply remains held, in order.
-      tmux("send-keys", "-t", name, "printf '\\033[2J\\033[H'; printf '%79sX\\nROUNDTRIP_END\\n' ''", "Enter");
-      await expect.poll(() => tmux("capture-pane", "-p", "-t", name).split("\n").some(s => s.trim() === "ROUNDTRIP_END")).toBe(true);
+      // No later activity may rescue a lost critical demand. Pause the real
+      // SSE transport after its precise callback, retaining the same live WS.
+      await page.evaluate(() => {
+        const g = (window as any).__nativeOrder; g.holdSseRetry = true;
+        const es = g.events.at(-1); es.close(); es.onerror(new Event("error"));
+      });
       await page.evaluate(() => (window as any).__releaseNative());
+      await expect.poll(synced).toBe(true);
+      const converged = await read();
+      writeFileSync(info.outputPath("native-critical-convergence.json"), JSON.stringify({ actual: converged, pane: pane(), events: await page.evaluate(() => { const g = (window as any).__nativeOrder; return { activity: g.activity, probes: g.probes, checks: g.checks, sockets: g.sockets.length }; }) }));
+      // Resume actual SSE before checking quiescence: a feedback loop must
+      // remain observable, rather than being silenced by the fault fixture.
+      await expect.poll(() => page.evaluate(() => (window as any).__nativeOrder.sseTimers.length)).toBe(1);
+      const snapshots = await page.evaluate(() => (window as any).__nativeOrder.snapshots);
+      await page.evaluate(() => {
+        const g = (window as any).__nativeOrder; g.holdSseRetry = false;
+        for (const reconnect of g.sseTimers.splice(0)) reconnect();
+      });
+      await expect.poll(() => page.evaluate(() => (window as any).__nativeOrder.snapshots)).toBeGreaterThan(snapshots);
       await expect.poll(synced).toBe(true);
       expect(await page.evaluate(() => (window as any).__nativeOrder.sockets.length)).toBe(1);
       // Observe more than two real registry polling periods after output stops.
@@ -90,6 +109,8 @@ export function defineNativeProbeRoundtripTests() {
         return Date.now() - unchangedSince >= 4500;
       }, { timeout: 12_000, intervals: [250] }).toBe(true);
       writeFileSync(info.outputPath("native-query-quiet.json"), JSON.stringify(quietSamples));
+      expect(await synced()).toBe(true);
+      expect(await page.evaluate(() => (window as any).__nativeOrder.sockets.length)).toBe(1);
     } finally {
       try { writeFileSync(info.outputPath("native-roundtrip.json"), JSON.stringify({ actual: await read(), pane: pane(), events: await page.evaluate(() => { const g = (window as any).__nativeOrder; return { messages: g.messages, checks: g.checks, positives: g.positives, activity: g.activity, probes: g.probes, sockets: g.sockets.length }; }) }, null, 2)); } catch {}
       await page.screenshot({ path: info.outputPath("native-roundtrip.png") }).catch(() => {});

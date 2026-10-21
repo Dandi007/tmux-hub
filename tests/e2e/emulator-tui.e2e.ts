@@ -32,10 +32,14 @@
 //   by tests/integration/emulator-attach.test.ts.
 
 import { test, expect } from "./emulator-fixtures";
+import { readFileSync } from "node:fs";
 
-// Port where the emulator hub listens (matches playwright.config.ts E2E_EMU_PORT).
-const EMU_HTTP = "http://127.0.0.1:3202";
-const EMU_WS   = "ws://127.0.0.1:3202";
+// Match this checkout's isolated emulator hub, including frozen private trees.
+const envFile = process.env.TMUX_HUB_E2E_EMU_ENV_FILE;
+if (!envFile) throw new Error("emulator fixture env file is required");
+const { port } = JSON.parse(readFileSync(envFile, "utf8")) as { port: string };
+const EMU_HTTP = `http://127.0.0.1:${port}`;
+const EMU_WS = `ws://127.0.0.1:${port}`;
 
 // Timeout for receiving the first WebSocket frame after connecting.
 const FRAME_TIMEOUT_MS = 8_000;
