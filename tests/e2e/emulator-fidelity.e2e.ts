@@ -16,3 +16,6 @@ defineNativeLateAttachTests();
 
 import { defineNativeProbeProgressTests } from "./native-probe-progress";
 defineNativeProbeProgressTests();
+
+import { defineNativeProbeRoundtripTests } from "./native-probe-roundtrip";
+defineNativeProbeRoundtripTests();

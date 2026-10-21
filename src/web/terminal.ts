@@ -1221,7 +1221,8 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       if (attached > 0) {
         nativeReplyNeedsRecheck = false;
         const hint = `${attached}:${cols}x${rows}`;
-        if (hint !== lastNativeHint && (viewportState.owner !== "native" || viewportState.cols !== cols || viewportState.rows !== rows)) requestNative("probe");
+        if (hint !== lastNativeHint && (nativeDemand !== null || nativeFlight !== null
+          || viewportState.owner !== "native" || viewportState.cols !== cols || viewportState.rows !== rows)) requestNative("probe");
         lastNativeHint = hint;
         // Identical hints do not create demands, but can drain unfinished work.
         recheckNativeViewport();
