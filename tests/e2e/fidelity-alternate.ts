@@ -16,10 +16,10 @@ export function defineAlternateTests(
       const owned = mkdtempSync("/tmp/e2e-alt-exit-");
       let continuousStarted = false;
       const wheelSamples: unknown[] = [];
+      const queues = new Map<string, { queued: number; delivered: number; failed: number }>();
       try {
       const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
       let delayed = 0;
-      const queues = new Map<string, { queued: number; delivered: number; failed: number }>();
       await page.addInitScript(n => {
         const W = window.WebSocket;
         window.WebSocket = class extends W {
