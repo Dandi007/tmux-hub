@@ -465,6 +465,15 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     rows: term.rows,
   };
 
+  type NativeDemand = { kind: "probe" | "reclaim"; generation: number; retries: number };
+  let nativeDemand: NativeDemand | null = null;
+  let nativeFlight: { id: number; demand: NativeDemand; size?: { cols: number; rows: number } } | null = null;
+  let nativeRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  let nativeGeneration = 0, nativeRequestSequence = 0;
+  let connectionReady = false;
+  let initialViewportConfirmed = false;
+  let nativeReplyNeedsRecheck = false;
+
   // ── State machine ──────────────────────────────────────────────────
   let currentState: TerminalState = "connected";
   let stateListeners: Array<(state: TerminalState, attempt?: number) => void> = [];
@@ -681,6 +690,12 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
               }
               if (kind === "viewport") {
                 const msg = parsed as Extract<ServerWsMessage, { kind: "viewport" }>;
+                if (!msg.peer && !msg.released) initialViewportConfirmed = true;
+                if (msg.peer) {
+                  // A newer explicit peer pin supersedes automatic recovery.
+                  if (nativeDemand?.kind === "reclaim") { nativeDemand = null; cancelNativeRetry(); }
+                  if (nativeFlight?.demand.kind === "reclaim") nativeFlight = null;
+                }
                 // A later automatic renderer fit must not reclaim a newer
                 // peer/native viewport. Explicit local navigation still may.
                 if (msg.peer || msg.owner === "native") {
@@ -704,13 +719,42 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                 } else if (result.action.type === "reclaim") {
                   reassertViewport();
                 }
-                // A failed initial web pin has no own applied ack. Its plain
-                // viewport permits the still-unsatisfied explicit intent once.
+                // A plain initial web viewport permits still-unsatisfied
+                // explicit intent once the connection has authority.
                 if (msg.owner === "web" && !msg.applied && !msg.peer && !msg.released) {
                   coveredExplicitIntent = null;
                   flushExplicitViewport();
                 }
                 flushRendererViewport();
+                // A detach SSE may have arrived before this older native
+                // reply. Recheck once on the same ordered WS, after adopting
+                // it, without treating ordinary web activity as new pin intent.
+                if (msg.owner === "native" && nativeReplyNeedsRecheck) {
+                  nativeReplyNeedsRecheck = false;
+                  requestNative("reclaim");
+                }
+                recheckNativeViewport();
+                return;
+              }
+              if (kind === "viewport_checked") {
+                const flight = nativeFlight;
+                if (!flight || (parsed as { requestId?: number }).requestId !== flight.id) return;
+                nativeFlight = null;
+                if (!(parsed as { ok: boolean }).ok) {
+                  if (nativeDemand?.generation !== flight.demand.generation) recheckNativeViewport();
+                  else if (nativeDemand?.kind === "probe" && nativeDemand.retries < 3) {
+                    const delay = 250 * 2 ** nativeDemand.retries++;
+                    nativeRetryTimer = setTimeout(() => { nativeRetryTimer = null; recheckNativeViewport(); }, delay);
+                  }
+                  return; // Keep failed demand; only one bounded probe retry timer.
+                }
+                if (nativeDemand?.generation === flight.demand.generation) {
+                  const size = flight.demand.kind === "reclaim" ? fit.proposeDimensions() : undefined;
+                  if (viewportState.owner === "web" && rendererOwnsViewport && size && flight.size
+                    && (size.cols !== flight.size.cols || size.rows !== flight.size.rows)) requestNative("reclaim");
+                  else { nativeDemand = null; cancelNativeRetry(); }
+                }
+                recheckNativeViewport();
                 return;
               }
               if (kind === "resync") {
@@ -769,6 +813,10 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                   reportingEnabled = true;
                   replayCount++;
                   replayProgress.complete(replayGeneration);
+                  if (socket === ws && initialViewportConfirmed) {
+                    connectionReady = true;
+                    reconnectAttempt = 0;
+                  }
                 });
                 return;
               }
@@ -850,17 +898,27 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
 
   const enterReconnecting = (): void => {
     if (disposed) return;
+    const wasReady = connectionReady;
     saveLocalLfbForReplay();
     console.log(`[tmux-hub] entering reconnect for ${opts.sessionName}`);
     stopHeartbeat();
     pendingRendererSize = null;
     coveredExplicitIntent = null;
     connectionPending = true;
+    initialViewportConfirmed = false;
+    connectionReady = false;
+    nativeFlight = null;
+    cancelNativeRetry();
     rendererOwnsViewport = false;
     try { ws.onmessage = null; ws.onclose = null; ws.onerror = null; ws.close(); } catch {}
     predictions.length = 0;
-    reconnectAttempt = 0;
-    setState("reconnecting", 0);
+    if (wasReady) reconnectAttempt = 0;
+    if (reconnectAttempt >= RECONNECT_MAX_RETRIES) {
+      setState("dead");
+      startDeadProbe();
+      return;
+    }
+    setState("reconnecting", reconnectAttempt);
     scheduleReconnectAttempt();
   };
 
@@ -909,7 +967,6 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       ws = socket;
       connectionPending = false;
       wireWs(ws);
-      reconnectAttempt = 0;
       predictions.length = 0;
       setState("connected");
       flushSendQueue();
@@ -997,6 +1054,28 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     pendingRendererSize = null; // This measured grid is covered by the explicit pin.
     queuedSend({ kind: "resize", ...size });
   };
+  function cancelNativeRetry(): void {
+    if (nativeRetryTimer !== null) { clearTimeout(nativeRetryTimer); nativeRetryTimer = null; }
+  }
+  function requestNative(kind: NativeDemand["kind"]): void {
+    cancelNativeRetry();
+    nativeDemand = { kind, generation: ++nativeGeneration, retries: 0 };
+  }
+  const recheckNativeViewport = (): void => {
+    const demand = nativeDemand;
+    if (!demand || nativeFlight || nativeRetryTimer !== null || !initialViewportConfirmed || !isTermVisible()
+      || currentState !== "connected" || ws.readyState !== WebSocket.OPEN) return;
+    // A read-only authority query must not depend on local fit being measurable.
+    const size = demand.kind === "reclaim" ? fit.proposeDimensions() : undefined;
+    if (demand.kind === "reclaim" && !size) return;
+    const id = ++nativeRequestSequence;
+    nativeFlight = { id, demand, ...(size ? { size } : {}) };
+    if (demand.kind === "probe") queuedSend({ kind: "viewport_probe", requestId: id });
+    else {
+      pendingRendererSize = null; // Current measurement covers old renderer work.
+      queuedSend({ kind: "resize", ...size!, afterNative: true, requestId: id });
+    }
+  };
   const onResize = () => {
     // Native owns the displayed grid too: fitting locally would reflow the
     // screen without resizing the pane or receiving an aligned snapshot.
@@ -1007,6 +1086,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     // Capture this fit now: a delayed viewport acknowledgement could replace
     // term.cols/rows before a debounced sender reads them.
     sendResizeIfVisible();
+    recheckNativeViewport();
   };
   window.addEventListener("resize", onResize);
 
@@ -1132,17 +1212,27 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       // now, not debounced: a quick switch away would hide the slot before a
       // debounced send fires, and the catch-up would be lost.
       sendResizeIfVisible();
+      recheckNativeViewport();
       applyPendingScrollDecision();
     },
-    notifySessionActivity: (attached: number, cols: number, rows: number) => {
+    notifySessionActivity: (attached: number, _cols: number, _rows: number) => {
       if (disposed) return;
-      const result = handleSessionActivity(viewportState, attached, cols, rows);
-      viewportState = result.next;
-      if (result.action.type === "resize") {
-        // Native detached → web reclaims ownership, fit and send resize
-        try { fit.fit(); } catch {}
-        sendResizeIfVisible();
-        console.log(`[tmux-hub] viewport reclaimed by web: ${term.cols}x${term.rows}`);
+      if (attached > 0) {
+        nativeReplyNeedsRecheck = false;
+        // Each real registry activity or reconnect snapshot is a new demand.
+        // Read-only probes cannot emit SSE; single-flight/generation coalesce
+        // independently delivered hints without relying on their visible grid.
+        requestNative("probe");
+        recheckNativeViewport();
+        return;
+      }
+      const hadProbe = nativeDemand?.kind === "probe" || nativeFlight?.demand.kind === "probe";
+      const result = handleSessionActivity(viewportState, attached);
+      nativeReplyNeedsRecheck = attached === 0;
+      if (result.action.type === "reclaim" || hadProbe) {
+        nativeReplyNeedsRecheck = false;
+        requestNative("reclaim");
+        recheckNativeViewport();
       }
     },
     close: () => {
@@ -1153,6 +1243,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       perf?.stop();
       stopHeartbeat();
       clearInterval(scrollPosTimer);
+      cancelNativeRetry();
       stopDeadProbe();
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       window.removeEventListener("resize", onResize);

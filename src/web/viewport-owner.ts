@@ -20,6 +20,11 @@ export function handleViewportMessage(
   msg: Extract<ServerWsMessage, { kind: "viewport" }>,
   current: ViewportState,
 ): { next: ViewportState; action: ViewportAction } {
+  // This only announces a former web pinner's departure. It does not say
+  // that the native TTY detached, even when the sender labels it web.
+  if (msg.released && current.owner === "native") {
+    return { next: current, action: { type: "none" } };
+  }
   const next: ViewportState = {
     owner: msg.owner,
     cols: msg.cols,
@@ -53,23 +58,15 @@ export function shouldSendResize(state: ViewportState): boolean {
   return state.owner === "web";
 }
 
-/**
- * Pure function: handle SSE session_activity event for ownership transition.
- * Returns the action to take when native detaches (attached→0).
- */
+/** SSE is a hint to recheck ownership on the ordered viewport WS stream. */
 export function handleSessionActivity(
   current: ViewportState,
   attached: number,
-  cols: number,
-  rows: number,
 ): { next: ViewportState; action: ViewportAction } {
-  if (attached === 0 && current.owner === "native") {
-    // Native detached → web reclaims ownership
-    return {
-      next: { owner: "web", cols, rows },
-      action: { type: "resize", cols, rows },
-    };
-  }
-  // No transition
-  return { next: current, action: { type: "none" } };
+  // Keep the displayed native grid until the WS confirms actual authority.
+  // Ordinary attached0 activity must not steal a confirmed web peer.
+  return {
+    next: current,
+    action: attached === 0 && current.owner === "native" ? { type: "reclaim" } : { type: "none" },
+  };
 }

@@ -1,29 +1,66 @@
 import { connect, createServer, type Socket } from "node:net";
 
-// Hold real server→browser TCP bytes, including HTTP 101, so the native
-// browser WebSocket stays CONNECTING. No viewport or replay bytes are invented.
-export async function holdWebSocketUpgrade(targetPort: number) {
+type Upgrade = { id: string; cols: string | null; rows: string | null; pin: string; accepted: boolean };
+
+// Hold real server→browser TCP bytes, including HTTP101. The upstream request
+// still runs: tests must await THIS live navigation's101 before activating it.
+export async function holdWebSocketUpgrade(targetPort: number, fragmentHeaders = false) {
   const sockets = new Set<Socket>();
-  const waiting: Array<{ client: Socket; chunks: Buffer[] }> = [];
-  let held = true;
+  const waiting = new Set<{ client: Socket; chunks: Buffer[]; upgrade?: Upgrade; rejected?: boolean }>();
+  let held = true, cutInitial = false, rejections = 0;
   const server = createServer(client => {
     const upstream = connect(targetPort, "127.0.0.1");
     sockets.add(client); sockets.add(upstream);
-    const queue = { client, chunks: [] as Buffer[] }; waiting.push(queue);
+    const queue: { client: Socket; chunks: Buffer[]; upgrade?: Upgrade; rejected?: boolean } = { client, chunks: [] }; waiting.add(queue);
+    let request = "", response = "";
+    client.on("data", chunk => {
+      if (queue.upgrade) return;
+      request += chunk.toString("latin1");
+      if (!request.includes("\r\n\r\n")) return;
+      const path = request.split("\r\n", 1)[0]?.split(" ")[1];
+      if (path) {
+        const u = new URL(path, "http://localhost");
+        // Retain only nonsecret fields. Never expose request URLs/headers.
+        queue.upgrade = { id: u.searchParams.get("rendererTestId") ?? "", cols: u.searchParams.get("cols"), rows: u.searchParams.get("rows"), pin: u.searchParams.get("pin") ?? "1", accepted: false };
+      }
+      request = "";
+    });
     client.pipe(upstream);
-    upstream.on("data", chunk => { if (held) queue.chunks.push(chunk); else client.write(chunk); });
-    for (const socket of [client, upstream]) {
-      socket.on("error", () => { client.destroy(); upstream.destroy(); });
-      socket.on("close", () => { sockets.delete(socket); client.destroy(); upstream.destroy(); });
-    }
+    let headers: Buffer[] = [];
+    const receive = (chunk: Buffer) => {
+      if (queue.rejected) return;
+      // Buffer the entire header before forwarding any prefix. In cut mode
+      // the browser must receive one valid101, then EOF before viewport data.
+      if (response !== "done") {
+        headers.push(chunk);
+        const all = Buffer.concat(headers), end = all.indexOf("\r\n\r\n");
+        if (end < 0) return;
+        if (queue.upgrade) queue.upgrade.accepted = /^HTTP\/1\.[01] 101\b/.test(all.toString("latin1", 0, end));
+        if (cutInitial && queue.upgrade?.accepted) {
+          queue.rejected = true; rejections++;
+          client.end(all.subarray(0, end + 4)); return;
+        }
+        chunk = all; headers = []; response = "done";
+      }
+      if (held) queue.chunks.push(chunk); else client.write(chunk);
+    };
+    upstream.on("data", chunk => {
+      if (fragmentHeaders && !queue.upgrade?.accepted && chunk.length > 7) { receive(chunk.subarray(0, 7)); receive(chunk.subarray(7)); }
+      else receive(chunk);
+    });
+    const close = () => { waiting.delete(queue); sockets.delete(client); sockets.delete(upstream); client.destroy(); upstream.destroy(); };
+    for (const socket of [client, upstream]) { socket.on("error", close); socket.on("close", close); }
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("proxy did not bind TCP");
   return {
     port: address.port,
-    buffered: () => waiting.reduce((n, q) => n + q.chunks.reduce((a, b) => a + b.length, 0), 0),
+    upgrades: () => [...waiting].flatMap(q => q.upgrade ? [{ ...q.upgrade }] : []),
+    buffered: () => [...waiting].reduce((n, q) => n + q.chunks.reduce((a, b) => a + b.length, 0), 0),
     hold() { held = true; },
+    cutBeforeViewport(value: boolean) { cutInitial = value; },
+    rejections: () => rejections,
     release() { held = false; for (const q of waiting) { for (const c of q.chunks) q.client.write(c); q.chunks = []; } },
     async close() { for (const s of sockets) s.destroy(); await new Promise<void>(resolve => server.close(() => resolve())); },
   };

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { stopOwnedGenerator } from "../helpers/stop-owned-generator";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import type { Page, TestType, Expect, PlaywrightTestArgs, PlaywrightWorkerArgs } from "@playwright/test";
@@ -15,15 +16,50 @@ export function defineAlternateTests(
       const name = await ctx.createSession();
       const owned = mkdtempSync("/tmp/e2e-alt-exit-");
       let continuousStarted = false;
+      let primaryFailure: { error: unknown } | undefined;
       const wheelSamples: unknown[] = [];
+      const queues = new Map<string, { queued: number; delivered: number; failed: number }>();
+      let lastBarrier: unknown = null;
+      const barrierSamples: unknown[] = [];
       try {
       const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
       let delayed = 0;
-      if (weak) await page.routeWebSocket(u => u.pathname === `/ws/sessions/${name}`, route => {
+      await page.addInitScript(n => {
+        (window as any).__alternateWire = { id: null, received: 0, resync: 0, completed: 0, wheels: [] };
+        // Playwright's routed socket is an EventTarget mock. Count its JS
+        // application dispatch, never the underlying native transport arrival.
+        const wires = new WeakMap<EventTarget, any>();
+        const dispatch = EventTarget.prototype.dispatchEvent;
+        EventTarget.prototype.dispatchEvent = function(event: Event): boolean {
+          const raw = (this as { url?: string }).url;
+          const own = raw && decodeURIComponent(new URL(raw).pathname.split("/").at(-1)!) === n;
+          if (own && event.type === "open") wires.set(this, (window as any).__alternateWire);
+          if (own && event.type === "message") {
+            const g = wires.get(this); if (!g) return dispatch.call(this, event);
+            g.received++;
+            const data = (event as MessageEvent).data;
+            if (typeof data === "string") try {
+              const m = JSON.parse(data);
+              if (m.kind === "resync") g.resync++;
+              if (m.kind === "scrollpos") g.completed = g.resync;
+            } catch {}
+          }
+          return dispatch.call(this, event);
+        };
+        document.addEventListener("wheel", () => {
+          const p = window.__tmuxHubTerms?.[n], g = (window as any).__alternateWire;
+          if (p && g) g.wheels.push({ at: performance.now(), pending: p.replayPending, resyncs: p.resyncs, replays: p.replays });
+        }, { capture: true });
+      }, name);
+      if (weak) await page.routeWebSocket(u => u.pathname === `/ws/sessions/${name}`, async route => {
+        const id = randomUUID(), queue = { queued: 0, delivered: 0, failed: 0 }; queues.set(id, queue);
+        // Assign route identity explicitly before this route can receive data.
+        await page.evaluate(id => { (window as any).__alternateWire = { id, received: 0, resync: 0, completed: 0, wheels: [] }; }, id);
         const server = route.connectToServer(); let tail = Promise.resolve();
         server.onMessage(message => {
           // Delay only actual frames, in order; no replacement snapshots.
-          tail = tail.then(async () => { await sleep(25); delayed++; try { route.send(message); } catch {} });
+          queue.queued++;
+          tail = tail.then(async () => { await sleep(25); delayed++; try { route.send(message); queue.delivered++; } catch { queue.failed++; } });
         });
       });
       ctx.tmuxE2E(["send-keys", "-t", name,
@@ -50,7 +86,7 @@ export function defineAlternateTests(
         await expect.poll(() => page.evaluate(n => window.__tmuxHubTerms?.[n]?.visible, name)).toBe(true);
       }
       await expectInSync(page, ctx, name, "alternate replay");
-      const wheel = async () => {
+      const wheel = async (normalHistory = false) => {
         const box = await page.locator(".xterm-screen:visible").first().boundingBox();
         if (!box) throw new Error("no visible terminal");
         const sample = () => page.evaluate(n => {
@@ -59,10 +95,28 @@ export function defineAlternateTests(
           return { replays: p.replays, resyncs: p.resyncs, replayPending: p.replayPending, scroll: p.linesFromBottom,
             dom: v ? { top: v.scrollTop, height: v.scrollHeight, client: v.clientHeight } : null };
         }, name);
+        await page.mouse.move(box.x + 50, box.y + 50);
+        if (normalHistory) await expect.poll(async () => {
+          await page.evaluate(n => window.__tmuxHubTerms![n]!.afterParsed(), name);
+          const wire = await page.evaluate(n => ({ ...(window as any).__alternateWire, pending: window.__tmuxHubTerms![n]!.replayPending }), name);
+          const queue = queues.get(wire.id);
+          const checks = { parsed: !wire.pending, completed: wire.completed === wire.resync,
+            queuePresent: !!queue, noDeliveryError: !queue?.failed, queueDrained: queue?.queued === queue?.delivered, browserReceived: wire.received === queue?.delivered };
+          lastBarrier = { at: Date.now(), wire, queue: queue ? { ...queue } : null, checks };
+          barrierSamples.push(lastBarrier);
+          return checks.parsed && checks.completed && (!weak || (checks.queuePresent && checks.noDeliveryError && checks.queueDrained && checks.browserReceived));
+        }, { message: "normal history setup waits for current weak queue and last announced replay to parse" }).toBe(true);
         const before = await sample();
-        await page.mouse.move(box.x + 50, box.y + 50); await page.mouse.wheel(0, -420);
+        const count = await page.evaluate(() => (window as any).__alternateWire.wheels.length);
+        await page.mouse.wheel(0, -420);
+        await expect.poll(() => page.evaluate(() => (window as any).__alternateWire.wheels.length)).toBeGreaterThan(count);
+        const actualInput = await page.evaluate(() => (window as any).__alternateWire.wheels.at(-1));
         await page.waitForTimeout(250);
-        wheelSamples.push({ before, after: await sample() });
+        wheelSamples.push({ before, actualInput, queue: [...queues.values()].map(q => ({ ...q })), after: await sample() });
+        if (normalHistory) {
+          writeFileSync(info.outputPath("alternate-barrier.json"), JSON.stringify({ barrierSamples, wheelSamples }, null, 2));
+          expect(actualInput.pending, "normal history setup: actual wheel arrived during replay").toBe(false);
+        }
       };
       const grid = (await view()).size;
       await wheel();
@@ -101,7 +155,7 @@ export function defineAlternateTests(
       // normal-history navigation after all announced snapshots complete;
       // navigation during replay has its own fidelity-scroll-intent cases.
       await expect.poll(() => page.evaluate(n => window.__tmuxHubTerms![n]!.replayPending, name)).toBe(false);
-      await wheel(); expect((await view()).scroll).toBeGreaterThan(0);
+      await wheel(true); expect((await view()).scroll).toBeGreaterThan(0);
       const chosen = (await view()).scroll, replay = (await view()).replays;
       await page.evaluate(n => window.__tmuxHubTerms![n]!.dropSocket(), name);
       await expect.poll(async () => (await view()).replays).toBeGreaterThan(replay);
@@ -109,21 +163,43 @@ export function defineAlternateTests(
       await expectInSync(page, ctx, name, "normal history still navigates and reconnects");
       if (weak) expect(delayed).toBeGreaterThan(0);
       } catch (error) {
-        writeFileSync(info.outputPath("alternate-failure.json"), JSON.stringify({ wheelSamples,
-          probe: await page.evaluate(n => { const p = window.__tmuxHubTerms?.[n]; return p ? { state: p.state, scroll: p.linesFromBottom, replays: p.replays, resyncs: p.resyncs, lines: p.screen() } : null; }, name).catch(() => null),
-          pane: ctx.tmuxE2E(["capture-pane", "-p", "-t", name]),
-          modes: ctx.tmuxE2E(["display", "-p", "-t", name, "#{alternate_on} #{history_size} #{mouse_standard_flag} #{mouse_sgr_flag}"]),
-        }));
-        await page.screenshot({ path: info.outputPath("alternate-failure.png") }).catch(() => {});
-        throw error;
+        primaryFailure = { error };
+        const diagnostic: Record<string, unknown> = {
+          originalError: error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : String(error),
+          lastBarrier, barrierSamples, wheelSamples, queues: [...queues.entries()],
+        };
+        const save = () => { try { writeFileSync(info.outputPath("alternate-failure.json"), JSON.stringify(diagnostic)); } catch {} };
+        // Persist existing samples before asking a potentially closed page or
+        // failed tmux for more evidence. Diagnostics must not replace the failure.
+        save();
+        try {
+          const collect = async (key: string, read: () => unknown) => {
+            try { diagnostic[key] = await read(); }
+            catch (failure) { diagnostic[key] = { diagnosticError: String(failure) }; }
+            save();
+          };
+          await collect("wire", () => page.evaluate(() => (window as any).__alternateWire));
+          await collect("probe", () => page.evaluate(n => {
+            const p = window.__tmuxHubTerms?.[n];
+            return p ? { state: p.state, scroll: p.linesFromBottom, replays: p.replays, resyncs: p.resyncs, lines: p.screen() } : null;
+          }, name));
+          await collect("pane", () => ctx.tmuxE2E(["capture-pane", "-p", "-t", name]));
+          await collect("modes", () => ctx.tmuxE2E(["display", "-p", "-t", name, "#{alternate_on} #{history_size} #{mouse_standard_flag} #{mouse_sgr_flag}"]));
+          await page.screenshot({ path: info.outputPath("alternate-failure.png") }).catch(() => {});
+        } finally { throw error; }
       } finally {
-        if (continuousStarted) {
-          const cleanup = await stopOwnedGenerator(owned, name, {
-            listSessions: () => ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n"),
-            killSession: n => { ctx.tmuxE2E(["kill-session", "-t", n]); },
-          });
-          writeFileSync(info.outputPath("generator-cleanup.json"), JSON.stringify(cleanup));
-        } else rmSync(owned, { recursive: true, force: true });
+        try {
+          if (continuousStarted) {
+            const cleanup = await stopOwnedGenerator(owned, name, {
+              listSessions: () => ctx.tmuxE2E(["list-sessions", "-F", "#{session_name}"]).split("\n"),
+              killSession: n => { ctx.tmuxE2E(["kill-session", "-t", n]); },
+            });
+            writeFileSync(info.outputPath("generator-cleanup.json"), JSON.stringify(cleanup));
+          } else rmSync(owned, { recursive: true, force: true });
+        } catch (cleanupError) {
+          try { writeFileSync(info.outputPath("generator-cleanup.json"), JSON.stringify({ error: String(cleanupError), primaryFailure: primaryFailure ? String(primaryFailure.error) : null })); } catch {}
+          if (!primaryFailure) throw cleanupError;
+        }
       }
     });
   }

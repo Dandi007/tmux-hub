@@ -5,3 +5,17 @@ defineFidelitySuite(test, expect);
 
 import { defineNativeViewportFitTests } from "./native-viewport-fit";
 defineNativeViewportFitTests();
+
+import { defineNativeOwnerOrderTests } from "./native-owner-order";
+defineNativeOwnerOrderTests();
+import { defineNativeRecheckProgressTests } from "./native-recheck-progress";
+defineNativeRecheckProgressTests();
+
+import { defineNativeLateAttachTests } from "./native-late-attach";
+defineNativeLateAttachTests();
+
+import { defineNativeProbeProgressTests } from "./native-probe-progress";
+defineNativeProbeProgressTests();
+
+import { defineNativeProbeRoundtripTests } from "./native-probe-roundtrip";
+defineNativeProbeRoundtripTests();

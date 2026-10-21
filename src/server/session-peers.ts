@@ -4,6 +4,7 @@
 // tells them (see main.ts) and, once the pinning page leaves, lets them reclaim.
 export class SessionPeers<T> {
   private readonly bySession = new Map<string, Set<T>>();
+  private readonly versions = new Map<string, number>();
   private readonly pinner = new Map<string, T>();
 
   add(session: string, peer: T): void {
@@ -16,7 +17,7 @@ export class SessionPeers<T> {
   remove(session: string, peer: T): boolean {
     const set = this.bySession.get(session);
     set?.delete(peer);
-    if (set && set.size === 0) this.bySession.delete(session);
+    if (!set || set.size === 0) { this.bySession.delete(session); this.versions.delete(session); }
     if (this.pinner.get(session) !== peer) return false;
     this.pinner.delete(session);
     return true;
@@ -24,7 +25,10 @@ export class SessionPeers<T> {
 
   pinned(session: string, peer: T): void {
     this.pinner.set(session, peer);
+    this.versions.set(session, this.pinVersion(session) + 1);
   }
+
+  pinVersion(session: string): number { return this.versions.get(session) ?? 0; }
 
   isPinner(session: string, peer: T): boolean {
     return this.pinner.get(session) === peer;
