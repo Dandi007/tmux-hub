@@ -30,7 +30,7 @@ export type TerminalHandle = {
   retry: () => void;
   /** false: automatic attach completion, which must respect a newer peer pin. */
   fit: (reclaim?: boolean) => void;
-  notifySessionActivity: (attached: number, cols: number, rows: number, source?: "activity" | "snapshot") => void;
+  notifySessionActivity: (attached: number, cols: number, rows: number) => void;
   readonly isConnected: boolean;
   readonly state: TerminalState;
   onStateChange: (cb: (state: TerminalState, attempt?: number) => void) => void;
@@ -470,7 +470,6 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   let nativeFlight: { id: number; demand: NativeDemand; size?: { cols: number; rows: number } } | null = null;
   let nativeRetryTimer: ReturnType<typeof setTimeout> | null = null;
   let nativeGeneration = 0, nativeRequestSequence = 0;
-  let lastNativeHint = "";
   let connectionReady = false;
   let initialViewportConfirmed = false;
   let nativeReplyNeedsRecheck = false;
@@ -1216,24 +1215,17 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       recheckNativeViewport();
       applyPendingScrollDecision();
     },
-    notifySessionActivity: (attached: number, cols: number, rows: number, source = "activity") => {
+    notifySessionActivity: (attached: number, _cols: number, _rows: number) => {
       if (disposed) return;
       if (attached > 0) {
         nativeReplyNeedsRecheck = false;
-        const hint = `${attached}:${cols}x${rows}`;
-        const unfinished = nativeDemand !== null || nativeFlight !== null;
-        const mismatch = viewportState.owner !== "native" || viewportState.cols !== cols || viewportState.rows !== rows;
-        // A peer's delayed authority can change the display while our SSE was
-        // disconnected. An identical fresh hint must repair that idle mismatch;
-        // while a check is unfinished, identical hints only drain existing work.
-        if (source === "snapshot" || (hint !== lastNativeHint && unfinished)
-          || (mismatch && (hint !== lastNativeHint || !unfinished))) requestNative("probe");
-        lastNativeHint = hint;
-        // Repeated hints drain unfinished work without replacing its generation.
+        // Each real registry activity or reconnect snapshot is a new demand.
+        // Read-only probes cannot emit SSE; single-flight/generation coalesce
+        // independently delivered hints without relying on their visible grid.
+        requestNative("probe");
         recheckNativeViewport();
         return;
       }
-      lastNativeHint = "";
       const hadProbe = nativeDemand?.kind === "probe" || nativeFlight?.demand.kind === "probe";
       const result = handleSessionActivity(viewportState, attached);
       nativeReplyNeedsRecheck = attached === 0;

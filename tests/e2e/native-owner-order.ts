@@ -9,7 +9,7 @@ import type { Page } from "@playwright/test";
 // bytes on that socket. SSE remains independently delivered.
 export async function gateNative(page: Page, name: string, armed: boolean, proxyPort = 0) {
   await page.addInitScript(({ n, armed, proxyPort }) => {
-    const g = (window as any).__nativeOrder = { armed, blocked: false, held: [] as (() => void)[], messages: [] as unknown[], checks: [] as unknown[], holdPositive: false, positiveHeld: [] as (() => void)[], sockets: [] as WebSocket[], holdApplied: false, failNextApplied: false, injectedErrors: 0, rejectCheck: false, holdZeroAfter: Number.POSITIVE_INFINITY, heldActivity: [] as (() => void)[], events: [] as EventSource[], snapshots: 0, holdSseRetry: false, sseTimers: [] as (() => void)[], zeros: 0, positives: 0, activity: [] as { event: string; attached: number; cols: number; rows: number }[] };
+    const g = (window as any).__nativeOrder = { armed, blocked: false, held: [] as (() => void)[], messages: [] as unknown[], checks: [] as unknown[], holdPositive: false, positiveHeld: [] as (() => void)[], sockets: [] as WebSocket[], probes: [] as unknown[], holdApplied: false, failNextApplied: false, injectedErrors: 0, rejectCheck: false, holdZeroAfter: Number.POSITIVE_INFINITY, heldActivity: [] as (() => void)[], events: [] as EventSource[], snapshots: 0, holdSseRetry: false, sseTimers: [] as (() => void)[], zeros: 0, positives: 0, activity: [] as { event: string; attached: number; cols: number; rows: number }[] };
     const schedule = window.setTimeout;
     window.setTimeout = ((fn: TimerHandler, delay?: number, ...args: unknown[]) => {
       if (g.holdSseRetry && delay === 1000 && typeof fn === "function") {
@@ -23,6 +23,12 @@ export async function gateNative(page: Page, name: string, armed: boolean, proxy
         const u = new URL(raw), own = decodeURIComponent(u.pathname.split("/").at(-1)!) === n;
         if (own && proxyPort) u.port = String(proxyPort);
         super(u, protocols); if (own) g.sockets.push(this);
+      }
+      send(data: string | ArrayBufferLike | Blob | ArrayBufferView) {
+        if (typeof data === "string" && decodeURIComponent(new URL(this.url).pathname.split("/").at(-1)!) === n) {
+          try { const m = JSON.parse(data); if (m.kind === "viewport_probe") g.probes.push(m); } catch {}
+        }
+        super.send(data);
       }
       set onmessage(handler) {
         super.onmessage = handler ? function(event) {

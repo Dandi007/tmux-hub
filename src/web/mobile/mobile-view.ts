@@ -251,7 +251,7 @@ export function renderMobile(root: HTMLElement): void {
     if (e.event === "snapshot") {
       sessions = e.payload;
       const current = sessions.find(s => s.name === openedName);
-      if (term && current) term.notifySessionActivity(current.attached, current.cols, current.rows, "snapshot");
+      if (term && current) term.notifySessionActivity(current.attached, current.cols, current.rows);
       if (pendingQuickLaunchName !== null && sessions.some((s) => s.name === pendingQuickLaunchName)) {
         const resolvedName = pendingQuickLaunchName;
         pendingQuickLaunchName = null;

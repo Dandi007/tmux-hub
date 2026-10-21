@@ -75,8 +75,23 @@ export function defineNativeProbeRoundtripTests() {
       await page.evaluate(() => (window as any).__releaseNative());
       await expect.poll(synced).toBe(true);
       expect(await page.evaluate(() => (window as any).__nativeOrder.sockets.length)).toBe(1);
+      // Observe more than two real registry polling periods after output stops.
+      // A query -> SSE -> query feedback loop cannot satisfy this quiet window.
+      const quietSamples: unknown[] = [];
+      let prior = "", unchangedSince = Date.now();
+      await expect.poll(async () => {
+        const counts = await page.evaluate(() => {
+          const g = (window as any).__nativeOrder;
+          return { activity: g.activity.length, probes: g.probes.length, checks: g.checks.length };
+        });
+        quietSamples.push({ at: Date.now(), ...counts });
+        const current = JSON.stringify(counts);
+        if (current !== prior) { prior = current; unchangedSince = Date.now(); }
+        return Date.now() - unchangedSince >= 4500;
+      }, { timeout: 12_000, intervals: [250] }).toBe(true);
+      writeFileSync(info.outputPath("native-query-quiet.json"), JSON.stringify(quietSamples));
     } finally {
-      try { writeFileSync(info.outputPath("native-roundtrip.json"), JSON.stringify({ actual: await read(), pane: pane(), events: await page.evaluate(() => { const g = (window as any).__nativeOrder; return { messages: g.messages, checks: g.checks, positives: g.positives, activity: g.activity, sockets: g.sockets.length }; }) }, null, 2)); } catch {}
+      try { writeFileSync(info.outputPath("native-roundtrip.json"), JSON.stringify({ actual: await read(), pane: pane(), events: await page.evaluate(() => { const g = (window as any).__nativeOrder; return { messages: g.messages, checks: g.checks, positives: g.positives, activity: g.activity, probes: g.probes, sockets: g.sockets.length }; }) }, null, 2)); } catch {}
       await page.screenshot({ path: info.outputPath("native-roundtrip.png") }).catch(() => {});
       await peer?.close();
       try { if (attached() > 0) tmux("detach-client", "-s", name); } finally { await stopNative(native); }

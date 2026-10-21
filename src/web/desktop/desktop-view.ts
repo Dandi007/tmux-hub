@@ -108,7 +108,7 @@ export function renderDesktop(root: HTMLElement): void {
     if (e.event === "snapshot") {
       sessions = e.payload;
       // SSE reconnect may only report native departure in its fresh snapshot.
-      for (const s of sessions) pool.notifySessionActivity(s.name, s.attached, s.cols, s.rows, "snapshot");
+      for (const s of sessions) pool.notifySessionActivity(s.name, s.attached, s.cols, s.rows);
     } else if (e.event === "session_created") {
       sessions = [...sessions, e.payload];
       if (pendingOpen === e.payload.name) {
