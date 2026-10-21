@@ -27,7 +27,7 @@ export type ClientWsMessage =
   | { kind: "binary"; data: string }
   | { kind: "key"; name: string }
   // afterNative: automatic detach recheck; never supersede a later web pin.
-  | { kind: "resize"; cols: number; rows: number; ifPinned?: true; afterNative?: true }
+  | { kind: "resize"; cols: number; rows: number; ifPinned?: true; afterNative?: true; requestId?: number }
   // Mouse-wheel forwarding: alternate-screen TUI apps (claude code, vim, less)
   // own their off-screen content and run in mouse mode, so a mobile touch-drag
   // is translated into wheel reports the app scrolls itself. col/row are 1-based
@@ -49,7 +49,7 @@ export type ServerWsMessage =
   | { kind: "resync" }
   | { kind: "pong"; ts: number }
   // Completion for an afterNative resize, including rejection or transient error.
-  | { kind: "viewport_checked"; ok: boolean }
+  | { kind: "viewport_checked"; ok: boolean; requestId?: number }
   // owner "web" + peer: another page pinned the pane to cols×rows (adopt it, a
   // resync follows). applied: acknowledgement of our own applied size (also
   // adopt: an intervening peer update may have changed our local grid).

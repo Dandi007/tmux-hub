@@ -71,6 +71,12 @@ export function createWsHandlers(deps: WsDeps) {
     void tail.then(() => { if (viewports.get(name) === tail) viewports.delete(name); });
     return next;
   }
+  function viewportChecked(ws: ServerWebSocket<WsData>, request: { requestId?: unknown }, ok: boolean): void {
+    const id = request.requestId;
+    try { ws.send(JSON.stringify({ kind: "viewport_checked", ok,
+      ...(typeof id === "number" && Number.isSafeInteger(id) && id > 0 ? { requestId: id } : {}),
+    })); } catch {}
+  }
   function released(ws: ServerWebSocket<WsData>): void {
     for (const p of peers.others(ws.data.sessionName, ws)) {
       try { p.send(JSON.stringify({ kind: "viewport", cols: ws.data.cols, rows: ws.data.rows, owner: "web", released: true })); } catch {}
@@ -310,11 +316,11 @@ export function createWsHandlers(deps: WsDeps) {
       const send = async (): Promise<void> => {
         // Renderer initialization is not new user intent. Check inside the
         // serialized mutation, since a peer pin may already be queued ahead.
-        const msg = parsed as { kind?: string; ifPinned?: unknown; afterNative?: unknown };
+        const msg = parsed as { kind?: string; ifPinned?: unknown; afterNative?: unknown; requestId?: unknown };
         // An SSE detach hint is not newer user intent. A web pin published
         // after this native confirmation already has its peer notice in flight.
         if (msg.kind === "resize" && msg.afterNative === true && ws.data.nativePinVersion !== peers.pinVersion(sessionName)) {
-          try { ws.send(JSON.stringify({ kind: "viewport_checked", ok: true })); } catch {}
+          viewportChecked(ws, msg, true);
           return;
         }
         if (msg.kind === "resize" && msg.ifPinned === true && !peers.isPinner(sessionName, ws)) {
@@ -335,7 +341,7 @@ export function createWsHandlers(deps: WsDeps) {
           pinnedBy(ws, result.cols, result.rows);
         }
         if (msg.kind === "resize" && msg.afterNative === true) {
-          try { ws.send(JSON.stringify({ kind: "viewport_checked", ok: true })); } catch {}
+          viewportChecked(ws, msg, true);
         }
       };
       const resize = typeof parsed === "object" && parsed !== null && (parsed as { kind?: string }).kind === "resize";
@@ -349,7 +355,7 @@ export function createWsHandlers(deps: WsDeps) {
         }
         try { ws.send(JSON.stringify({ error: msg })); } catch {}
         if (resize && (parsed as { afterNative?: unknown }).afterNative === true) {
-          try { ws.send(JSON.stringify({ kind: "viewport_checked", ok: false })); } catch {}
+          viewportChecked(ws, parsed as { requestId?: unknown }, false);
         }
       });
     },

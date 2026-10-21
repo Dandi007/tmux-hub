@@ -542,3 +542,6 @@ test.describe("desktop voice input", () => {
 
 import { defineRendererFitTests } from "./desktop-renderer-fit";
 defineRendererFitTests();
+
+import { defineReconnectBudgetTests } from "./desktop-reconnect-budget";
+defineReconnectBudgetTests();

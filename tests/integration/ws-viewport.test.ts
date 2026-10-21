@@ -302,3 +302,16 @@ test("failed initial native geometry closes for retry instead of leaving an unin
   const b = await hub.connect(120);
   expect(b.messages.some(m => m.owner === "native" && m.cols === 80)).toBe(true);
 });
+
+test("native completion preserves its request identity across success and superseded peer checks", async () => {
+  const hub = start(); const a = await hub.connect(120);
+  a.ws.send(JSON.stringify({ kind: "resize", cols: 133, rows: 24, afterNative: true, requestId: 71 }));
+  await until(() => a.messages.some(m => m.kind === "viewport_checked"));
+  expect(a.messages.find(m => m.kind === "viewport_checked")?.requestId).toBe(71);
+  expect(hub.pane()).toBe(133);
+  const b = await hub.connect(183);
+  hub.resize(b, 155); await until(() => a.messages.some(m => m.peer && m.cols === 155));
+  a.ws.send(JSON.stringify({ kind: "resize", cols: 133, rows: 24, afterNative: true, requestId: 72 }));
+  await until(() => a.messages.filter(m => m.kind === "viewport_checked").length === 2);
+  expect(a.messages.filter(m => m.kind === "viewport_checked").map(m => m.requestId)).toEqual([71, 72]);
+});

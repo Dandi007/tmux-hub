@@ -467,6 +467,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
 
   let nativeRecheckPending = false;
   let nativeRecheckInFlight = false;
+  let nativeRequestSequence = 0;
+  let nativeRequestId: number | null = null;
+  let connectionReady = false;
   let nativeRecheckGeneration = 0;
   let nativeRecheckSentGeneration = 0;
   let nativeRecheckSize: { cols: number; rows: number } | null = null;
@@ -694,6 +697,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                   // A newer explicit peer pin supersedes automatic recovery.
                   nativeRecheckPending = false;
                   nativeRecheckInFlight = false;
+                  nativeRequestId = null;
                   nativeRecheckSize = null;
                 }
                 // A later automatic renderer fit must not reclaim a newer
@@ -738,8 +742,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                 return;
               }
               if (kind === "viewport_checked") {
-                if (!nativeRecheckInFlight) return;
+                if (!nativeRecheckInFlight || (parsed as { requestId?: number }).requestId !== nativeRequestId) return;
                 nativeRecheckInFlight = false;
+                nativeRequestId = null;
                 if (!(parsed as { ok: boolean }).ok) {
                   if (nativeRecheckGeneration !== nativeRecheckSentGeneration) recheckNativeViewport();
                   return; // Otherwise keep pending for the next visible interaction.
@@ -808,6 +813,10 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                   reportingEnabled = true;
                   replayCount++;
                   replayProgress.complete(replayGeneration);
+                  if (socket === ws && initialViewportConfirmed) {
+                    connectionReady = true;
+                    reconnectAttempt = 0;
+                  }
                 });
                 return;
               }
@@ -889,6 +898,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
 
   const enterReconnecting = (): void => {
     if (disposed) return;
+    const wasReady = connectionReady;
     saveLocalLfbForReplay();
     console.log(`[tmux-hub] entering reconnect for ${opts.sessionName}`);
     stopHeartbeat();
@@ -896,12 +906,19 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     coveredExplicitIntent = null;
     connectionPending = true;
     initialViewportConfirmed = false;
+    connectionReady = false;
     nativeRecheckInFlight = false;
+    nativeRequestId = null;
     rendererOwnsViewport = false;
     try { ws.onmessage = null; ws.onclose = null; ws.onerror = null; ws.close(); } catch {}
     predictions.length = 0;
-    reconnectAttempt = 0;
-    setState("reconnecting", 0);
+    if (wasReady) reconnectAttempt = 0;
+    if (reconnectAttempt >= RECONNECT_MAX_RETRIES) {
+      setState("dead");
+      startDeadProbe();
+      return;
+    }
+    setState("reconnecting", reconnectAttempt);
     scheduleReconnectAttempt();
   };
 
@@ -950,7 +967,6 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       ws = socket;
       connectionPending = false;
       wireWs(ws);
-      reconnectAttempt = 0;
       predictions.length = 0;
       setState("connected");
       flushSendQueue();
@@ -1047,7 +1063,8 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     nativeRecheckSentGeneration = nativeRecheckGeneration;
     nativeRecheckSize = size;
     pendingRendererSize = null; // This current measurement covers old renderer work.
-    queuedSend({ kind: "resize", ...size, afterNative: true });
+    nativeRequestId = ++nativeRequestSequence;
+    queuedSend({ kind: "resize", ...size, afterNative: true, requestId: nativeRequestId });
   };
   const onResize = () => {
     // Native owns the displayed grid too: fitting locally would reflow the

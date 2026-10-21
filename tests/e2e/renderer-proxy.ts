@@ -6,12 +6,12 @@ type Upgrade = { id: string; cols: string | null; rows: string | null; pin: stri
 // still runs: tests must await THIS live navigation's101 before activating it.
 export async function holdWebSocketUpgrade(targetPort: number) {
   const sockets = new Set<Socket>();
-  const waiting = new Set<{ client: Socket; chunks: Buffer[]; upgrade?: Upgrade }>();
-  let held = true;
+  const waiting = new Set<{ client: Socket; chunks: Buffer[]; upgrade?: Upgrade; rejected?: boolean }>();
+  let held = true, cutInitial = false, rejections = 0;
   const server = createServer(client => {
     const upstream = connect(targetPort, "127.0.0.1");
     sockets.add(client); sockets.add(upstream);
-    const queue: { client: Socket; chunks: Buffer[]; upgrade?: Upgrade } = { client, chunks: [] }; waiting.add(queue);
+    const queue: { client: Socket; chunks: Buffer[]; upgrade?: Upgrade; rejected?: boolean } = { client, chunks: [] }; waiting.add(queue);
     let request = "", response = "";
     client.on("data", chunk => {
       if (queue.upgrade) return;
@@ -27,10 +27,16 @@ export async function holdWebSocketUpgrade(targetPort: number) {
     });
     client.pipe(upstream);
     upstream.on("data", chunk => {
+      if (queue.rejected) return;
       if (!queue.upgrade?.accepted) {
         response += chunk.toString("latin1");
         if (response.includes("\r\n\r\n")) {
           if (queue.upgrade) queue.upgrade.accepted = /^HTTP\/1\.[01] 101\b/.test(response);
+          if (cutInitial && queue.upgrade?.accepted) {
+            queue.rejected = true; rejections++;
+            client.end(Buffer.from(response.slice(0, response.indexOf("\r\n\r\n") + 4), "latin1"));
+            return;
+          }
           response = "";
         }
       }
@@ -47,6 +53,8 @@ export async function holdWebSocketUpgrade(targetPort: number) {
     upgrades: () => [...waiting].flatMap(q => q.upgrade ? [{ ...q.upgrade }] : []),
     buffered: () => [...waiting].reduce((n, q) => n + q.chunks.reduce((a, b) => a + b.length, 0), 0),
     hold() { held = true; },
+    cutBeforeViewport(value: boolean) { cutInitial = value; },
+    rejections: () => rejections,
     release() { held = false; for (const q of waiting) { for (const c of q.chunks) q.client.write(c); q.chunks = []; } },
     async close() { for (const s of sockets) s.destroy(); await new Promise<void>(resolve => server.close(() => resolve())); },
   };

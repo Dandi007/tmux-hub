@@ -14,6 +14,7 @@ PR164 merge push CI39530842019 的 CONNECTING hidden activation 在调用 render
 
 - released 仅是旧 web pinner 退出的提示，当前 native 状态保持不动，等待真正 detach。
 - SSE attached→0（或首次0且 native 状态尚未交付）请求当前测量 grid 的真实 resize；本地不提前 fit，等同一有序 WS 上 applied/native 回复决定显示。普通 attached0 不产生 pin；已采用 native 时复核，若 native 元数据迟于 detach SSE 则在实际收到它后复核一次。复核 resize 标记 afterNative，服务端在串行 mutation 中只允许 native 确认后没有更新 web pin 的请求；较新 peer pin 的有序通知继续获胜。隐藏 slot 记住复核请求，激活后再发布。
+- 每个复核有独立 requestId，完成回复只消费匹配的在途请求，peer取消不会让旧 completion 归到新请求。WS Upgrade不重置重试预算，只有当前连接已确认viewport并解析回放才恢复健康预算；初始化前连续关闭累计8次失败、退避并进入dead，人工retry/定时probe按既有路径重试。
 - 每次新 detach 需求有独立代次，旧回复只能消费发送时覆盖的代次。初始化无法取得权威尺寸则关闭该WS重试，不维持无权威但心跳正常的连接。SSE恢复snapshot向已有终端同步attached状态。
 - 复核保留到显式 viewport_checked 回复；在途 resize 保留最新测量，成功后仍为自身 web pin 才有条件补发。错误保留需求供下一次交互重试，跨连接等待新初始权威回复再复核；新连接的 pinVersion 在初始化建立，自己的 applied 更新基准。
 - 测试代理只计活连接，解析并保存无凭据的测试连接ID、pin/grid和101状态。当前导航/连接的真实101作为 CONNECTING 前置 barrier；取消该用例多余导航。
@@ -25,6 +26,7 @@ PR164 merge push CI39530842019 的 CONNECTING hidden activation 在调用 render
 - `src/web/desktop/desktop-view.ts` / `src/web/mobile/mobile-view.ts`：SSE恢复snapshot同步native状态。
 - `src/web/viewport-owner.ts`：native 状态忽略 web released。
 - `src/web/terminal.ts`：detach 状态变化请求权威 resize，保持显示直到回复。
+- `tests/e2e/desktop-reconnect-budget.ts`：真实HTTP101前缀后断流，记录原调度间隔并加速执行，验证8次预算、dead按钮与健康恢复。
 - `tests/e2e/helpers.ts` / `renderer-proxy.ts` / `desktop-renderer-fit.ts`：活连接/导航握手前置。
 - `tests/e2e/native-recheck-progress.ts`：在途再resize、隐藏跨重连激活、一次明确标注的客户端错误注入与交互重试。
 - 新 native 所有权顺序 E2E：真实 TTY、桌面/手机、延迟顺序及尺寸/画面验证。
@@ -38,3 +40,5 @@ PR164 merge push CI39530842019 的 CONNECTING hidden activation 在调用 render
 ## 6. 非目标
 
 不改语音、prod/accepted、harness、外部infra；非发布阻断生命周期/VT细节单列backlog。移动视口是Chromium模拟，不冒充物理手机/WebKit/HIL。
+
+未改路径的“网页先连接、native后来接入/调尺寸”SSE正向同步是独立审查发现的静态既有缺口，单列backlog与handoff待真实复核。本spec的native先连接、退出/旧pinner关闭验收不代替该方向；不据此声明完整生产验收通过。
