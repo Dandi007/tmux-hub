@@ -102,6 +102,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   let connectionPending = true;
   let rendererOwnsViewport = false;
   let pendingExplicitSize: { cols: number; rows: number } | null = null;
+  let coveredExplicitIntent: { cols: number; rows: number } | null = null;
   let pendingRendererSize: { cols: number; rows: number } | null = null;
   let flushRendererViewport = (): void => {};
   const term = new Terminal({
@@ -685,6 +686,13 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                 } else if (msg.applied) {
                   rendererOwnsViewport = true;
                 }
+                if (msg.owner === "native") {
+                  pendingExplicitSize = null;
+                  coveredExplicitIntent = null;
+                } else if (msg.applied && pendingExplicitSize === coveredExplicitIntent) {
+                  pendingExplicitSize = null;
+                  coveredExplicitIntent = null;
+                }
                 const result = handleViewportMessage(msg, viewportState);
                 viewportState = result.next;
                 if (result.action.type === "resize") {
@@ -693,6 +701,12 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                   console.log(`[tmux-hub] viewport adopted (${msg.owner}${msg.peer ? ", peer" : ""}): ${result.action.cols}x${result.action.rows}`);
                 } else if (result.action.type === "reclaim") {
                   reassertViewport();
+                }
+                // A failed initial web pin has no own applied ack. Its plain
+                // viewport permits the still-unsatisfied explicit intent once.
+                if (msg.owner === "web" && !msg.applied && !msg.peer && !msg.released) {
+                  coveredExplicitIntent = null;
+                  flushExplicitViewport();
                 }
                 flushRendererViewport();
                 return;
@@ -791,7 +805,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     const visible = isTermVisible();
     // The URL covers this intent even if its renderer measurement is refined
     // while auth resolves. A later explicit action creates a different object.
-    if (visible && pendingExplicitSize === coveredIntent) pendingExplicitSize = null;
+    coveredExplicitIntent = visible ? coveredIntent : null;
     const pin = visible ? "" : "&pin=0";
     return `${base}${sep}cols=${c}&rows=${r}&resync=1${pin}`;
   };
@@ -837,7 +851,8 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     saveLocalLfbForReplay();
     console.log(`[tmux-hub] entering reconnect for ${opts.sessionName}`);
     stopHeartbeat();
-    pendingExplicitSize = null;
+    pendingRendererSize = null;
+    coveredExplicitIntent = null;
     connectionPending = true;
     rendererOwnsViewport = false;
     try { ws.onmessage = null; ws.onclose = null; ws.onerror = null; ws.close(); } catch {}
@@ -860,7 +875,8 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   const attemptReconnect = async (): Promise<void> => {
     if (disposed) return;
     reconnectAttempt++;
-    pendingExplicitSize = null; // A fresh URL captures current layout for this attempt.
+    pendingRendererSize = null;
+    coveredExplicitIntent = null;
     console.log(`[tmux-hub] reconnect attempt ${reconnectAttempt}/${RECONNECT_MAX_RETRIES} for ${opts.sessionName}`);
     setState("reconnecting", reconnectAttempt);
 
@@ -942,11 +958,13 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     if (c > 0 && r > 0 && isTermVisible() && shouldSendResize(viewportState)) {
       if (pendingRendererSize) pendingRendererSize = { cols: c, rows: r };
       // One latest geometry from actual activation/resize, never a resize
-      // history. A connection that closes before open discards this intent.
-      if (currentState !== "dead" && connectionPending) {
+      // history. Unsent intent survives backoff until a URL ack or actual send.
+      if (connectionPending) {
         pendingExplicitSize = { cols: c, rows: r };
         return;
       }
+      pendingExplicitSize = null;
+      coveredExplicitIntent = null;
       queuedSend({ kind: "resize", cols: c, rows: r });
     }
   };
@@ -970,8 +988,10 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   };
   const flushExplicitViewport = (): void => {
     if (!pendingExplicitSize || disposed || ws.readyState !== WebSocket.OPEN) return;
+    if (pendingExplicitSize === coveredExplicitIntent) return;
     const size = pendingExplicitSize;
     pendingExplicitSize = null;
+    coveredExplicitIntent = null;
     pendingRendererSize = null; // This measured grid is covered by the explicit pin.
     queuedSend({ kind: "resize", ...size });
   };

@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures";
 import { bindSecret } from "./helpers";
+import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { holdWebSocketUpgrade } from "./renderer-proxy";
@@ -8,14 +9,18 @@ const tab = (page: Page, name: string) => page.locator(`.tab-bar__tab[data-sessi
 async function open(page: Page) {
   await page.goto("/?debug=term"); await bindSecret(page); await page.reload();
 }
-async function gate(page: Page, armed: boolean, target = "", proxyPort = 0) {
-  await page.addInitScript(({ armed, target, proxyPort }) => {
+async function gate(page: Page, armed: boolean, target = "", proxyPort = 0, holdViewport = false) {
+  await page.addInitScript(({ armed, target, proxyPort, holdViewport }) => {
     const schedule = window.setTimeout;
-    const g = (window as any).__rendererGate = { armed, callbacks: [] as { phase: number; run: () => void }[], messages: [] as unknown[], sockets: [] as WebSocket[], holdViewport: false, heldViewport: [] as (() => void)[] };
+    const g = (window as any).__rendererGate = { armed, callbacks: [] as { phase: number; run: () => void }[], messages: [] as unknown[], sockets: [] as WebSocket[], holdRetry: false, holdActivity: false, heldActivity: [] as (() => void)[], holdViewport, heldViewport: [] as (() => void)[] };
     window.setTimeout = ((fn: TimerHandler, delay?: number, ...args: unknown[]) => {
       const source = typeof fn === "function" ? String(fn) : "";
       const host = Array.from(document.querySelectorAll(".terminal-host")).at(-1);
       const current = host?.closest<HTMLElement>(".term-slot")?.dataset.session;
+      if (g.holdRetry && typeof fn === "function" && delay! >= 350 && delay! <= 650) {
+        g.callbacks.push({ phase: 500, run: () => fn(...args) });
+        return schedule(() => {}, 60_000);
+      }
       if (g.armed && typeof fn === "function" && ((delay === 50 && (!target || current === target) && source.includes("CanvasAddon")) || (delay === 100 && source.includes("readyState")))) {
         g.callbacks.push({ phase: delay!, run: () => fn(...args) });
         return schedule(() => {}, 60_000);
@@ -28,7 +33,7 @@ async function gate(page: Page, armed: boolean, target = "", proxyPort = 0) {
         const u = new URL(url);
         if (proxyPort && decodeURIComponent(u.pathname.split("/").at(-1)!) === target) u.port = String(proxyPort);
         super(u, protocols);
-        if (proxyPort && u.port === String(proxyPort)) g.sockets.push(this);
+        if (decodeURIComponent(u.pathname.split("/").at(-1)!) === target) g.sockets.push(this);
       }
       set onmessage(handler) {
         super.onmessage = handler ? function (event) {
@@ -45,13 +50,23 @@ async function gate(page: Page, armed: boolean, target = "", proxyPort = 0) {
         } : null;
       }
     };
+    const Events = window.EventSource;
+    window.EventSource = class extends Events {
+      set onmessage(handler) {
+        super.onmessage = handler ? function (event) {
+          const m = JSON.parse(event.data);
+          if (g.holdActivity && m.event === "session_activity" && m.payload.name === target) { g.heldActivity.push(() => handler.call(this, event)); return; }
+          handler.call(this, event);
+        } : null;
+      }
+    };
     (window as any).__fireRenderer = (phase: number) => {
       const tasks = g.callbacks.filter((t: any) => t.phase === phase);
       g.callbacks = g.callbacks.filter((t: any) => t.phase !== phase);
       for (const task of tasks) task.run();
       return tasks.length;
     };
-  }, { armed, target, proxyPort });
+  }, { armed, target, proxyPort, holdViewport });
 }
 const view = (p: Page, name: string) => p.evaluate(n => {
   const t = window.__tmuxHubTerms?.[n];
@@ -252,6 +267,64 @@ export function defineRendererFitTests() {
       await expect.poll(async () => ({ a: (await view(page, name))?.size, b: (await view(peer, name))?.size, pane: pane() })).toEqual({ a: expected, b: expected, pane: expected });
       writeFileSync(info.outputPath("reconnect-peer.json"), JSON.stringify({ before, expected, messages: await page.evaluate(() => (window as any).__rendererGate.messages) }));
     } finally { releaseAuth(); await page.screenshot({ path: info.outputPath("reconnect-peer.png") }).catch(() => {}); await peer.close(); await proxy.close(); }
+  });
+
+  test("activation during reconnect backoff reaches the pane after switching away", async ({ page, ctx }, info) => {
+    const a = await ctx.createSession(), b = await ctx.createSession();
+    const pane = () => ctx.tmuxE2E(["display", "-p", "-t", b, "#{pane_width}x#{pane_height}"]);
+    await gate(page, false, b); await page.setViewportSize({ width: 1400, height: 900 }); await open(page);
+    await tab(page, b).click(); await expect.poll(async () => (await view(page, b))?.replays ?? 0).toBeGreaterThan(0);
+    await page.waitForTimeout(350); await expect.poll(async () => (await view(page, b))?.size === pane()).toBe(true);
+    const old = pane(); await tab(page, a).click(); await page.setViewportSize({ width: 1000, height: 700 });
+    await page.evaluate(n => { (window as any).__rendererGate.holdRetry = true; window.__tmuxHubTerms![n]!.dropSocket(); }, b);
+    await expect.poll(() => page.evaluate(() => (window as any).__rendererGate.callbacks.filter((x: any) => x.phase === 500).length)).toBe(1);
+    await tab(page, b).click(); const measured = (await view(page, b))!.size; expect(measured).not.toBe(old);
+    await tab(page, a).click();
+    expect(await page.evaluate(() => (window as any).__rendererGate.sockets.length)).toBe(1);
+    await page.evaluate(() => { (window as any).__rendererGate.holdRetry = false; (window as any).__fireRenderer(500); });
+    await expect.poll(() => page.evaluate(n => window.__tmuxHubTerms![n]!.state, b)).toBe("connected");
+    writeFileSync(info.outputPath("backoff-activation.json"), JSON.stringify({ old, measured, pane: pane(), messages: await page.evaluate(() => (window as any).__rendererGate.messages) }));
+    await expect.poll(() => pane()).toBe(measured);
+    expect((await view(page, b))?.visible).toBe(false);
+    await page.screenshot({ path: info.outputPath("backoff-activation.png") });
+  });
+
+  test("native-era renderer measurement cannot overwrite a fresh reconnect URL grid", async ({ page, ctx }, info) => {
+    const name = await ctx.createSession();
+    const pane = () => ctx.tmuxE2E(["display", "-p", "-t", name, "#{pane_width}x#{pane_height}"]);
+    const attached = () => Number(ctx.tmuxE2E(["display", "-p", "-t", name, "#{session_attached}"]));
+    const env = { ...process.env, TMUX_TMPDIR: ctx.tmuxTmpdir, TERM: "xterm-256color" }; delete env.TMUX;
+    const args = process.platform === "linux"
+      ? ["-q", "-c", `tmux -L ${ctx.socket} attach -t ${name}`, "/dev/null"]
+      : ["-q", "/dev/null", "tmux", "-L", ctx.socket, "attach", "-t", name];
+    const native = spawn("script", args, { env, stdio: ["pipe", "ignore", "ignore"] });
+    try {
+      await expect.poll(attached).toBeGreaterThan(0);
+      await gate(page, true, name, 0, true); await page.setViewportSize({ width: 1400, height: 900 }); await open(page); await tab(page, name).click();
+      await expect.poll(() => page.evaluate(() => (window as any).__rendererGate.callbacks.filter((x: any) => x.phase === 50).length)).toBe(1);
+      await expect.poll(() => page.evaluate(() => (window as any).__rendererGate.messages.some((m: any) => m.owner === "native"))).toBe(true);
+      const measured = await page.evaluate(n => { (window as any).__fireRenderer(50); return window.__tmuxHubTerms![n]!.measuredSize; }, name);
+      await page.evaluate(() => { const g = (window as any).__rendererGate; g.holdViewport = false; for (const deliver of g.heldViewport.splice(0)) deliver(); });
+      await expect.poll(async () => (await view(page, name))?.size).toBe(pane());
+      await page.setViewportSize({ width: 1000, height: 700 });
+      const current = await page.evaluate(n => window.__tmuxHubTerms![n]!.measuredSize, name); expect(current).not.toBe(measured);
+      const nativeViewport = { browser: (await view(page, name))?.size, pane: pane(), attached: attached() };
+      await page.evaluate(n => { const g = (window as any).__rendererGate; g.holdActivity = true; g.holdRetry = true; window.__tmuxHubTerms![n]!.dropSocket(); }, name);
+      await expect.poll(() => page.evaluate(() => (window as any).__rendererGate.callbacks.filter((x: any) => x.phase === 500).length)).toBe(1);
+      ctx.tmuxE2E(["detach-client", "-s", name]); await expect.poll(attached).toBe(0);
+      await page.evaluate(() => { const g = (window as any).__rendererGate; g.holdRetry = false; (window as any).__fireRenderer(500); });
+      await expect.poll(() => page.evaluate(n => window.__tmuxHubTerms![n]!.state, name)).toBe("connected");
+      await page.waitForTimeout(250);
+      writeFileSync(info.outputPath("native-renderer.json"), JSON.stringify({ measured, current, nativeViewport, pane: pane(), messages: await page.evaluate(() => (window as any).__rendererGate.messages) }));
+      await expect.poll(() => pane()).toBe(current);
+      await expect.poll(async () => (await view(page, name))?.size).toBe(current);
+      await page.evaluate(() => { const g = (window as any).__rendererGate; g.holdActivity = false; for (const deliver of g.heldActivity.splice(0)) deliver(); });
+      await page.waitForTimeout(250); expect(pane()).toBe(current);
+      await page.screenshot({ path: info.outputPath("native-renderer.png") });
+    } finally {
+      if (attached() > 0) ctx.tmuxE2E(["detach-client", "-s", name]);
+      if (native.exitCode === null) await new Promise<void>(resolve => { native.once("exit", () => resolve()); native.kill(); });
+    }
   });
 
 }
