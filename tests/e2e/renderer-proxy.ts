@@ -23,6 +23,7 @@ export async function holdWebSocketUpgrade(targetPort: number) {
   return {
     port: address.port,
     buffered: () => waiting.reduce((n, q) => n + q.chunks.reduce((a, b) => a + b.length, 0), 0),
+    hold() { held = true; },
     release() { held = false; for (const q of waiting) { for (const c of q.chunks) q.client.write(c); q.chunks = []; } },
     async close() { for (const s of sockets) s.destroy(); await new Promise<void>(resolve => server.close(() => resolve())); },
   };

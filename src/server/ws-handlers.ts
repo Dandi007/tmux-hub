@@ -296,8 +296,8 @@ export function createWsHandlers(deps: WsDeps) {
         // serialized mutation, since a peer pin may already be queued ahead.
         const msg = parsed as { kind?: string; ifPinned?: unknown };
         if (msg.kind === "resize" && msg.ifPinned === true && !peers.isPinner(sessionName, ws)) {
-          const size = ws.data.viewport;
-          if (size) ws.send(JSON.stringify({ kind: "viewport", ...size, owner: "web", peer: true }));
+          // The peer's ordered publication is already in flight. Do not
+          // synthesize web ownership here: a native client may now own it.
           return;
         }
         const result = await input.send(sessionName, parsed as Parameters<typeof input.send>[1]);

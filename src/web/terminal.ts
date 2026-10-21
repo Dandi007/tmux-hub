@@ -28,7 +28,8 @@ export type TerminalHandle = {
   close: () => void;
   probeNow: () => void;
   retry: () => void;
-  fit: () => void;
+  /** false: automatic attach completion, which must respect a newer peer pin. */
+  fit: (reclaim?: boolean) => void;
   notifySessionActivity: (attached: number, cols: number, rows: number) => void;
   readonly isConnected: boolean;
   readonly state: TerminalState;
@@ -96,8 +97,10 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   // Assigned before the first asynchronous URL build. Renderer callbacks may
   // run while that build is pending, before a WebSocket exists.
   let publishRendererViewport = (): void => {};
+  let connectionPending = true;
   let rendererMayPin = true;
   let rendererOwnsViewport = false;
+  let pendingExplicitSize: { cols: number; rows: number } | null = null;
   let pendingRendererSize: { cols: number; rows: number } | null = null;
   let flushRendererViewport = (): void => {};
   const term = new Terminal({
@@ -679,7 +682,6 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
                 if (msg.peer || msg.owner === "native") {
                   rendererMayPin = false;
                   rendererOwnsViewport = false;
-                  pendingRendererSize = null;
                 } else if (msg.applied) {
                   rendererMayPin = true;
                   rendererOwnsViewport = true;
@@ -831,6 +833,9 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     saveLocalLfbForReplay();
     console.log(`[tmux-hub] entering reconnect for ${opts.sessionName}`);
     stopHeartbeat();
+    pendingExplicitSize = null;
+    connectionPending = true;
+    rendererOwnsViewport = false;
     try { ws.onmessage = null; ws.onclose = null; ws.onerror = null; ws.close(); } catch {}
     predictions.length = 0;
     reconnectAttempt = 0;
@@ -851,6 +856,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
   const attemptReconnect = async (): Promise<void> => {
     if (disposed) return;
     reconnectAttempt++;
+    pendingExplicitSize = null; // A fresh URL captures current layout for this attempt.
     console.log(`[tmux-hub] reconnect attempt ${reconnectAttempt}/${RECONNECT_MAX_RETRIES} for ${opts.sessionName}`);
     setState("reconnecting", reconnectAttempt);
 
@@ -879,13 +885,14 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       if (disposed) { try { socket.close(); } catch {} return; }
       console.log(`[tmux-hub] reconnect: ws open — success`);
       ws = socket;
+      connectionPending = false;
       wireWs(ws);
       reconnectAttempt = 0;
       predictions.length = 0;
       setState("connected");
       flushSendQueue();
       startHeartbeat();
-      sendResizeIfVisible();
+      flushExplicitViewport();
     };
 
     socket.onclose = (ev) => {
@@ -931,6 +938,12 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     if (c > 0 && r > 0 && isTermVisible() && shouldSendResize(viewportState)) {
       rendererMayPin = true;
       if (pendingRendererSize) pendingRendererSize = { cols: c, rows: r };
+      // One latest geometry from actual activation/resize, never a resize
+      // history. A connection that closes before open discards this intent.
+      if (currentState !== "dead" && connectionPending) {
+        pendingExplicitSize = { cols: c, rows: r };
+        return;
+      }
       queuedSend({ kind: "resize", cols: c, rows: r });
     }
   };
@@ -938,6 +951,7 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     if (disposed || !rendererMayPin || !isTermVisible() || !shouldSendResize(viewportState)) return;
     try { fit.fit(); } catch {}
     pendingRendererSize = { cols: term.cols, rows: term.rows };
+    if (pendingExplicitSize) pendingExplicitSize = pendingRendererSize;
     flushRendererViewport();
   };
   flushRendererViewport = () => {
@@ -947,6 +961,13 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
     const size = pendingRendererSize;
     pendingRendererSize = null;
     queuedSend({ kind: "resize", ...size, ifPinned: true });
+  };
+  const flushExplicitViewport = (): void => {
+    if (!pendingExplicitSize || disposed || ws.readyState !== WebSocket.OPEN) return;
+    const size = pendingExplicitSize;
+    pendingExplicitSize = null;
+    pendingRendererSize = null; // This measured grid is covered by the explicit pin.
+    queuedSend({ kind: "resize", ...size });
   };
   const onResize = () => {
     try { fit.fit(); } catch {}
@@ -1014,8 +1035,10 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
 
   ws.addEventListener("open", () => {
     if (disposed) return;
+    connectionPending = false;
     flushSendQueue();
     startHeartbeat();
+    flushExplicitViewport();
     // Renderer work waits for the ordered initial viewport acknowledgement.
     // Publishing on open could race a peer pin whose message is still in flight.
   });
@@ -1056,8 +1079,13 @@ export async function attachTerminal(opts: AttachOptions): Promise<TerminalHandl
       setState("reconnecting", 0);
       scheduleReconnectAttempt();
     },
-    fit: () => {
+    fit: (reclaim = true) => {
       if (disposed) return;
+      if (!reclaim) {
+        publishRendererViewport();
+        applyPendingScrollDecision();
+        return;
+      }
       try { fit.fit(); } catch {}
       // Pool activation: pin the pane to this (now visible) slot — catches up a
       // resize deferred while hidden, and makes "latest active client wins" hold

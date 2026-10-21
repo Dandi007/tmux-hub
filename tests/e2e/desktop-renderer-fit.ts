@@ -95,13 +95,13 @@ export function defineRendererFitTests() {
     } finally { await page.screenshot({ path: info.outputPath("renderer-switch.png") }).catch(() => {}); }
   });
 
-  test("visible renderer measurement survives CONNECTING then a tab switch", async ({ page, ctx }, info) => {
+  for (const initiallyPinned of [true, false]) test(`visible renderer measurement survives CONNECTING then a tab switch: ${initiallyPinned ? "pinned" : "hidden activation"}`, async ({ page, ctx }, info) => {
     const a = await ctx.createSession(), b = await ctx.createSession();
     const proxy = await holdWebSocketUpgrade(Number(ctx.port));
     const pane = () => ctx.tmuxE2E(["display", "-p", "-t", b, "#{pane_width}x#{pane_height}"]);
     try {
       await gate(page, true, b, proxy.port);
-      await page.addInitScript(n => localStorage.setItem("tmux-hub.last-session", n), b);
+      await page.addInitScript(n => localStorage.setItem("tmux-hub.last-session", n), initiallyPinned ? b : a);
       await page.setViewportSize({ width: 1400, height: 900 }); await open(page);
       await expect(tab(page, b)).toBeVisible();
       await page.reload(); // Restore B from a registry snapshot containing both owned sessions.
@@ -110,7 +110,7 @@ export function defineRendererFitTests() {
       await tab(page, b).click();
       expect(await page.evaluate(() => (window as any).__rendererGate.sockets[0]?.readyState)).toBe(0);
       const before = await view(page, b);
-      await expect.poll(() => pane()).toBe(before!.size);
+      await expect.poll(() => pane()).toBe(initiallyPinned ? before!.size : "80x24");
       const measured = await page.evaluate(n => {
         const count = (window as any).__fireRenderer(50), t = window.__tmuxHubTerms![n]!;
         return { count, size: `${t.cols}x${t.rows}`, visible: t.visible, replays: t.replays };
@@ -154,37 +154,81 @@ export function defineRendererFitTests() {
       await expect.poll(async () => ({ a: (await view(page, name))?.size, b: (await view(peer, name))?.size })).toEqual({ a: pane(), b: pane() });
     } finally { await page.screenshot({ path: info.outputPath("peer-renderer.png") }).catch(() => {}); await peer.close(); }
   });
-  test("own applied acknowledgement restores permission after an older peer notice", async ({ page, ctx }, info) => {
+  for (const beforeAck of [false, true]) test(`own applied acknowledgement restores permission after an older peer notice: renderer ${beforeAck ? "before" : "after"} ack`, async ({ page, ctx }, info) => {
     const name = await ctx.createSession();
     const pane = () => ctx.tmuxE2E(["display", "-p", "-t", name, "#{pane_width}x#{pane_height}"]);
     await gate(page, true, name); await page.setViewportSize({ width: 1400, height: 900 }); await open(page);
     await tab(page, name).click();
     await expect.poll(async () => (await view(page, name))?.replays ?? 0).toBeGreaterThan(0);
     await expect.poll(() => page.evaluate(() => (window as any).__rendererGate.callbacks.filter((x: any) => x.phase === 50).length)).toBe(1);
-    await page.evaluate(() => { (window as any).__rendererGate.holdViewport = true; });
+    if (!beforeAck) await page.evaluate(() => { (window as any).__rendererGate.holdViewport = true; });
     const peer = await page.context().newPage();
     try {
       await peer.setViewportSize({ width: 1200, height: 800 }); await open(peer); await tab(peer, name).click();
       await expect.poll(async () => (await view(peer, name))?.replays ?? 0).toBeGreaterThan(0);
       await peer.waitForTimeout(350);
+      if (beforeAck) {
+        await expect.poll(async () => (await view(page, name))?.size).toBe(pane());
+        await page.evaluate(() => { (window as any).__rendererGate.holdViewport = true; });
+        await peer.setViewportSize({ width: 1100, height: 750 });
+        await expect.poll(() => pane()).not.toBe("169x42");
+      }
       const peerSize = pane();
       await page.setViewportSize({ width: 1300, height: 850 });
       await expect.poll(() => pane()).not.toBe(peerSize);
       const local = (await view(page, name))!.size;
       await expect.poll(() => page.evaluate(({ name, local }) => (window as any).__rendererGate.messages.some((m: any) => m.name === name && m.applied && `${m.cols}x${m.rows}` === local), { name, local })).toBe(true);
-      await page.evaluate(() => {
+      const deliver = () => page.evaluate(() => {
         const g = (window as any).__rendererGate; g.holdViewport = false;
         for (const deliver of g.heldViewport.splice(0)) deliver();
       });
+      if (!beforeAck) await deliver();
       const measured = await page.evaluate(n => {
         const count = (window as any).__fireRenderer(50), t = window.__tmuxHubTerms![n]!;
         return { count, size: `${t.cols}x${t.rows}` };
       }, name);
+      if (beforeAck) await deliver();
       expect(measured.count).toBe(1); expect(measured.size).not.toBe(local);
       writeFileSync(info.outputPath("own-applied-renderer.json"), JSON.stringify({ peerSize, local, measured, messages: await page.evaluate(() => (window as any).__rendererGate.messages) }));
       await expect.poll(() => pane()).toBe(measured.size);
       await expect.poll(async () => (await view(peer, name))?.size).toBe(measured.size);
     } finally { await page.screenshot({ path: info.outputPath("own-applied-renderer.png") }).catch(() => {}); await peer.close(); }
+  });
+
+  for (const reconnect of [false, true]) test(`${reconnect ? "reconnect" : "initial"} open does not override a peer pin completed during its handshake`, async ({ page, ctx }, info) => {
+    const name = await ctx.createSession(), proxy = await holdWebSocketUpgrade(Number(ctx.port));
+    const pane = () => ctx.tmuxE2E(["display", "-p", "-t", name, "#{pane_width}x#{pane_height}"]);
+    const peer = await page.context().newPage();
+    try {
+      proxy.release(); await gate(page, false, name, proxy.port);
+      await page.setViewportSize({ width: 1400, height: 900 }); await open(page); await tab(page, name).click();
+      await expect.poll(async () => (await view(page, name))?.replays ?? 0).toBeGreaterThan(0);
+      await page.waitForTimeout(350);
+      await peer.setViewportSize({ width: 1200, height: 800 }); await open(peer); await tab(peer, name).click();
+      await expect.poll(async () => (await view(peer, name))?.replays ?? 0).toBeGreaterThan(0); await peer.waitForTimeout(350);
+      await page.setViewportSize({ width: 1300, height: 850 });
+      await expect.poll(async () => (await view(page, name))?.size === pane()).toBe(true);
+      const before = (await view(page, name))!;
+      proxy.hold();
+      if (reconnect) await page.evaluate(n => window.__tmuxHubTerms![n]!.dropSocket(), name);
+      else await page.reload();
+      await expect.poll(() => page.evaluate(() => (window as any).__rendererGate.sockets.length)).toBe(reconnect ? 2 : 1);
+      await expect.poll(() => proxy.buffered()).toBeGreaterThan(0);
+      const connecting = await page.evaluate(() => {
+        const socket = (window as any).__rendererGate.sockets.at(-1), url = new URL(socket.url);
+        return { size: `${url.searchParams.get("cols")}x${url.searchParams.get("rows")}`, ready: socket.readyState };
+      });
+      await expect.poll(() => pane()).toBe(connecting.size);
+      expect(connecting.ready).toBe(0);
+      await peer.setViewportSize({ width: 1100, height: 750 });
+      await expect.poll(() => pane()).not.toBe(connecting.size);
+      await expect.poll(async () => (await view(peer, name))?.size === pane()).toBe(true);
+      const expected = pane(); proxy.release();
+      await expect.poll(async () => { const p = await view(page, name); return p?.replays! > (reconnect ? before.replays : 0) && (await page.evaluate(n => window.__tmuxHubTerms![n]!.state, name)) === "connected"; }).toBe(true);
+      await page.waitForTimeout(250);
+      await expect.poll(async () => ({ a: (await view(page, name))?.size, b: (await view(peer, name))?.size, pane: pane() })).toEqual({ a: expected, b: expected, pane: expected });
+      writeFileSync(info.outputPath("reconnect-peer.json"), JSON.stringify({ before, expected, messages: await page.evaluate(() => (window as any).__rendererGate.messages) }));
+    } finally { await page.screenshot({ path: info.outputPath("reconnect-peer.png") }).catch(() => {}); await peer.close(); await proxy.close(); }
   });
 
 }
