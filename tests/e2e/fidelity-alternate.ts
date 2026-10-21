@@ -17,6 +17,7 @@ export function defineAlternateTests(
       let continuousStarted = false;
       const wheelSamples: unknown[] = [];
       const queues = new Map<string, { queued: number; delivered: number; failed: number }>();
+      let lastBarrier: unknown = null;
       try {
       const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
       let delayed = 0;
@@ -96,8 +97,10 @@ export function defineAlternateTests(
           await page.evaluate(n => window.__tmuxHubTerms![n]!.afterParsed(), name);
           const wire = await page.evaluate(n => ({ ...(window as any).__alternateWire, pending: window.__tmuxHubTerms![n]!.replayPending }), name);
           const queue = queues.get(wire.id);
-          return !wire.pending && wire.completed === wire.resync
-            && (!weak || (!!queue && !queue.failed && queue.queued === queue.delivered && wire.received === queue.delivered));
+          const checks = { parsed: !wire.pending, completed: wire.completed === wire.resync,
+            queuePresent: !!queue, noDeliveryError: !queue?.failed, queueDrained: queue?.queued === queue?.delivered, browserReceived: wire.received === queue?.delivered };
+          lastBarrier = { at: Date.now(), wire, queue: queue ? { ...queue } : null, checks };
+          return checks.parsed && checks.completed && (!weak || (checks.queuePresent && checks.noDeliveryError && checks.queueDrained && checks.browserReceived));
         }, { message: "normal history setup waits for current weak queue and last announced replay to parse" }).toBe(true);
         const before = await sample();
         const count = await page.evaluate(() => (window as any).__alternateWire.wheels.length);
@@ -153,7 +156,7 @@ export function defineAlternateTests(
       await expectInSync(page, ctx, name, "normal history still navigates and reconnects");
       if (weak) expect(delayed).toBeGreaterThan(0);
       } catch (error) {
-        writeFileSync(info.outputPath("alternate-failure.json"), JSON.stringify({ wheelSamples, queues: [...queues.entries()], wire: await page.evaluate(() => (window as any).__alternateWire),
+        writeFileSync(info.outputPath("alternate-failure.json"), JSON.stringify({ originalError: error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : String(error), lastBarrier, wheelSamples, queues: [...queues.entries()], wire: await page.evaluate(() => (window as any).__alternateWire),
           probe: await page.evaluate(n => { const p = window.__tmuxHubTerms?.[n]; return p ? { state: p.state, scroll: p.linesFromBottom, replays: p.replays, resyncs: p.resyncs, lines: p.screen() } : null; }, name).catch(() => null),
           pane: ctx.tmuxE2E(["capture-pane", "-p", "-t", name]),
           modes: ctx.tmuxE2E(["display", "-p", "-t", name, "#{alternate_on} #{history_size} #{mouse_standard_flag} #{mouse_sgr_flag}"]),
