@@ -50,3 +50,5 @@ PR164 merge push CI39530842019 的 CONNECTING hidden activation 在调用 render
 全量full6中continuous-exit weak历史wheel前置竞态：先前瞬时pending=false后，弱网队列又宣布resync，实际wheel before已pending=true。只修测试同步：代理按当前连接ID计queued/delivered，generator停止后正常历史操作等待当前队列清空、浏览器实际收到相同帧数、最后宣布resync解析完成。在DOM实际wheel事件捕获pending/resync/replay；若仍在replay归setup失败。只发一次wheel，不重试输入，不放宽原正滚动/重连保留断言；replay中输入仍由原确定性持帧用例覆盖。
 
 Native实际TTY80×24→100×32→80×24的往返变化：当100×31的旧权威WS流尚在途，而较新80×23 SSE先到，即使新hint等于当前显示grid也要保留新代需求；旧completion只能消费自己代次。真实TTY调整、有序持帧、同一WS的桌面/手机回归，在冻结旧产品6c两端均实测browser100×31/pane80×23失败。修复仅补充“有未完成需求/在途时保留新hint”条件。
+
+PR165首CI39540182006真实红：手机busy reconnect在overlapCount>3注入前置超时，121pass/1fail/24未运行；已真实重连，未进入画面/scroll验收。sleep0.008不保证5个30ms窗口都收到字节，任次quiet后不会再补overlap。覆盖拆分：新增真实WS+生产handlers/broadcaster/ResyncScheduler集成，在每次真实capture tap期间写私有log并等待poll确认，确证5captures/4retries/1overlap、随后静默同WS自动resync和scrollpos30契约；负控关闭onOverlap修复回调应使该集成失败。E2E保持真实busy输出进度、一次真实重连、停输出后screen==pane、scroll30及无额外WS，记录snapshot/retry/overlap而不再随机要求五次都重叠。
