@@ -27,11 +27,15 @@ export function defineAlternateTests(
         (window as any).__alternateWire = { id: null, received: 0, resync: 0, completed: 0, wheels: [] };
         // Playwright's routed socket is an EventTarget mock. Count its JS
         // application dispatch, never the underlying native transport arrival.
+        const wires = new WeakMap<EventTarget, any>();
         const dispatch = EventTarget.prototype.dispatchEvent;
         EventTarget.prototype.dispatchEvent = function(event: Event): boolean {
           const raw = (this as { url?: string }).url;
-          if (event.type === "message" && raw && decodeURIComponent(new URL(raw).pathname.split("/").at(-1)!) === n) {
-            const g = (window as any).__alternateWire; g.received++;
+          const own = raw && decodeURIComponent(new URL(raw).pathname.split("/").at(-1)!) === n;
+          if (own && event.type === "open") wires.set(this, (window as any).__alternateWire);
+          if (own && event.type === "message") {
+            const g = wires.get(this); if (!g) return dispatch.call(this, event);
+            g.received++;
             const data = (event as MessageEvent).data;
             if (typeof data === "string") try {
               const m = JSON.parse(data);
